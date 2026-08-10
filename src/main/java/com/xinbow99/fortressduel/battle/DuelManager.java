@@ -19,7 +19,6 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -118,12 +117,13 @@ public final class DuelManager {
 
         ServerLevel level = target.level();
         DuelSettings settings = config.settings();
-        BlockPos site = findArenaSite(level, target.blockPosition(), settings);
-        if (site == null) {
-            return "附近找不到夠空曠的地方開場，換個位置再試一次。";
+
+        // 就地開場：場地框在雙方目前站的位置之間，所以只要確認這裡沒有跟別場重疊
+        if (overlapsExistingArena(level, challenger.blockPosition(), target.blockPosition())) {
+            return "這裡跟另一場正在進行的對戰重疊了，走遠一點再試。";
         }
 
-        Duel duel = Duel.start(level.getServer(), level, site, settings, services, challenger, target);
+        Duel duel = Duel.start(level.getServer(), level, settings, services, challenger, target);
         activeDuels.add(duel);
         duelsByPlayer.put(challenger.getUUID(), duel);
         duelsByPlayer.put(target.getUUID(), duel);
@@ -154,64 +154,21 @@ public final class DuelManager {
         return null;
     }
 
-    // ---------- 場地選址 ----------
+    // ---------- 場地 ----------
 
     /**
-     * 在 origin 附近找一塊夠平的地開場。
+     * 這兩個人站的位置，會不會跟某一場正在進行的對戰重疊。
      *
-     * <p>不生成地形，所以「夠平」是唯一的條件：抽幾個候選點，量它們範圍內的地表高低差，
-     * 取落差最小的那個。全部都太崎嶇（落差超過競技場高度的一半）就回 null，讓玩家換地方。
+     * <p>就地開場之後沒有「選址」這回事了——場地是玩家自己站出來的，系統只需要否決
+     * 「站在別人的競技場裡開新的一場」。
      */
-    private BlockPos findArenaSite(ServerLevel level, BlockPos origin, DuelSettings settings) {
-        int minDistance = settings.arenaSize() / 2 + settings.arenaMinSeparation();
-        int maxDistance = Math.max(minDistance + 1, settings.arenaSearchRadius());
-
-        BlockPos best = null;
-        int bestSpread = Integer.MAX_VALUE;
-
-        for (int attempt = 0; attempt < 24; attempt++) {
-            double angle = level.getRandom().nextDouble() * Math.PI * 2;
-            int distance = minDistance + level.getRandom().nextInt(maxDistance - minDistance);
-            BlockPos candidate = origin.offset(
-                    (int) Math.round(Math.cos(angle) * distance), 0,
-                    (int) Math.round(Math.sin(angle) * distance));
-
-            if (overlapsExistingArena(level, candidate, settings)) continue;
-
-            int spread = surfaceSpread(level, candidate, settings.arenaSize());
-            if (spread < bestSpread) {
-                bestSpread = spread;
-                best = candidate;
-            }
-        }
-
-        return bestSpread <= settings.arenaHeight() / 2 ? best : null;
-    }
-
-    /** 抽樣量地表落差：只看四角與中心，夠判斷「這裡是不是山壁」而不用掃幾千格。 */
-    private int surfaceSpread(ServerLevel level, BlockPos center, int size) {
-        int half = size / 2;
-        int[][] samples = {
-                {0, 0}, {-half, -half}, {half, -half}, {-half, half}, {half, half},
-                {0, -half}, {0, half}, {-half, 0}, {half, 0}
-        };
-        int min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
-        for (int[] s : samples) {
-            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                    center.getX() + s[0], center.getZ() + s[1]);
-            min = Math.min(min, y);
-            max = Math.max(max, y);
-        }
-        return max - min;
-    }
-
-    private boolean overlapsExistingArena(ServerLevel level, BlockPos candidate, DuelSettings settings) {
-        int keepOut = settings.arenaSize() + settings.arenaMinSeparation();
+    private boolean overlapsExistingArena(ServerLevel level, BlockPos a, BlockPos b) {
+        int keepOut = config.settings().arenaMinSeparation();
         for (Duel duel : activeDuels) {
             if (duel.arena().level() != level) continue;
-            Region other = duel.arena().region();
-            if (Math.abs(other.center().getX() - candidate.getX()) < keepOut
-                    && Math.abs(other.center().getZ() - candidate.getZ()) < keepOut) {
+
+            Region other = duel.arena().region().expand(keepOut);
+            if (other.contains(a) || other.contains(b)) {
                 return true;
             }
         }

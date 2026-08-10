@@ -4,10 +4,12 @@ import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.economy.EconomyManager;
+import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import com.xinbow99.fortressduel.util.YamlConfig;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -18,6 +20,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 
 import java.util.Collection;
@@ -30,7 +33,8 @@ import java.util.UUID;
 /**
  * NPC 的生成與互動，以及 npcs.yml / shops.yml 兩張表。
  *
- * <p>NPC 是「站著不動的介面」：關掉 AI、無敵、不會被推走，右鍵就開店。對戰結束時一併移除——
+ * <p>NPC 是「站著不動的介面」：關掉 AI、不會被推走，右鍵就開店。但**打得死**——
+ * 軍火商是玩家要保護的資產，他一倒那一側就補不到子彈。對戰結束時一併移除——
  * 它們屬於那一場的場地，不該留在世界上。
  */
 public final class NpcManager {
@@ -56,6 +60,25 @@ public final class NpcManager {
                 player instanceof ServerPlayer sp ? onInteract(sp, entity) : InteractionResult.PASS);
         DuelEvents.END.register((duel, result) ->
                 removeIn(duel.arena().level(), duel.arena().region()));
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> onNpcDeath(entity));
+    }
+
+    /**
+     * NPC 被打死。
+     *
+     * <p>不重生、不還原——這正是他能當成戰術目標的原因：與其硬啃對方的水晶，
+     * 先把他的軍火商做掉，對面接下來就補不到子彈。
+     */
+    private void onNpcDeath(LivingEntity entity) {
+        NpcDef def = spawned.remove(entity.getUUID());
+        if (def == null) return;
+
+        if (!(entity.level() instanceof ServerLevel level)) return;
+
+        // 只講給看得到的人聽：這是場上的事件，不該洗到整個伺服器
+        Component text = Msg.warn(def.displayName() + " 被擊殺了！這一側再也買不到東西。");
+        level.getPlayers(player -> player.distanceToSqr(entity) < 96 * 96)
+                .forEach(player -> player.sendSystemMessage(text));
     }
 
     // ---------- 設定 ----------
@@ -111,14 +134,16 @@ public final class NpcManager {
 
         entity.setCustomName(Component.literal(def.displayName()));
         entity.setCustomNameVisible(def.nameVisible());
-        entity.setInvulnerable(true);
         entity.setSilent(true);
         entity.snapTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, yaw, 0f);
 
         if (entity instanceof Mob mob) {
-            // 關掉 AI 才會站在原地：不然村民會自己跑去睡覺、被怪追著跑
+            // 關掉 AI 才會站在原地：不然村民會自己跑去睡覺、被怪追著跑。
+            // 但**不設無敵**——軍火商是可以被打死的資產，守住他是玩家的責任
             mob.setNoAi(true);
             mob.setPersistenceRequired();
+            MobSpawner.setMaxHealth(mob, (float) def.health());
+            mob.setHealth(mob.getMaxHealth());
         }
 
         spawned.put(entity.getUUID(), def);

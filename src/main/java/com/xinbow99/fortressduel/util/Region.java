@@ -27,6 +27,24 @@ public record Region(int minX, int minY, int minZ, int maxX, int maxY, int maxZ)
                 center.getX() + half, center.getY() + above, center.getZ() + half);
     }
 
+    /**
+     * 一個同時把 a、b 兩點框進來的正方形。
+     *
+     * <p>對戰不再把玩家傳送到預先選好的場地，而是**就地**在雙方之間框出範圍，所以邊長不能是
+     * 固定值——兩個人站得多遠，場地就要多大。取「兩點的最大軸距 + 兩側留白」與設定的最小邊長
+     * 之中較大的那個。
+     */
+    public static Region around(BlockPos a, BlockPos b, int minSize, int margin, int below, int above) {
+        int centerX = (a.getX() + b.getX()) / 2;
+        int centerZ = (a.getZ() + b.getZ()) / 2;
+        int span = Math.max(Math.abs(a.getX() - b.getX()), Math.abs(a.getZ() - b.getZ()));
+        int size = Math.max(minSize, span + margin * 2);
+
+        // 垂直方向以兩人之中較低的那個為基準，站在山坡上時上面那個人才不會超出範圍
+        int baseY = Math.min(a.getY(), b.getY());
+        return square(new BlockPos(centerX, baseY, centerZ), size, below, above);
+    }
+
     public int sizeX() { return maxX - minX + 1; }
     public int sizeY() { return maxY - minY + 1; }
     public int sizeZ() { return maxZ - minZ + 1; }

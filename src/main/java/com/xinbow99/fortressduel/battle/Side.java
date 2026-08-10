@@ -22,7 +22,8 @@ public final class Side {
 
     private final UUID playerId;
     private final String playerName;
-    private final BlockPos core;
+    /** 這一方的核心。準備階段結束才長出來，在那之前是 null。 */
+    private BlockPos core;
 
     private final ResourceKey<Level> returnLevel;
     private final Vec3 returnPos;
@@ -34,10 +35,10 @@ public final class Side {
     private final float maxHp;
     private float hp;
 
-    public Side(ServerPlayer player, BlockPos core, float maxHp, ChatFormatting color, BossEvent.BossBarColor barColor) {
+    public Side(ServerPlayer player, float maxHp, ChatFormatting color, BossEvent.BossBarColor barColor) {
         this.playerId = player.getUUID();
         this.playerName = player.getGameProfile().name();
-        this.core = core;
+
 
         this.returnLevel = player.level().dimension();
         this.returnPos = player.position();
@@ -107,6 +108,10 @@ public final class Side {
 
     public String playerName() {
         return playerName;
+    }
+
+    public void setCore(BlockPos core) {
+        this.core = core;
     }
 
     public BlockPos core() {

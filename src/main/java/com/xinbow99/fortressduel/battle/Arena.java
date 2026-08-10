@@ -25,54 +25,80 @@ public final class Arena {
 
     private final ServerLevel level;
     private final Region region;
-    private final BlockPos coreNorth;
-    private final BlockPos coreSouth;
     private final ArenaSnapshot snapshot;
 
-    private Arena(ServerLevel level, Region region, BlockPos coreNorth, BlockPos coreSouth, ArenaSnapshot snapshot) {
+    /** 兩座核心的位置。開場時還沒有——準備階段結束才會在雙方腳邊長出來。 */
+    private BlockPos coreA;
+    private BlockPos coreB;
+
+    private Arena(ServerLevel level, Region region, ArenaSnapshot snapshot) {
         this.level = level;
         this.region = region;
-        this.coreNorth = coreNorth;
-        this.coreSouth = coreSouth;
         this.snapshot = snapshot;
     }
 
     /**
-     * 以 center 為中心蓋出一座競技場。
+     * 就地框出一座競技場：範圍涵蓋雙方目前站的位置。
      *
-     * @param center 中心點（X/Z 有意義，Y 會依地表重算）
+     * <p>不傳送玩家，所以場地是「長在他們身上」而不是「找一塊空地再把人丟過去」——
+     * 邊長取決於兩人站得多遠（見 {@link Region#around}）。
+     *
+     * <p>這一步**只砌邊界**。核心與建築要等準備階段結束才放，因為它們的位置是相對玩家的，
+     * 而玩家在準備階段還可能走動。
      */
-    public static Arena build(ServerLevel level, BlockPos center, DuelSettings settings,
+    public static Arena build(ServerLevel level, BlockPos posA, BlockPos posB, DuelSettings settings,
                               BuildingPlacer buildings) {
-        int groundY = surfaceY(level, center.getX(), center.getZ());
-        BlockPos ground = new BlockPos(center.getX(), groundY, center.getZ());
-        Region region = Region.square(ground, settings.arenaSize(), -settings.arenaDepth(), settings.arenaHeight());
+        Region region = Region.around(posA, posB,
+                settings.arenaSize(), settings.arenaMargin(),
+                -settings.arenaDepth(), settings.arenaHeight());
 
         ArenaSnapshot snapshot = settings.restoreTerrain()
                 ? ArenaSnapshot.full(level, region)
                 : ArenaSnapshot.incremental();
 
-        // 兩座核心各站在自己那半場的正中央
-        BlockPos coreNorth = coreSpot(level, region.halfNorth().center(), region);
-        BlockPos coreSouth = coreSpot(level, region.halfSouth().center(), region);
-
-        Arena arena = new Arena(level, region, coreNorth, coreSouth, snapshot);
+        Arena arena = new Arena(level, region, snapshot);
         arena.placeBorder(settings);
-        arena.placeCore(coreNorth, settings);
-        arena.placeCore(coreSouth, settings);
-        arena.placeBuildings(settings, buildings);
 
-        FortressDuel.LOGGER.info("Arena built at {} ({}x{}, {} blocks in snapshot)",
-                ground, settings.arenaSize(), settings.arenaSize(), snapshot.recordedBlocks());
+        FortressDuel.LOGGER.info("Arena framed at {} ({}x{}, {} blocks in snapshot)",
+                region.center(), region.sizeX(), region.sizeZ(), snapshot.recordedBlocks());
         return arena;
     }
 
-    /** 核心要放的那一格（烽火台本體的位置）：該欄地表再往上一格。 */
-    private static BlockPos coreSpot(ServerLevel level, BlockPos horizontal, Region region) {
-        int y = surfaceY(level, horizontal.getX(), horizontal.getZ());
-        // 地表可能高過競技場頂或低過底（例如中心點在山壁上），夾回範圍內才不會把核心蓋到牆外
-        y = Math.clamp(y, region.minY() + 1, region.maxY() - 4);
-        return new BlockPos(horizontal.getX(), y + 1, horizontal.getZ());
+    /**
+     * 準備階段結束：在雙方腳邊長出核心，並蓋起各自的建築。
+     *
+     * <p>核心不是放在玩家站的那一格，而是往**遠離對手**的方向退幾格——放在腳下會把人頂起來，
+     * 而且核心貼著自己的臉也不好守。退開的方向由「對手在哪邊」決定，所以兩座核心天生就是
+     * 一個背對背的佈局。
+     */
+    public void placeCores(BlockPos playerA, BlockPos playerB, DuelSettings settings,
+                           BuildingPlacer buildings) {
+        int offset = settings.coreOffset();
+        coreA = coreSpot(playerA, playerB, offset);
+        coreB = coreSpot(playerB, playerA, offset);
+
+        placeCore(coreA, settings);
+        placeCore(coreB, settings);
+        placeBuildings(settings, buildings, coreA, coreB);
+        placeBuildings(settings, buildings, coreB, coreA);
+    }
+
+    /** 從 self 往「遠離 enemy」的方向退 offset 格，再貼回地面。 */
+    private BlockPos coreSpot(BlockPos self, BlockPos enemy, int offset) {
+        int dx = self.getX() - enemy.getX();
+        int dz = self.getZ() - enemy.getZ();
+
+        // 只退主要那一軸：兩個人幾乎不會剛好斜 45 度，退兩軸反而會讓兩座核心看起來歪掉
+        int x = self.getX() + (Math.abs(dx) >= Math.abs(dz) ? Integer.signum(dx) * offset : 0);
+        int z = self.getZ() + (Math.abs(dz) > Math.abs(dx) ? Integer.signum(dz) * offset : 0);
+
+        // 退開之後可能踩空或撞進山壁，夾回競技場的垂直範圍內
+        int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 4);
+        return new BlockPos(x, y + 1, z);
+    }
+
+    public boolean coresPlaced() {
+        return coreA != null && coreB != null;
     }
 
     private static int surfaceY(ServerLevel level, int x, int z) {
@@ -126,19 +152,22 @@ public final class Arena {
     }
 
     /**
-     * 兩側各蓋一份設定裡列出的建築（武器商店之類）。
+     * 在某一側蓋設定裡列出的建築（武器商店之類）。
      *
-     * <p>南半場整個沿 Z 鏡射，所以兩邊的店都開口朝中場，不會一邊面向對手、一邊背對。
+     * <p>{@code mirror} 由「對手在自己的哪一邊」決定：藍圖是照「對手在 +Z」的方向畫的，
+     * 對手在 −Z 的那一側就整份鏡射，兩邊的店才會都開口朝中場而不是一邊背對。
      */
-    private void placeBuildings(DuelSettings settings, BuildingPlacer buildings) {
+    private void placeBuildings(DuelSettings settings, BuildingPlacer buildings,
+                               BlockPos core, BlockPos enemyCore) {
+        boolean mirror = enemyCore.getZ() < core.getZ();
+
         for (String id : settings.arenaBuildings()) {
             BuildingDef def = buildings.byId(id);
             if (def == null) {
                 FortressDuel.LOGGER.warn("Building '{}' from duel.yml is not defined in buildings.yml", id);
                 continue;
             }
-            buildings.place(level, def, coreNorth, false, pos -> snapshot.record(level, pos));
-            buildings.place(level, def, coreSouth, true, pos -> snapshot.record(level, pos));
+            buildings.place(level, def, core, mirror, pos -> snapshot.record(level, pos));
         }
     }
 
@@ -167,19 +196,27 @@ public final class Arena {
         return region;
     }
 
-    public BlockPos coreNorth() {
-        return coreNorth;
+    public BlockPos coreA() {
+        return coreA;
     }
 
-    public BlockPos coreSouth() {
-        return coreSouth;
+    public BlockPos coreB() {
+        return coreB;
     }
 
-    /** 出生點：站在自己核心與場中央之間，面向對手。 */
+    /**
+     * 被拉回場內時要站的位置：自己的核心旁邊。
+     *
+     * <p>核心還沒生成（準備階段）就退回場地中央——那時本來也還沒有「自己這一側」。
+     */
     public Vec3 spawnFor(BlockPos core) {
-        int towardCenter = core.getZ() < region.center().getZ() ? 4 : -4;
-        int z = core.getZ() + towardCenter;
-        return new Vec3(core.getX() + 0.5, safeSpawnY(core.getX(), z, core.getY()), z + 0.5);
+        if (core == null) {
+            BlockPos center = region.center();
+            return new Vec3(center.getX() + 0.5,
+                    safeSpawnY(center.getX(), center.getZ(), center.getY()), center.getZ() + 0.5);
+        }
+        int x = core.getX(), z = core.getZ() + 2;
+        return new Vec3(x + 0.5, safeSpawnY(x, z, core.getY()), z + 0.5);
     }
 
     /**
@@ -203,13 +240,14 @@ public final class Arena {
         return fallback;
     }
 
-    /** 站在出生點時要朝哪邊看（yaw）。北半場朝南 ＝ 0 度，南半場朝北 ＝ 180 度。 */
+    /** 站在出生點時要朝哪邊看（yaw）：面向場地中央。 */
     public float spawnYawFor(BlockPos core) {
+        if (core == null) return 0f;
         return core.getZ() < region.center().getZ() ? 0f : 180f;
     }
 
     /** 這一格是不是某一座核心的烽火台本體。 */
     public boolean isCoreBlock(BlockPos pos) {
-        return pos.equals(coreNorth) || pos.equals(coreSouth);
+        return pos.equals(coreA) || pos.equals(coreB);
     }
 }

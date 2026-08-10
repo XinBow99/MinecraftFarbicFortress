@@ -28,8 +28,8 @@ import java.util.UUID;
 /**
  * 一場進行中的對戰。
  *
- * <p>玩法是即時制：進場倒數結束就開打，沒有建造／開戰階段之分。建材不用買——玩家自己挖、
- * 自己蓋，能不能守住是自己的事；勝負條件只有一條，把對方的烽火台核心打到 0。
+ * <p>開場不傳送玩家：競技場就地框在雙方站的位置之間，準備倒數結束才在各自腳邊長出水晶。
+ * 之後建造與攻擊階段輪替，勝負條件只有一條：把對方的水晶打到 0。
  *
  * <p>所有狀態變更都只在伺服器主執行緒（tick 或指令）發生，所以這裡沒有任何同步處理。
  */
@@ -61,7 +61,7 @@ public final class Duel {
     private final Side north;
     private final Side south;
 
-    private DuelState state = DuelState.COUNTDOWN;
+    private DuelState state = DuelState.PREPARE;
     /** 目前這個階段還剩幾 tick。倒數、建造、攻擊三個階段共用同一個計時器。 */
     private int phaseTicks;
     /** 打到第幾輪（一輪 ＝ 一次建造 + 一次攻擊）。 */
@@ -81,24 +81,24 @@ public final class Duel {
     }
 
     /**
-     * 蓋場地、把雙方傳進去、開始倒數。
+     * 就地框出場地、開始準備倒數。**不傳送任何人。**
      *
-     * @param challenger 發起挑戰的人，分到北半場
-     * @param target     接受挑戰的人，分到南半場
+     * @param challenger 發起挑戰的人
+     * @param target     接受挑戰的人
      */
-    public static Duel start(MinecraftServer server, ServerLevel level, BlockPos center,
+    public static Duel start(MinecraftServer server, ServerLevel level,
                              DuelSettings settings, DuelServices services,
                              ServerPlayer challenger, ServerPlayer target) {
-        Arena arena = Arena.build(level, center, settings, services.buildings());
+        // 不傳送任何人：競技場就地框在雙方目前站的位置之間
+        Arena arena = Arena.build(level, challenger.blockPosition(), target.blockPosition(),
+                settings, services.buildings());
 
-        Side north = new Side(challenger, arena.coreNorth(), settings.coreHp(),
+        Side north = new Side(challenger, settings.coreHp(),
                 ChatFormatting.AQUA, BossEvent.BossBarColor.BLUE);
-        Side south = new Side(target, arena.coreSouth(), settings.coreHp(),
+        Side south = new Side(target, settings.coreHp(),
                 ChatFormatting.RED, BossEvent.BossBarColor.RED);
 
         Duel duel = new Duel(server, arena, settings, services, north, south);
-        duel.teleportIn(challenger, north);
-        duel.teleportIn(target, south);
 
         // 兩條血條雙方都要看得到——你必須知道自己還剩多少，也必須知道還要打幾下才贏
         for (ServerPlayer player : new ServerPlayer[]{challenger, target}) {
@@ -106,7 +106,8 @@ public final class Duel {
             south.showTo(player);
             duel.giveStartingItems(player);
             services.weapons().giveStartingAmmo(player);
-            player.sendSystemMessage(Msg.good("對戰開始！打掉對方的烽火台核心就獲勝。"));
+            player.sendSystemMessage(Msg.good("對戰開始！站好別亂跑——"
+                    + settings.countdownSeconds() + " 秒後水晶會在你腳邊生成，那就是你要守的東西。"));
         }
 
         DuelEvents.START.invoker().onDuelStart(duel);
@@ -140,11 +141,6 @@ public final class Duel {
         }
     }
 
-    private void teleportIn(ServerPlayer player, Side side) {
-        Vec3 spawn = arena.spawnFor(side.core());
-        player.teleportTo(arena.level(), spawn.x, spawn.y, spawn.z,
-                Set.of(), arena.spawnYawFor(side.core()), 0f, true);
-    }
 
     // ---------- 每 tick ----------
 
@@ -197,9 +193,31 @@ public final class Duel {
         }
 
         switch (state) {
-            case COUNTDOWN, COMBAT -> enterBuild(both);
+            case PREPARE -> {
+                spawnCores(a, b);
+                enterBuild(both);
+            }
+            case COMBAT -> enterBuild(both);
             case BUILD -> enterCombat(both);
             default -> { /* ENDED：不再換階段 */ }
+        }
+    }
+
+    /**
+     * 準備階段結束：在雙方**當下站的位置**旁邊長出水晶。
+     *
+     * <p>位置是這一刻才決定的，不是開場那一刻——所以準備階段的十秒是玩家的：想把水晶擺在
+     * 高地上、擺進山洞裡，就走過去站好。這也是為什麼開場不傳送人。
+     */
+    private void spawnCores(ServerPlayer a, ServerPlayer b) {
+        arena.placeCores(a.blockPosition(), b.blockPosition(), settings, services.buildings());
+        north.setCore(arena.coreA());
+        south.setCore(arena.coreB());
+
+        for (ServerPlayer player : new ServerPlayer[]{a, b}) {
+            player.sendSystemMessage(Msg.good("水晶已生成！打掉對方的水晶就獲勝——順帶一提，"
+                    + "軍火商也會被打死，他死了你就買不到東西。"));
+            beep(player, SoundEvents.BEACON_ACTIVATE, 1f);
         }
     }
 
@@ -239,7 +257,7 @@ public final class Duel {
     private Component hud(ServerPlayer player) {
         int seconds = (phaseTicks + 19) / 20;
         MutableComponent line = switch (state) {
-            case COUNTDOWN -> Msg.plain("準備… " + seconds, ChatFormatting.YELLOW);
+            case PREPARE -> Msg.plain("水晶生成倒數 " + seconds + "s  站好別亂跑", ChatFormatting.YELLOW);
             case BUILD -> Msg.plain("建造 " + seconds + "s", ChatFormatting.GREEN);
             case COMBAT -> Msg.plain("攻擊 " + seconds + "s", ChatFormatting.RED);
             case ENDED -> Component.literal("");
