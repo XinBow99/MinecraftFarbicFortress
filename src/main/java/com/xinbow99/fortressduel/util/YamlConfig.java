@@ -55,7 +55,7 @@ public final class YamlConfig {
                     return new YamlConfig(fileName, Map.of());
                 }
                 if (!(loaded instanceof Map)) {
-                    FortressDuel.LOGGER.error("{} 的最外層必須是一組鍵值對，實際讀到 {}；這次改用空設定",
+                    FortressDuel.LOGGER.error("The root of {} must be a mapping, but got {}; falling back to an empty config",
                             fileName, loaded.getClass().getSimpleName());
                     return new YamlConfig(fileName, Map.of());
                 }
@@ -63,7 +63,7 @@ public final class YamlConfig {
             }
         } catch (Exception e) {
             // 包含 YAML 語法錯誤：留完整訊息讓玩家知道改壞了哪一行，然後退回空設定
-            FortressDuel.LOGGER.error("讀取 {} 失敗，這次改用空設定", fileName, e);
+            FortressDuel.LOGGER.error("Failed to read {}, falling back to an empty config", fileName, e);
             return new YamlConfig(fileName, Map.of());
         }
     }
@@ -72,12 +72,12 @@ public final class YamlConfig {
         String resource = "/fortressduel/defaults/" + fileName;
         try (InputStream in = YamlConfig.class.getResourceAsStream(resource)) {
             if (in == null) {
-                FortressDuel.LOGGER.warn("jar 內沒有預設檔 {}，{} 會是空的", resource, fileName);
+                FortressDuel.LOGGER.warn("No bundled default at {}, so {} will be empty", resource, fileName);
                 Files.createFile(target);
                 return;
             }
             Files.copy(in, target);
-            FortressDuel.LOGGER.info("已產生預設設定檔 {}", target);
+            FortressDuel.LOGGER.info("Wrote default config {}", target);
         }
     }
 
@@ -138,7 +138,7 @@ public final class YamlConfig {
             if (e.getValue() instanceof Map<?, ?> child) {
                 out.put(String.valueOf(e.getKey()), (Map<String, Object>) child);
             } else {
-                FortressDuel.LOGGER.warn("{}：{}.{} 不是一組欄位，已略過", name, path, e.getKey());
+                FortressDuel.LOGGER.warn("{}: {}.{} is not a mapping, skipping it", name, path, e.getKey());
             }
         }
         return out;
@@ -156,7 +156,7 @@ public final class YamlConfig {
 
     private <T> T warnType(String path, Object actual, T def) {
         if (actual != null) {
-            FortressDuel.LOGGER.warn("{}：{} 的值 '{}' 型別不對，改用預設值 {}", name, path, actual, def);
+            FortressDuel.LOGGER.warn("{}: {} has the wrong type (value '{}'), using default {}", name, path, actual, def);
         }
         return def;
     }

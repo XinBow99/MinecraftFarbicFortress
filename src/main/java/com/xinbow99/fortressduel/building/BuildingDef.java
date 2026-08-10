@@ -42,7 +42,7 @@ public record BuildingDef(
             for (Map.Entry<?, ?> e : raw.entrySet()) {
                 String key = String.valueOf(e.getKey());
                 if (key.length() != 1) {
-                    FortressDuel.LOGGER.warn("建築 {} 的調色盤鍵 '{}' 不是單一字元，已略過", id, key);
+                    FortressDuel.LOGGER.warn("Building {} has palette key '{}' that is not a single character, skipping it", id, key);
                     continue;
                 }
                 palette.put(key.charAt(0), String.valueOf(e.getValue()));

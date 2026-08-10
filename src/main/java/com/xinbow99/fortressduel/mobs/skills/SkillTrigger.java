@@ -26,7 +26,7 @@ public enum SkillTrigger {
         try {
             return valueOf(raw.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            FortressDuel.LOGGER.warn("技能的 trigger '{}' 不認得，改用 ON_DAMAGED", raw);
+            FortressDuel.LOGGER.warn("Unknown skill trigger '{}', falling back to ON_DAMAGED", raw);
             return ON_DAMAGED;
         }
     }

@@ -162,7 +162,7 @@ public final class ShopMenu extends ChestMenu {
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
             default -> {
-                FortressDuel.LOGGER.warn("商品 {} 的 type '{}' 不認得", entry.id(), entry.type());
+                FortressDuel.LOGGER.warn("Shop entry {} uses unknown type '{}'", entry.id(), entry.type());
                 yield false;
             }
         };

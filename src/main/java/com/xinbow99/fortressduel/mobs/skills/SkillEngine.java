@@ -67,7 +67,7 @@ public final class SkillEngine {
     /** 註冊一種技能實作。type 就是 skills.yml 裡的 {@code type} 欄位。 */
     public void registerType(String type, MobSkill skill) {
         if (types.putIfAbsent(type, skill) != null) {
-            FortressDuel.LOGGER.warn("技能型別 {} 重複註冊，後來的那個被忽略", type);
+            FortressDuel.LOGGER.warn("Skill type {} was registered twice, the later registration is ignored", type);
         }
     }
 
@@ -171,7 +171,7 @@ public final class SkillEngine {
 
             MobSkill impl = types.get(skill.type());
             if (impl == null) {
-                FortressDuel.LOGGER.warn("技能 {} 的 type '{}' 沒有對應的實作", skill.id(), skill.type());
+                FortressDuel.LOGGER.warn("Skill {} uses type '{}' which has no implementation", skill.id(), skill.type());
                 continue;
             }
 
@@ -203,7 +203,7 @@ public final class SkillEngine {
         for (String id : def.skills()) {
             SkillDef skill = config.skills().byId(id);
             if (skill == null) {
-                FortressDuel.LOGGER.warn("怪物 {} 的技能 '{}' 不在 skills.yml 裡", def.id(), id);
+                FortressDuel.LOGGER.warn("Mob {} references skill '{}' which is not defined in skills.yml", def.id(), id);
                 continue;
             }
             out.add(skill);

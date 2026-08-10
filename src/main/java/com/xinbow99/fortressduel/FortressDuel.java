@@ -63,7 +63,7 @@ public class FortressDuel implements ModInitializer {
         new IncidentScheduler(config, skills).register();
         new DuelCommands(duels, config, skills).register();
 
-        LOGGER.info("要塞對戰已載入，設定目錄：{}", config.configDir());
+        LOGGER.info("Fortress Duel loaded. Config directory: {}", config.configDir());
     }
 
     public static Identifier id(String path) {

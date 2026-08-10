@@ -99,7 +99,7 @@ public final class NpcManager {
     public Entity spawn(ServerLevel level, NpcDef def, BlockPos pos, float yaw) {
         EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(def.entity()).orElse(null);
         if (type == null) {
-            FortressDuel.LOGGER.warn("NPC {} 指定的實體 '{}' 不存在", def.id(), def.entity());
+            FortressDuel.LOGGER.warn("NPC {} references entity '{}' which does not exist", def.id(), def.entity());
             return null;
         }
 
@@ -145,7 +145,7 @@ public final class NpcManager {
 
         ShopDef shop = shops.get(def.shop());
         if (shop == null) {
-            FortressDuel.LOGGER.warn("NPC {} 指向的商店 '{}' 不在 shops.yml 裡", def.id(), def.shop());
+            FortressDuel.LOGGER.warn("NPC {} references shop '{}' which is not defined in shops.yml", def.id(), def.shop());
             player.sendSystemMessage(Msg.warn("這個商人的店還沒開張（設定裡找不到商店）。"));
             return InteractionResult.FAIL;
         }

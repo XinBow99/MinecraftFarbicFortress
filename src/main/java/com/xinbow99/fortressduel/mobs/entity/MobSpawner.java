@@ -42,7 +42,7 @@ public final class MobSpawner {
                                          SkillEngine engine) {
         EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(def.entity()).orElse(null);
         if (type == null) {
-            FortressDuel.LOGGER.warn("怪物 {} 指定的實體 '{}' 不存在，這次不生成", def.id(), def.entity());
+            FortressDuel.LOGGER.warn("Mob {} references entity '{}' which does not exist, skipping this spawn", def.id(), def.entity());
             return List.of();
         }
 

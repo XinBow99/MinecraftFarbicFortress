@@ -95,7 +95,7 @@ public final class IncidentScheduler {
 
         SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(incident.music());
         if (sound == null) {
-            FortressDuel.LOGGER.warn("突發事件 {} 的音樂 '{}' 不存在", incident.id(), incident.music());
+            FortressDuel.LOGGER.warn("Incident {} references sound '{}' which does not exist", incident.id(), incident.music());
         }
         return sound;
     }
@@ -106,7 +106,7 @@ public final class IncidentScheduler {
                 // 公告已經在 announce 做完了，沒有額外效果
             }
             case "spawn_mobs" -> spawnMobs(duel, incident);
-            default -> FortressDuel.LOGGER.warn("突發事件 {} 的 action '{}' 還沒有實作",
+            default -> FortressDuel.LOGGER.warn("Incident {} uses action '{}' which is not implemented yet",
                     incident.id(), incident.action());
         }
     }
@@ -120,7 +120,7 @@ public final class IncidentScheduler {
         for (String mobId : incident.mobs()) {
             MobDef def = config.mobs().byId(mobId);
             if (def == null) {
-                FortressDuel.LOGGER.warn("突發事件 {} 指定的怪物 '{}' 不在 mobs.yml 裡", incident.id(), mobId);
+                FortressDuel.LOGGER.warn("Incident {} references mob '{}' which is not defined in mobs.yml", incident.id(), mobId);
                 continue;
             }
             MobSpawner.spawnPack(level, def, center, spread, skills);

@@ -94,7 +94,7 @@ public final class BuildingPlacer {
 
         NpcDef npcDef = npcs.npc(def.npc());
         if (npcDef == null) {
-            FortressDuel.LOGGER.warn("建築 {} 指定的 NPC '{}' 不在 npcs.yml 裡", def.id(), def.npc());
+            FortressDuel.LOGGER.warn("Building {} references NPC '{}' which is not defined in npcs.yml", def.id(), def.npc());
             return;
         }
 
@@ -109,7 +109,7 @@ public final class BuildingPlacer {
     private BlockState state(String id) {
         Block block = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(id)).orElse(null);
         if (block == null) {
-            FortressDuel.LOGGER.warn("藍圖裡的方塊 '{}' 不存在，那一格保持原狀", id);
+            FortressDuel.LOGGER.warn("Block '{}' in the blueprint does not exist, leaving that cell untouched", id);
             return null;
         }
         return block.defaultBlockState();

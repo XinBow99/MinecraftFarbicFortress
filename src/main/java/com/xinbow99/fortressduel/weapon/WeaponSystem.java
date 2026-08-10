@@ -385,7 +385,7 @@ public final class WeaponSystem {
             return simple;
         }
         // 帶參數的粒子（例如 dust 要指定顏色）沒辦法只用一個 id 建出來，退回一個看得見的預設
-        FortressDuel.LOGGER.warn("粒子 '{}' 不是簡單粒子或不存在，改用 crit", id);
+        FortressDuel.LOGGER.warn("Particle '{}' is missing or needs parameters, falling back to crit", id);
         return ParticleTypes.CRIT;
     }
 

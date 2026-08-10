@@ -124,7 +124,7 @@ public final class Duel {
             String[] parts = entry.trim().split("\\s+");
             Item item = BuiltInRegistries.ITEM.getOptional(Identifier.parse(parts[0])).orElse(null);
             if (item == null) {
-                FortressDuel.LOGGER.warn("starting_items 裡的物品 '{}' 不存在，已略過", parts[0]);
+                FortressDuel.LOGGER.warn("Item '{}' in starting_items does not exist, skipping it", parts[0]);
                 continue;
             }
 
@@ -133,7 +133,7 @@ public final class Duel {
                 try {
                     count = Integer.parseInt(parts[1]);
                 } catch (NumberFormatException e) {
-                    FortressDuel.LOGGER.warn("starting_items 的 '{}' 數量寫錯，當成 1 個", entry);
+                    FortressDuel.LOGGER.warn("Invalid amount in starting_items entry '{}', treating it as 1", entry);
                 }
             }
             player.getInventory().placeItemBackInInventory(new ItemStack(item, count));

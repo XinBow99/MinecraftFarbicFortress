@@ -62,7 +62,7 @@ public final class Arena {
         arena.placeCore(coreSouth, settings);
         arena.placeBuildings(settings, buildings);
 
-        FortressDuel.LOGGER.info("競技場已建立於 {} {}×{}（快照 {} 格）",
+        FortressDuel.LOGGER.info("Arena built at {} ({}x{}, {} blocks in snapshot)",
                 ground, settings.arenaSize(), settings.arenaSize(), snapshot.recordedBlocks());
         return arena;
     }
@@ -134,7 +134,7 @@ public final class Arena {
         for (String id : settings.arenaBuildings()) {
             BuildingDef def = buildings.byId(id);
             if (def == null) {
-                FortressDuel.LOGGER.warn("duel.yml 指定的建築 '{}' 不在 buildings.yml 裡", id);
+                FortressDuel.LOGGER.warn("Building '{}' from duel.yml is not defined in buildings.yml", id);
                 continue;
             }
             buildings.place(level, def, coreNorth, false, pos -> snapshot.record(level, pos));
@@ -145,7 +145,7 @@ public final class Arena {
     private static BlockState blockState(String id, Block fallback) {
         Block block = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(id)).orElse(null);
         if (block == null) {
-            FortressDuel.LOGGER.warn("設定裡的方塊 '{}' 不存在，改用 {}", id, fallback.getName().getString());
+            FortressDuel.LOGGER.warn("Block '{}' from the config does not exist, falling back to {}", id, fallback.getName().getString());
             return fallback.defaultBlockState();
         }
         return block.defaultBlockState();

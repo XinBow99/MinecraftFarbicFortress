@@ -57,7 +57,7 @@ public final class ConfigManager {
         }
 
         FortressDuel.LOGGER.info(
-                "設定載入完成：{} 種武器、{} 種怪物、{} 種技能、{} 種突發事件、{} 種 NPC、{} 間商店、{} 棟建築",
+                "Config loaded: {} weapons, {} mobs, {} skills, {} incidents, {} NPCs, {} shops, {} buildings",
                 weapons.size(), mobs.size(), skills.size(), incidents.size(),
                 npcs == null ? 0 : npcs.npcCount(),
                 npcs == null ? 0 : npcs.shopCount(),

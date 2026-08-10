@@ -86,7 +86,7 @@ public final class SkillTypes {
         String mobId = ctx.skill().param("mob", "");
         MobDef def = engine.config().mobs().byId(mobId);
         if (def == null) {
-            FortressDuel.LOGGER.warn("技能 {} 要召喚的怪物 '{}' 不在 mobs.yml 裡", ctx.skill().id(), mobId);
+            FortressDuel.LOGGER.warn("Skill {} tries to summon mob '{}' which is not defined in mobs.yml", ctx.skill().id(), mobId);
             return false;
         }
         int radius = Math.max(1, ctx.skill().param("radius", 4));
@@ -138,7 +138,7 @@ public final class SkillTypes {
         String id = ctx.skill().param("effect", "");
         Holder<MobEffect> effect = BuiltInRegistries.MOB_EFFECT.get(Identifier.parse(id)).orElse(null);
         if (effect == null) {
-            FortressDuel.LOGGER.warn("技能 {} 的效果 '{}' 不存在", ctx.skill().id(), id);
+            FortressDuel.LOGGER.warn("Skill {} references effect '{}' which does not exist", ctx.skill().id(), id);
             return false;
         }
 

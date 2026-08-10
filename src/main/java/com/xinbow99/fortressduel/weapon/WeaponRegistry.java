@@ -25,7 +25,7 @@ public final class WeaponRegistry {
             // 這種通常是複製貼上忘了改，所以要講出來
             WeaponDef previous = items.put(def.item(), def);
             if (previous != null) {
-                FortressDuel.LOGGER.warn("武器 {} 與 {} 綁到同一個物品 {}，只有 {} 會生效",
+                FortressDuel.LOGGER.warn("Weapons {} and {} are bound to the same item {}; only {} will work",
                         previous.id(), def.id(), def.item(), def.id());
             }
         }
