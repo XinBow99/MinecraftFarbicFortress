@@ -9,15 +9,19 @@ challenge:
   max_distance: 100
 
 arena:
-  # 框出來的正方形邊長（格）
+  # 框出來的正方形最小邊長（格）。實際邊長會取「兩人的最大軸距 + 兩側 margin」與這個值
+  # 之中較大的那個——場地是就地框在雙方之間的，站得越開場地越大
   size: 48
   # 範圍往上算幾格（框線的高度上限也吃這個值）
   height: 32
   # 範圍往下算幾格（要挖地道的話調大）
   depth: 8
-  # 找場地時最遠找到幾格外
-  search_radius: 200
-  # 競技場之間、以及競技場與挑戰者之間至少隔幾格
+  # 邊界離最外側的玩家至少留幾格
+  margin: 16
+  # 水晶生成在玩家往「遠離對手」方向退幾格的位置。放在腳下會把人頂起來，
+  # 而且核心貼著自己的臉也不好守
+  core_offset: 3
+  # 新的一場不能開在別場競技場的這個距離之內
   min_separation: 24
   # 框線用什麼方塊。barrier 看不見也打不掉；想要看得見可以改成 minecraft:glass
   border_block: minecraft:barrier
@@ -38,8 +42,9 @@ core:
   base_block: minecraft:iron_block
 
 battle:
-  # 進場後倒數幾秒才開始第一輪
-  countdown_seconds: 5
+  # 準備階段長度（秒）。這段時間玩家可以走到想要的位置——時間一到，水晶就在
+  # 你**當下站的地方**旁邊生成。開場不傳送任何人，所以這十秒是你選陣地的機會
+  countdown_seconds: 10
   # 建造階段長度（秒）：可以擺方塊，不能攻擊
   build_seconds: 60
   # 攻擊階段長度（秒）：不能擺方塊，可以攻擊

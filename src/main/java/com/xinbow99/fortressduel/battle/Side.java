@@ -23,7 +23,8 @@ public final class Side {
     private final UUID playerId;
     private final String playerName;
     private final boolean dummy;
-    private final BlockPos core;
+    /** 這一方的核心。準備階段結束才長出來，在那之前是 null。 */
+    private BlockPos core;
 
     private final ResourceKey<Level> returnLevel;
     private final Vec3 returnPos;
@@ -35,8 +36,8 @@ public final class Side {
     private final float maxHp;
     private float hp;
 
-    public Side(ServerPlayer player, BlockPos core, float maxHp, ChatFormatting color, BossEvent.BossBarColor barColor) {
-        this(player.getUUID(), player.getGameProfile().name(), false, core,
+    public Side(ServerPlayer player, float maxHp, ChatFormatting color, BossEvent.BossBarColor barColor) {
+        this(player.getUUID(), player.getGameProfile().name(), false,
                 player.level().dimension(), player.position(), player.getYRot(), player.getXRot(),
                 maxHp, color, barColor);
     }
@@ -48,20 +49,19 @@ public final class Side {
      * {@code duelsByPlayer}、錢包、彈藥袋這些以 UUID 為鍵的表當成玩家。{@code returnLevel}／
      * {@code returnPos} 是佔位用的——沒有對應的線上玩家，{@code teleportOut} 會先一步跳過它。
      */
-    public static Side dummy(String name, BlockPos core, float maxHp,
+    public static Side dummy(String name, float maxHp,
                              ChatFormatting color, BossEvent.BossBarColor barColor) {
-        return new Side(UUID.randomUUID(), name, true, core,
+        return new Side(UUID.randomUUID(), name, true,
                 Level.OVERWORLD, Vec3.ZERO, 0f, 0f,
                 maxHp, color, barColor);
     }
 
-    private Side(UUID playerId, String playerName, boolean dummy, BlockPos core,
+    private Side(UUID playerId, String playerName, boolean dummy,
                  ResourceKey<Level> returnLevel, Vec3 returnPos, float returnYaw, float returnPitch,
                  float maxHp, ChatFormatting color, BossEvent.BossBarColor barColor) {
         this.playerId = playerId;
         this.playerName = playerName;
         this.dummy = dummy;
-        this.core = core;
 
         this.returnLevel = returnLevel;
         this.returnPos = returnPos;
@@ -131,6 +131,10 @@ public final class Side {
 
     public String playerName() {
         return playerName;
+    }
+
+    public void setCore(BlockPos core) {
+        this.core = core;
     }
 
     /** 這一方是不是靶子（單人練習模式的對手）。 */

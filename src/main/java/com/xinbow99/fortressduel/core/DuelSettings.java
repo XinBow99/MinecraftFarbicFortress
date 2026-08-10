@@ -18,11 +18,14 @@ public record DuelSettings(
         int arenaSize,
         int arenaHeight,
         int arenaDepth,
-        int arenaSearchRadius,
         int arenaMinSeparation,
         String borderBlock,
         int borderHeight,
         boolean restoreTerrain,
+        /** 競技場邊界離最外側玩家至少留幾格。 */
+        int arenaMargin,
+        /** 水晶生成在玩家往「遠離對手」方向退幾格的位置。 */
+        int coreOffset,
         /** 開場時兩側各蓋哪幾棟建築（對應 buildings.yml）。 */
         List<String> arenaBuildings,
 
@@ -62,18 +65,19 @@ public record DuelSettings(
                 cfg.getInt("arena.size", 48),
                 cfg.getInt("arena.height", 32),
                 cfg.getInt("arena.depth", 8),
-                cfg.getInt("arena.search_radius", 200),
                 cfg.getInt("arena.min_separation", 24),
                 cfg.getString("arena.border_block", "minecraft:barrier"),
                 cfg.getInt("arena.border_height", 32),
                 cfg.getBoolean("arena.restore_terrain", true),
+                cfg.getInt("arena.margin", 16),
+                cfg.getInt("arena.core_offset", 3),
                 cfg.getStringList("arena.buildings"),
 
                 cfg.getInt("core.hp", 400),
                 cfg.getInt("core.hit_damage", 10),
                 cfg.getString("core.base_block", "minecraft:iron_block"),
 
-                cfg.getInt("battle.countdown_seconds", 5),
+                cfg.getInt("battle.countdown_seconds", 10),
                 cfg.getInt("battle.build_seconds", 60),
                 cfg.getInt("battle.combat_seconds", 60),
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
