@@ -90,6 +90,15 @@ public final class EconomyManager {
 
         Duel duel = duels.duelOf(killer);
         if (duel == null) return;
+
+        // 怪物必須死在自己這場的競技場裡。怪物本身沒有範圍限制（會自己走出去），
+        // 所以「殺手在對戰中」不足以保證這筆賞金屬於這一場——場外的怪、
+        // 甚至別場飄出來的怪，都不該算進這場的經濟
+        if (entity.level() != duel.arena().level()
+                || !duel.arena().region().contains(entity.blockPosition())) {
+            return;
+        }
+
         if (!duel.state().canAttack()) {
             killer.sendSystemMessage(Msg.plain("建造階段不發賞金", ChatFormatting.GRAY), true);
             return;

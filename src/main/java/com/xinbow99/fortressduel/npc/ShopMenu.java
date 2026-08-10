@@ -141,8 +141,47 @@ public final class ShopMenu extends ChestMenu {
             }
             return;
         }
-        // 下半部是玩家自己的背包，讓他照常整理
+
+        // Shift + 左鍵（QUICK_MOVE）在背包那一半的意思是「把這疊搬到上面的容器」。
+        // 上面的容器是開店時 new 出來的暫存 SimpleContainer，關掉視窗就被丟棄——
+        // 也就是說不擋的話，玩家 Shift 點自己的鑽石就等於把鑽石刪掉
+        if (input == ContainerInput.QUICK_MOVE) return;
+
+        // 其餘（在自己背包裡搬東西、丟東西）照常
         super.clicked(slotId, button, input, who);
+    }
+
+    /**
+     * 第二道防線：Shift + 左鍵最終都會走到這裡，直接回空表示「搬不動」。
+     *
+     * <p>{@link #clicked} 已經擋過一次了，但那是靠「認得 QUICK_MOVE 這個輸入型別」；
+     * 這裡是靠「搬移這個動作本身不做事」。兩道防線擋的是不同層級，任何一條新的呼叫路徑
+     * 只要經過搬移邏輯就會被這裡攔下。
+     */
+    @Override
+    public ItemStack quickMoveStack(Player who, int slotId) {
+        return ItemStack.EMPTY;
+    }
+
+    /**
+     * 第三道防線：關閉視窗時，把不知怎麼跑進展示櫃的東西還給玩家。
+     *
+     * <p>正常情況下這裡永遠是空的。留著是因為「玩家的物品消失」這種 bug 事後補救不了——
+     * 寧可多一段不會執行到的程式碼，也不要賭前兩道防線沒有漏洞。
+     */
+    @Override
+    public void removed(Player who) {
+        for (int slot = 0; slot < SIZE; slot++) {
+            if (slotEntries.get(slot) != null) continue; // 展示用的圖示，本來就該留在容器裡
+
+            ItemStack stray = getSlot(slot).getItem();
+            if (!stray.isEmpty()) {
+                FortressDuel.LOGGER.warn("Returning {} that ended up in shop {}", stray, shop.id());
+                who.getInventory().placeItemBackInInventory(stray);
+                getSlot(slot).set(ItemStack.EMPTY);
+            }
+        }
+        super.removed(who);
     }
 
     private void buy(ShopEntry entry) {

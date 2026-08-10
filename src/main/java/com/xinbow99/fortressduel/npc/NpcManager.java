@@ -5,6 +5,7 @@ import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.util.Msg;
+import com.xinbow99.fortressduel.util.Region;
 import com.xinbow99.fortressduel.util.YamlConfig;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
@@ -21,6 +22,7 @@ import net.minecraft.world.entity.Mob;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -52,7 +54,8 @@ public final class NpcManager {
     public void register() {
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) ->
                 player instanceof ServerPlayer sp ? onInteract(sp, entity) : InteractionResult.PASS);
-        DuelEvents.END.register((duel, result) -> removeAll(duel.arena().level()));
+        DuelEvents.END.register((duel, result) ->
+                removeIn(duel.arena().level(), duel.arena().region()));
     }
 
     // ---------- 設定 ----------
@@ -122,14 +125,31 @@ public final class NpcManager {
         return entity;
     }
 
-    /** 對戰結束時把這個世界上所有本 mod 生成的 NPC 移除。 */
-    private void removeAll(ServerLevel level) {
-        for (UUID id : Map.copyOf(spawned).keySet()) {
+    /**
+     * 移除某一座競技場裡的 NPC。
+     *
+     * <p>用「位置落在這場的範圍內」判斷，而不是清掉整張表——同時有兩場對戰時，一場結束
+     * 把另一場的軍火商也清掉的話，那一場的玩家從此買不到東西。
+     *
+     * <p>之所以不是把 NPC 記成「屬於哪一場對戰」，是因為建築（連同 NPC）是在 {@code Arena.build}
+     * 裡放下去的，那時 {@link com.xinbow99.fortressduel.battle.Duel} 物件還沒被建出來。
+     * 用範圍判斷就不需要把 Duel 一路傳進放置流程。
+     */
+    private void removeIn(ServerLevel level, Region region) {
+        Iterator<Map.Entry<UUID, NpcDef>> it = spawned.entrySet().iterator();
+        while (it.hasNext()) {
+            UUID id = it.next().getKey();
             Entity entity = level.getEntityInAnyDimension(id);
-            if (entity != null) {
-                entity.discard();
+
+            if (entity == null) {
+                // 已經不在世界上了（被指令清掉、區塊卸載後消失…），記錄留著也沒用
+                it.remove();
+                continue;
             }
-            spawned.remove(id);
+            if (entity.level() == level && region.contains(entity.blockPosition())) {
+                entity.discard();
+                it.remove();
+            }
         }
     }
 
