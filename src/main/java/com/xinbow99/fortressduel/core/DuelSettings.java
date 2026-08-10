@@ -79,7 +79,7 @@ public record DuelSettings(
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
                 startingItems(cfg),
 
-                cfg.getInt("incident.interval_seconds", 60),
+                cfg.getInt("incident.interval_seconds", 120),
 
                 cfg.getInt("economy.starting_money", 600),
                 cfg.getInt("economy.round_income", 380),

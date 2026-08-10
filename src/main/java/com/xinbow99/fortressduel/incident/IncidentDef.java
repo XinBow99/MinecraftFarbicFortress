@@ -23,8 +23,6 @@ public record IncidentDef(
         String action,
         /** action ＝ spawn_mobs 時要生成的怪物 id（對應 mobs.yml）。 */
         List<String> mobs,
-        /** 持續幾秒；0 ＝ 瞬間發生完就結束。 */
-        int durationSeconds,
         /** 發生時播放的音樂／音效；null ＝ 不播。 */
         Identifier music,
         double musicVolume,
@@ -46,7 +44,6 @@ public record IncidentDef(
                 YamlConfig.d(section, "weight", 1.0),
                 YamlConfig.str(section, "action", "message"),
                 mobs,
-                YamlConfig.i(section, "duration_seconds", 0),
                 music.isBlank() ? null : Identifier.parse(music),
                 YamlConfig.d(section, "music_volume", 1.0),
                 YamlConfig.d(section, "music_pitch", 1.0));
