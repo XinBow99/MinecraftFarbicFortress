@@ -21,6 +21,7 @@ Minecraft Fabric mod（1.26.2 / Fabric Loader 0.19.3）。玩家可以向任意�
 | `/duel accept <玩家>` | 接受挑戰 |
 | `/duel deny <玩家>` | 拒絕 |
 | `/duel forfeit` | 投降 |
+| `/duel solo` | 測試用：單人練習，對手是不會還手的靶子（OP） |
 | `/duel reload` | 重讀設定（OP） |
 | `/duel give <武器>` | 測試用：直接拿一把武器（OP） |
 | `/duel spawn <怪物>` | 測試用：生一批怪（OP） |
@@ -59,7 +60,7 @@ Minecraft Fabric mod（1.26.2 / Fabric Loader 0.19.3）。玩家可以向任意�
 ./gradlew build          # 打包，產物在 build/libs/
 ```
 
-要測對戰至少需要兩個玩家，所以內建了第二個客戶端的啟動設定。
+要測對戰至少需要兩個玩家，所以內建了第二個客戶端的啟動設定。只是要試武器、怪物、技能或商店的話不用開兩個視窗——`/duel solo` 一個人就能進場，對手是一座不會還手的靶子。
 
 ## 發佈
 
