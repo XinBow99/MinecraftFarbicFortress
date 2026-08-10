@@ -31,6 +31,7 @@ import net.minecraft.world.item.ItemStack;
  * /duel challenge &lt;player&gt;   向任意玩家發起挑戰
  * /duel accept   &lt;player&gt;   接受挑戰，雙方傳送進競技場
  * /duel deny     &lt;player&gt;   拒絕
+ * /duel solo                單人練習，對手是靶子（需要 OP）
  * /duel forfeit             投降，判對手獲勝
  * /duel reload              重讀 YAML 設定（需要 OP）
  * </pre>
@@ -68,6 +69,10 @@ public final class DuelCommands {
                                 .executes(ctx -> run(ctx.getSource(),
                                         duels.deny(ctx.getSource().getPlayerOrException(),
                                                 EntityArgument.getPlayer(ctx, "player"))))))
+                .then(Commands.literal("solo")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(ctx -> run(ctx.getSource(),
+                                duels.solo(ctx.getSource().getPlayerOrException()))))
                 .then(Commands.literal("forfeit")
                         .executes(ctx -> run(ctx.getSource(),
                                 duels.forfeit(ctx.getSource().getPlayerOrException()))))

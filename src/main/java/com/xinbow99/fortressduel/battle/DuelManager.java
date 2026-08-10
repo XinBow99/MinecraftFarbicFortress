@@ -134,6 +134,31 @@ public final class DuelManager {
         return null;
     }
 
+    /**
+     * 開一場單人練習：自己一個人對上不會還手的靶子。
+     *
+     * <p>不需要挑戰書，也沒有距離限制——這是測試工具，不是玩法的一部分。
+     *
+     * @return 給發起者看的結果訊息；null ＝ 已開場
+     */
+    public String solo(ServerPlayer player) {
+        if (isInDuel(player)) return "你正在對戰中。";
+
+        ServerLevel level = player.level();
+        DuelSettings settings = config.settings();
+        BlockPos site = findArenaSite(level, player.blockPosition(), settings);
+        if (site == null) {
+            return "附近找不到夠空曠的地方開場，換個位置再試一次。";
+        }
+
+        Duel duel = Duel.startSolo(level.getServer(), level, site, settings, services, player);
+        activeDuels.add(duel);
+        duelsByPlayer.put(player.getUUID(), duel);
+
+        challenges.remove(player.getUUID());
+        return null;
+    }
+
     /** @return 給拒絕者看的結果訊息；null ＝ 已拒絕 */
     public String deny(ServerPlayer target, ServerPlayer challenger) {
         List<Challenge> inbox = challenges.get(target.getUUID());
@@ -148,6 +173,12 @@ public final class DuelManager {
     public String forfeit(ServerPlayer player) {
         Duel duel = duelsByPlayer.get(player.getUUID());
         if (duel == null) return "你目前沒有在對戰。";
+
+        // 單人練習沒有對手可以判給，直接中止——不然會跳出「你輸給了訓練假人」
+        if (duel.isSolo()) {
+            duel.finish(Duel.Result.aborted());
+            return null;
+        }
 
         Side side = duel.sideOf(player.getUUID());
         duel.finish(Duel.Result.forfeit(duel.opponentOf(side).playerId()));
