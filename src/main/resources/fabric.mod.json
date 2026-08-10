@@ -1,0 +1,38 @@
+{
+	"schemaVersion": 1,
+	"id": "fortress-duel",
+	"version": "${version}",
+	"name": "Fortress Duel",
+	"description": "向任意玩家發起挑戰，傳送到附近框出的 n×n 競技場，各自守著一座烽火台核心：建造階段蓋牆、攻擊階段互轟，先摧毀對方核心者獲勝。怪物、武器、突發事件皆以 YAML 設定。",
+	"authors": [
+		"xinbow99"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/fortress-duel/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.xinbow99.fortressduel.FortressDuel"
+		],
+		"client": [
+			"com.xinbow99.fortressduel.client.FortressDuelClient"
+		]
+	},
+	"mixins": [
+		"fortress-duel.mixins.json",
+		{
+			"config": "fortress-duel.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

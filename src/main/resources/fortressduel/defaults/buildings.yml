@@ -1,0 +1,63 @@
+# 要塞對戰 — 建築
+#
+# 開場時兩側各蓋一份（要蓋哪幾棟在 duel.yml 的 arena.buildings）。
+# 南半場會整個沿 Z 鏡射，所以兩邊的店都開口朝向中場，不會一邊背對。
+#
+# 藍圖寫法：調色盤 + 逐層字元圖
+#   offset      相對自己核心的位置（南半場的 z 會自動變號）
+#   palette     一個字元對一個方塊。**字元不在調色盤裡 = 那一格不要動**（地形會穿過去）
+#   layers      由下往上，一層一個 y；一層裡一列一個 z（北→南），一列裡一個字元一個 x（西→東）
+#   npc         要放在裡面的 NPC id（對應 npcs.yml）
+#   npc_offset  NPC 相對建築原點（也就是 offset 那一格）的位置
+#
+# 對戰結束時整棟會跟著競技場一起還原，NPC 也會被移除。
+
+buildings:
+  weapon_shop:
+    name: 武器商店
+    # 蓋在核心後方（遠離中場那一側），玩家補彈藥時不會直接暴露在對手火線上
+    offset: {x: -3, y: 0, z: 4}
+
+    palette:
+      S: minecraft:stone_bricks
+      C: minecraft:chiseled_stone_bricks
+      G: minecraft:glass_pane
+      L: minecraft:lantern
+      P: minecraft:oak_planks
+      ".": minecraft:air
+
+    layers:
+      # y = 0：地板
+      - ["PPPPPPP",
+         "PPPPPPP",
+         "PPPPPPP",
+         "PPPPPPP",
+         "PPPPPPP"]
+      # y = 1：牆，南面（朝中場那側）開一個三格寬的門
+      - ["SSSSSSS",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SS...SS"]
+      # y = 2：牆 + 窗
+      - ["SGSGSGS",
+         "G.....G",
+         "S.....S",
+         "G.....G",
+         "SS...SS"]
+      # y = 3：牆頂
+      - ["SSSSSSS",
+         "S.....S",
+         "S..L..S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 4：屋頂
+      - ["CCCCCCC",
+         "CCCCCCC",
+         "CCCCCCC",
+         "CCCCCCC",
+         "CCCCCCC"]
+
+    npc: arms_dealer
+    # 站在店的正中央、地板上方一格
+    npc_offset: {x: 3, y: 1, z: 2}

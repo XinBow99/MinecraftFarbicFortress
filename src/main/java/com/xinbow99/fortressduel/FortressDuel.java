@@ -1,0 +1,72 @@
+package com.xinbow99.fortressduel;
+
+import com.xinbow99.fortressduel.battle.DuelManager;
+import com.xinbow99.fortressduel.battle.DuelServices;
+import com.xinbow99.fortressduel.building.BuildingPlacer;
+import com.xinbow99.fortressduel.core.ConfigManager;
+import com.xinbow99.fortressduel.economy.EconomyManager;
+import com.xinbow99.fortressduel.npc.NpcManager;
+import com.xinbow99.fortressduel.core.DuelCommands;
+import com.xinbow99.fortressduel.incident.IncidentScheduler;
+import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
+import com.xinbow99.fortressduel.weapon.WeaponSystem;
+import net.fabricmc.api.ModInitializer;
+import net.minecraft.resources.Identifier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * 要塞對戰（Fortress Duel）。
+ *
+ * <p>玩家可以向任意玩家發起挑戰，接受後雙方被傳送到附近框出來的 n×n 競技場，各自那半場的正中央
+ * 有一座烽火台核心。即時制：進場倒數結束就開打，建材不用買——自己挖、自己蓋，把對方的核心
+ * 打到 0 就贏。玩法與內容（武器／怪物／突發事件）移植自同名的網頁版。
+ *
+ * <p>模組分層：
+ * <ul>
+ *   <li>{@code core}     — 設定載入、指令、對戰事件匯流排</li>
+ *   <li>{@code battle}   — 挑戰流程、競技場、核心血量</li>
+ *   <li>{@code weapon}   — 武器與技能效果（weapons.yml）</li>
+ *   <li>{@code mobs.entity} — 怪物本身（mobs.yml）</li>
+ *   <li>{@code mobs.skills} — 怪物技能（skills.yml）</li>
+ *   <li>{@code incident} — 突發事件（incidents.yml）</li>
+ *   <li>{@code util}     — 共用工具</li>
+ * </ul>
+ */
+public class FortressDuel implements ModInitializer {
+
+    public static final String MOD_ID = "fortress-duel";
+    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+
+    @Override
+    public void onInitialize() {
+        ConfigManager config = new ConfigManager();
+
+        DuelManager duels = new DuelManager(config);
+        SkillEngine skills = new SkillEngine(config);
+        WeaponSystem weapons = new WeaponSystem(config, duels);
+        EconomyManager economy = new EconomyManager(config, duels, skills);
+        NpcManager npcs = new NpcManager(config, economy, weapons);
+        BuildingPlacer buildings = new BuildingPlacer(npcs);
+
+        // 子系統之間互相需要，所以先全部建好再互相登記，最後才第一次讀設定
+        config.attach(npcs, buildings);
+        duels.attach(new DuelServices(buildings, economy, weapons));
+        config.reload();
+
+        duels.register();
+        skills.register();
+        // 經濟要比技能引擎晚註冊沒關係——兩邊都掛在 AFTER_DEATH，但誰都不會刪掉對方要用的登記
+        economy.register();
+        weapons.register();
+        npcs.register();
+        new IncidentScheduler(config, skills).register();
+        new DuelCommands(duels, config, skills).register();
+
+        LOGGER.info("要塞對戰已載入，設定目錄：{}", config.configDir());
+    }
+
+    public static Identifier id(String path) {
+        return Identifier.fromNamespaceAndPath(MOD_ID, path);
+    }
+}

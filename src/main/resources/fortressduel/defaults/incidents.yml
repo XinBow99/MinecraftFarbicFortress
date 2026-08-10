@@ -1,0 +1,112 @@
+# 要塞對戰 — 突發事件
+#
+# 網頁版是「每回合開始抽一次」，MC 版沒有回合，改成每隔 duel.yml 的
+# incident.interval_seconds 抽一次。權重比例照抄網頁版（純給錢的三個各 15%、其餘各 5%）。
+#
+# 欄位
+#   name              顯示名稱
+#   description       公告時附的一行說明
+#   weight            抽籤權重
+#   action            效果種類：
+#                       message     只公告，沒有其他效果
+#                       spawn_mobs  在場中央生成 mobs 列出的怪
+#   mobs              action = spawn_mobs 時要生成哪幾種（對應 mobs.yml 的 id）
+#   duration_seconds  持續幾秒，0 = 瞬間發生完就結束
+#   music             發生時播放的音樂／音效 id，省略 = 不播
+#                     走 MUSIC 頻道（玩家的「音樂」音量滑桿管得到），在雙方各自的位置各播一次，
+#                     所以離得再遠也聽得到自己這場的事件音樂
+#   music_volume      音量倍率，預設 1.0
+#   music_pitch       音高倍率，預設 1.0（0.5 = 低一個八度，聽起來更沉）
+#
+# 想放自己的音樂：把 ogg 放進資源包的 assets/<namespace>/sounds/，在 sounds.json 註冊一個
+# 事件名，這裡就填那個 id。原版可用的例如：
+#   minecraft:entity.wither.spawn        沉重的警告
+#   minecraft:entity.ender_dragon.growl  低吼
+#   minecraft:event.raid.horn            襲擊號角
+#   minecraft:block.beacon.activate      上升音
+
+incidents:
+  dungeon:
+    name: 隱藏副本
+    description: 中場湧出一大群蟲群，先搶先贏。
+    weight: 15
+    action: spawn_mobs
+    mobs: [swarm]
+    music: minecraft:entity.silverfish.ambient
+
+  ground_horde:
+    name: 土偶大軍
+    description: 中場一字排開一批土偶，血厚但走得慢。
+    weight: 15
+    action: spawn_mobs
+    mobs: [ground]
+    music: minecraft:entity.zombie.ambient
+    music_pitch: 0.6
+
+  drift_horde:
+    name: 漂鳥群
+    description: 漂鳥飄進中場，飛得又高又飄很難瞄。
+    weight: 15
+    action: spawn_mobs
+    mobs: [drift]
+    music: minecraft:entity.bee.loop_aggressive
+
+  refugee_raid:
+    name: 難民來襲！
+    description: 一支武裝小隊降落到中場，之後會朝隨機目標開火。
+    weight: 5
+    action: spawn_mobs
+    mobs: [refugee]
+    music: minecraft:event.raid.horn
+
+  eclipse:
+    name: 蝕世之影
+    description: 它對人沒興趣，但對人造物有無法抑制的破壞慾。
+    weight: 5
+    action: spawn_mobs
+    mobs: [eclipse]
+    music: minecraft:entity.ender_dragon.growl
+    music_pitch: 0.7
+
+  ender:
+    name: 終界怪物降臨
+    description: 它會獵食場上的小怪，吃越多長越大。
+    weight: 5
+    action: spawn_mobs
+    mobs: [boss]
+    music: minecraft:entity.wither.spawn
+
+  # ---- 以下的效果還沒實作，目前只會公告（action: message）----
+
+  meteor:
+    name: 隕石雨
+    description: 隕石襲擊雙方要塞。
+    weight: 5
+    action: message
+
+  low_gravity:
+    name: 低重力
+    description: 這段時間重力減半，彈道又高又遠。
+    weight: 5
+    action: message
+    duration_seconds: 30
+
+  fortify:
+    name: 銅牆鐵壁
+    description: 這段時間所有方塊受到的傷害減半。
+    weight: 5
+    action: message
+    duration_seconds: 30
+
+  rampage:
+    name: 火力全開
+    description: 這段時間所有武器傷害 ×1.5。
+    weight: 5
+    action: message
+    duration_seconds: 30
+
+  plague:
+    name: 鼠疫
+    description: 一大群黑老鼠沿著牆往上啃，薄材料會被啃穿。
+    weight: 5
+    action: message

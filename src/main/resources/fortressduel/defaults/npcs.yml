@@ -1,0 +1,17 @@
+# 要塞對戰 — NPC
+#
+# 跟怪物一樣不註冊新實體：拿一個原版實體當殼，關掉 AI、設成無敵，右鍵它就開商店。
+# 放在哪裡由 buildings.yml 決定（建築的 npc 欄位）。
+#
+# 欄位
+#   name          頭上顯示的名字
+#   entity        用哪個原版實體當殼
+#   shop          右鍵開哪一間店（對應 shops.yml）；留空 = 純裝飾
+#   name_visible  名字要不要一直顯示
+
+npcs:
+  arms_dealer:
+    name: §6軍火商
+    entity: minecraft:villager
+    shop: arms_dealer
+    name_visible: true

@@ -1,0 +1,110 @@
+# 要塞對戰 — 怪物技能
+#
+# 在 mobs.yml 的怪物底下寫 skills: [分身] 就會掛上這裡定義的技能。
+#
+# 欄位
+#   name              顯示名稱
+#   type              對應程式裡的實作，決定「做什麼」。內建：
+#                       clone     分身：複製自己
+#                       summon    召喚：叫出 mobs.yml 裡的另一種怪
+#                       heal      回血
+#                       teleport  順移
+#                       effect    給自己上一個藥水效果
+#   trigger           什麼時候發動：
+#                       ON_SPAWN       生成的當下
+#                       INTERVAL       每隔 interval_seconds
+#                       ON_DAMAGED     每次受傷之後
+#                       ON_LOW_HEALTH  血量第一次掉到 health_threshold 以下（整場只觸發一次）
+#                       ON_DEATH       死亡的當下
+#   chance            觸發時真正發動的機率 0~1
+#   cooldown_seconds  冷卻，冷卻中不會再發動
+#   interval_seconds  trigger = INTERVAL 時的間隔
+#   health_threshold  trigger = ON_LOW_HEALTH 時的血量門檻（佔上限的比例）
+#   message           發動時附近玩家看到的訊息，留空 = 不公告
+#   params            各 type 自己解讀的參數（見下方各例）
+#
+# 同一個 type 可以被好幾個技能用不同參數再包一層——例如底下的「分身」與「垂死分裂」
+# 都是 clone，只是觸發時機與數量不同。
+
+skills:
+  分身:
+    name: 分身
+    type: clone
+    trigger: ON_DAMAGED
+    chance: 0.25
+    cooldown_seconds: 12
+    message: "§d怪物分裂出了分身！"
+    params:
+      count: 2
+      # 分身的血量 = 本體血量上限 × health_ratio
+      health_ratio: 0.5
+      scale_ratio: 0.8
+      radius: 3
+      # true = 分身也帶著技能（會連鎖分身，但有連鎖深度上限 2 擋著）
+      inherit_skills: true
+
+  垂死分裂:
+    name: 垂死分裂
+    type: clone
+    trigger: ON_DEATH
+    chance: 1.0
+    message: "§d它裂開了。"
+    params:
+      count: 3
+      health_ratio: 0.25
+      scale_ratio: 0.6
+      radius: 2
+      # 死亡分裂不繼承技能，否則一隻怪可以無限裂下去
+      inherit_skills: false
+
+  召喚蟲群:
+    name: 召喚蟲群
+    type: summon
+    trigger: INTERVAL
+    interval_seconds: 20
+    chance: 0.5
+    cooldown_seconds: 20
+    message: "§d它召來了一批蟲群。"
+    params:
+      mob: swarm
+      radius: 5
+
+  再生:
+    name: 再生
+    type: heal
+    trigger: INTERVAL
+    interval_seconds: 5
+    params:
+      # 固定值與比例可以同時寫，會相加
+      ratio: 0.05
+
+  垂死狂暴:
+    name: 垂死狂暴
+    type: effect
+    trigger: ON_LOW_HEALTH
+    health_threshold: 0.3
+    message: "§c它狂暴了！"
+    params:
+      effect: minecraft:speed
+      duration_seconds: 15
+      amplifier: 1
+
+  閃現:
+    name: 閃現
+    type: teleport
+    trigger: ON_DAMAGED
+    chance: 0.3
+    cooldown_seconds: 4
+    params:
+      radius: 8
+      # true = 往攻擊者身邊跳（追擊）；false = 隨機跳開（閃避）
+      toward_attacker: false
+
+  瞬移突進:
+    name: 瞬移突進
+    type: teleport
+    trigger: INTERVAL
+    interval_seconds: 3
+    params:
+      radius: 12
+      toward_attacker: true

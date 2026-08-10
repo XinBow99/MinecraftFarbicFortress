@@ -1,0 +1,181 @@
+# 要塞對戰 — 武器
+#
+# 數值移植自網頁版的 AMMO 表，但拿掉了價格：MC 版不買彈藥，武器就是手上的物品，
+# 建材也不用買（自己挖、自己蓋）。
+#
+# 拿著 item 指定的物品「右鍵」開火，只在對戰的攻擊階段有效。
+# 方塊血量 = 原版硬度 × duel.yml 的 weapon.block_hp_per_hardness（預設 10），
+# 所以 damage 是「打幾發破一格」而不是絕對值：石頭硬度 1.5 → 血量 15 → 廢鐵彈(20) 一發破。
+#
+# 欄位
+#   name              顯示名稱
+#   item              綁定的物品；拿著它右鍵就是用這把武器
+#   damage            單發傷害（同時作用在方塊與生物上）
+#   splash_radius     濺射半徑（格），0 = 單點命中
+#   pierce            穿甲 0~1。折減目標方塊的血量，1.0 = 血量壓到 1（一發破，但仍要打中）
+#   pellets           一次擊發幾顆（散彈）
+#   spread_degrees    角度散佈（±度）
+#   cooldown_ticks    裝填間隔（20 tick = 1 秒）
+#   projectile_speed  彈丸初速（格/tick）
+#   gravity           重力（格/tick²），0 = 直線飛行
+#   lifetime_ticks    飛多久之後自己消失
+#   auto              預留欄位：目前一次右鍵 = 一發，連發靠短 cooldown 達成
+#   breaks_blocks     命中的方塊會不會被打掉（只在競技場範圍內生效）
+#   trail_particle    飛行時拖的粒子
+#   fire_sound        開火音效
+#   ammo_capacity     最多帶幾發，也就是 HUD 上 100/120 的分母
+#   ammo_per_shot     一次擊發消耗幾發（散彈打 5 顆但只算 1 發，跟 pellets 是兩回事）
+#   starting_ammo     開場就配給的量
+
+weapons:
+  scrap:
+    name: 廢鐵彈
+    item: minecraft:iron_nugget
+    damage: 20
+    splash_radius: 0
+    pierce: 0
+    spread_degrees: 1.0
+    cooldown_ticks: 18
+    projectile_speed: 3.0
+    gravity: 0.04
+    lifetime_ticks: 120
+    breaks_blocks: true
+    ammo_capacity: 120
+    trail_particle: minecraft:crit
+    fire_sound: minecraft:entity.arrow.shoot
+    starting_ammo: 60
+
+  mg:
+    name: 機槍彈
+    item: minecraft:copper_ingot
+    damage: 12
+    splash_radius: 0
+    pierce: 0
+    spread_degrees: 3.0
+    cooldown_ticks: 3
+    projectile_speed: 3.8
+    gravity: 0.03
+    lifetime_ticks: 80
+    auto: true
+    breaks_blocks: true
+    ammo_capacity: 300
+    trail_particle: minecraft:smoke
+    fire_sound: minecraft:entity.arrow.shoot
+    starting_ammo: 60
+
+  ap:
+    name: 穿甲彈
+    item: minecraft:iron_ingot
+    damage: 20
+    splash_radius: 0
+    # 完全無視硬度：鋼鐵、黑曜石也是一發一格
+    pierce: 1.0
+    spread_degrees: 1.6
+    cooldown_ticks: 20
+    projectile_speed: 3.4
+    gravity: 0.03
+    lifetime_ticks: 120
+    breaks_blocks: true
+    ammo_capacity: 60
+    trail_particle: minecraft:enchanted_hit
+    fire_sound: minecraft:item.crossbow.shoot
+
+  buck:
+    name: 散彈
+    item: minecraft:flint
+    damage: 11
+    splash_radius: 0
+    pierce: 0
+    pellets: 5
+    spread_degrees: 1.5
+    cooldown_ticks: 24
+    projectile_speed: 2.6
+    gravity: 0.05
+    lifetime_ticks: 40
+    breaks_blocks: true
+    ammo_capacity: 120
+    trail_particle: minecraft:crit
+    fire_sound: minecraft:entity.firework_rocket.blast
+
+  sniper:
+    name: 狙擊彈
+    item: minecraft:spectral_arrow
+    damage: 52
+    splash_radius: 0
+    pierce: 0.25
+    spread_degrees: 0
+    cooldown_ticks: 30
+    projectile_speed: 5.0
+    # 彈道平直：重力極低，背下來的落點不會隨距離大幅改變
+    gravity: 0.01
+    lifetime_ticks: 160
+    breaks_blocks: true
+    ammo_capacity: 40
+    trail_particle: minecraft:end_rod
+    fire_sound: minecraft:item.crossbow.shoot
+
+  he:
+    name: 高爆彈
+    item: minecraft:tnt
+    damage: 38
+    splash_radius: 2.5
+    pierce: 0
+    spread_degrees: 1.6
+    cooldown_ticks: 40
+    projectile_speed: 2.4
+    gravity: 0.06
+    lifetime_ticks: 120
+    breaks_blocks: true
+    ammo_capacity: 30
+    trail_particle: minecraft:flame
+    fire_sound: minecraft:entity.generic.explode
+
+  laser:
+    name: 雷射
+    item: minecraft:amethyst_shard
+    damage: 5
+    splash_radius: 0
+    pierce: 0
+    spread_degrees: 0.3
+    cooldown_ticks: 2
+    # 一 tick 飛 20 格 + 零重力 ＝ 幾乎是即時命中的直線光束
+    projectile_speed: 20.0
+    gravity: 0
+    lifetime_ticks: 6
+    auto: true
+    breaks_blocks: true
+    ammo_capacity: 40
+    trail_particle: minecraft:end_rod
+    fire_sound: minecraft:block.beacon.power_select
+
+  missile:
+    name: 導彈
+    item: minecraft:firework_rocket
+    damage: 180
+    splash_radius: 1.5
+    pierce: 0.5
+    spread_degrees: 0
+    cooldown_ticks: 80
+    projectile_speed: 2.0
+    gravity: 0
+    lifetime_ticks: 200
+    breaks_blocks: true
+    ammo_capacity: 30
+    trail_particle: minecraft:flame
+    fire_sound: minecraft:entity.firework_rocket.launch
+
+  drone:
+    name: 無人機
+    item: minecraft:ender_eye
+    damage: 70
+    splash_radius: 3.5
+    pierce: 0
+    spread_degrees: 0
+    cooldown_ticks: 120
+    projectile_speed: 1.4
+    gravity: 0
+    lifetime_ticks: 300
+    breaks_blocks: true
+    ammo_capacity: 6
+    trail_particle: minecraft:portal
+    fire_sound: minecraft:entity.generic.explode

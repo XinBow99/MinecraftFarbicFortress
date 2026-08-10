@@ -1,0 +1,70 @@
+# 發佈：打上 v 開頭的 tag（例如 v1.0.0）就建置並開一個 GitHub Release，把 jar 附上去。
+#
+# 用法：
+#   git tag v1.0.0 && git push origin v1.0.0
+# 或在 Actions 頁面手動觸發（workflow_dispatch），自己填版本號。
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本號（不含 v，例如 1.0.0）'
+        required: true
+
+permissions:
+  # 要建立 Release 就需要寫入權限，預設的唯讀 token 不夠
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+
+      - name: validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+          cache: gradle
+
+      - name: resolve version
+        id: version
+        # tag 觸發時版本號取自 tag（去掉開頭的 v），手動觸發時取自輸入。
+        # 版本號由這裡決定而不是 gradle.properties，發佈的 jar 檔名才不會跟 tag 對不上
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: build
+        run: ./gradlew build -Pmod_version=${{ steps.version.outputs.value }}
+
+      - name: collect release jar
+        id: jar
+        # build/libs 裡還有 -sources.jar，那不是給玩家裝的，要濾掉
+        run: |
+          mkdir -p release
+          find build/libs -name '*.jar' ! -name '*-sources.jar' -exec cp {} release/ \;
+          ls -l release/
+
+      - name: create github release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.version.outputs.value) }}
+          name: 要塞對戰 v${{ steps.version.outputs.value }}
+          generate_release_notes: true
+          files: release/*.jar

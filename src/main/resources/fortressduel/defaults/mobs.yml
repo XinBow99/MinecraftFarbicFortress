@@ -1,0 +1,111 @@
+# 要塞對戰 — 怪物
+#
+# 不註冊新的實體型別，而是拿一個原版實體當底（entity）再套上這裡的數值，
+# 所以加一種怪不用寫任何 Java，客戶端也不用裝 mod。
+# 血量沿用網頁版的 MONSTER_KINDS，賞金那一欄拿掉了（MC 版沒有經濟系統）。
+#
+# 欄位
+#   name           顯示名稱（會掛成實體的自訂名字）
+#   entity         拿哪個原版實體當底
+#   health         血量上限
+#   attack_damage  攻擊力
+#   movement_speed 移動速度（原版殭屍約 0.23）
+#   scale          體型倍率
+#   pack_min/max   一次降臨幾隻
+#   weight         抽籤權重，0 = 只能被突發事件指名叫出來
+#   attacks_core   會不會主動去打核心
+#   skills         掛在牠身上的技能 id（定義在 skills.yml）
+
+mobs:
+  swarm:
+    name: 蟲群
+    entity: minecraft:silverfish
+    health: 20
+    attack_damage: 2
+    movement_speed: 0.3
+    scale: 1.0
+    pack_min: 8
+    pack_max: 12
+    weight: 3.0
+    reward: 25
+    skills: [分身]
+
+  ground:
+    name: 土偶
+    entity: minecraft:zombie
+    health: 130
+    attack_damage: 4
+    movement_speed: 0.18
+    scale: 1.2
+    pack_min: 4
+    pack_max: 6
+    weight: 3.0
+    reward: 125
+    skills: [垂死分裂]
+
+  sky:
+    name: 浮空獸
+    entity: minecraft:phantom
+    health: 70
+    attack_damage: 3
+    movement_speed: 0.4
+    scale: 1.0
+    pack_min: 2
+    pack_max: 4
+    weight: 2.0
+    reward: 100
+
+  drift:
+    name: 漂鳥
+    entity: minecraft:bee
+    health: 130
+    attack_damage: 3
+    movement_speed: 0.45
+    scale: 1.5
+    pack_min: 3
+    pack_max: 5
+    weight: 2.0
+    reward: 250
+    skills: [閃現]
+
+  refugee:
+    name: 難民
+    entity: minecraft:pillager
+    health: 55
+    attack_damage: 5
+    movement_speed: 0.35
+    scale: 1.0
+    pack_min: 5
+    pack_max: 5
+    weight: 1.0
+    attacks_core: true
+    reward: 75
+
+  eclipse:
+    name: 蝕世之影
+    entity: minecraft:vex
+    health: 160
+    attack_damage: 6
+    movement_speed: 0.5
+    scale: 1.4
+    pack_min: 1
+    pack_max: 2
+    weight: 1.0
+    attacks_core: true
+    reward: 190
+    skills: [閃現, 再生]
+
+  boss:
+    name: 終界怪物
+    entity: minecraft:enderman
+    health: 450
+    attack_damage: 8
+    movement_speed: 0.3
+    scale: 1.6
+    pack_min: 1
+    pack_max: 1
+    # 0 = 不進一般抽籤，只由突發事件叫出來
+    weight: 0
+    # 對應網頁版終界怪物的順移移動、吃小怪長大、殘血狂暴
+    reward: 550
+    skills: [瞬移突進, 召喚蟲群, 垂死狂暴]
