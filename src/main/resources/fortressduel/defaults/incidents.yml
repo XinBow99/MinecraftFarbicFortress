@@ -11,12 +11,14 @@
 #                       message     只公告，沒有其他效果
 #                       spawn_mobs  在場中央生成 mobs 列出的怪
 #   mobs              action = spawn_mobs 時要生成哪幾種（對應 mobs.yml 的 id）
-#   duration_seconds  持續幾秒，0 = 瞬間發生完就結束
 #   music             發生時播放的音樂／音效 id，省略 = 不播
 #                     走 MUSIC 頻道（玩家的「音樂」音量滑桿管得到），在雙方各自的位置各播一次，
 #                     所以離得再遠也聽得到自己這場的事件音樂
 #   music_volume      音量倍率，預設 1.0
 #   music_pitch       音高倍率，預設 1.0（0.5 = 低一個八度，聽起來更沉）
+#
+# 尚未實作：持續型事件（低重力、銅牆鐵壁、火力全開那種「持續 N 秒」的效果）還沒有
+# 對應的機制，所以也沒有 duration 欄位。它們目前都是 action: message，只會公告。
 #
 # 想放自己的音樂：把 ogg 放進資源包的 assets/<namespace>/sounds/，在 sounds.json 註冊一個
 # 事件名，這裡就填那個 id。原版可用的例如：
@@ -89,21 +91,18 @@ incidents:
     description: 這段時間重力減半，彈道又高又遠。
     weight: 5
     action: message
-    duration_seconds: 30
 
   fortify:
     name: 銅牆鐵壁
     description: 這段時間所有方塊受到的傷害減半。
     weight: 5
     action: message
-    duration_seconds: 30
 
   rampage:
     name: 火力全開
     description: 這段時間所有武器傷害 ×1.5。
     weight: 5
     action: message
-    duration_seconds: 30
 
   plague:
     name: 鼠疫

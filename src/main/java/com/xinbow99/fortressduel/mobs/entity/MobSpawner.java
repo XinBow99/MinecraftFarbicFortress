@@ -66,10 +66,6 @@ public final class MobSpawner {
         return spawned;
     }
 
-    /** 不掛技能的版本。 */
-    public static List<Entity> spawnPack(ServerLevel level, MobDef def, BlockPos center, int spread) {
-        return spawnPack(level, def, center, spread, null);
-    }
 
     private static BlockPos scatter(ServerLevel level, BlockPos center, int spread) {
         int x = center.getX() + level.getRandom().nextInt(spread * 2 + 1) - spread;

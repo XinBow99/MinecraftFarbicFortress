@@ -27,8 +27,6 @@ public record MobDef(
         int packMax,
         /** 抽籤權重，越大越常出現；0 ＝ 只能被突發事件指名叫出來。 */
         double weight,
-        /** 會不會主動去打玩家的核心（網頁版的難民就是這種）。 */
-        boolean attacksCore,
         /** 打死牠給多少錢（對應網頁版的怪物賞金）。 */
         int reward,
         /** 掛在牠身上的技能 id（對應 skills.yml）。 */
@@ -55,7 +53,6 @@ public record MobDef(
                 min,
                 max,
                 YamlConfig.d(section, "weight", 1.0),
-                YamlConfig.bool(section, "attacks_core", false),
                 YamlConfig.i(section, "reward", 0),
                 skills);
     }

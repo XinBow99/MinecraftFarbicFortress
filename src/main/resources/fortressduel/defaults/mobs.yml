@@ -13,8 +13,10 @@
 #   scale          體型倍率
 #   pack_min/max   一次降臨幾隻
 #   weight         抽籤權重，0 = 只能被突發事件指名叫出來
-#   attacks_core   會不會主動去打核心
 #   skills         掛在牠身上的技能 id（定義在 skills.yml）
+#
+# 尚未實作：怪物還沒有「主動去打核心」的 AI，牠們走的是原版的目標選擇。
+# 等那個做出來才會有對應的設定欄位——現在沒有欄位，就是真的沒有這個行為。
 
 mobs:
   swarm:
@@ -78,7 +80,6 @@ mobs:
     pack_min: 5
     pack_max: 5
     weight: 1.0
-    attacks_core: true
     reward: 75
 
   eclipse:
@@ -91,7 +92,6 @@ mobs:
     pack_min: 1
     pack_max: 2
     weight: 1.0
-    attacks_core: true
     reward: 190
     skills: [閃現, 再生]
 

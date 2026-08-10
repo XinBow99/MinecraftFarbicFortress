@@ -72,7 +72,13 @@ public final class EconomyManager {
         player.sendSystemMessage(Msg.good("本輪收入 +$" + income + "（餘額 $" + wallet.balance() + "）"));
     }
 
-    /** 怪物死亡 → 賞金給打死牠的人。 */
+    /**
+     * 怪物死亡 → 賞金給打死牠的人。
+     *
+     * <p>只在攻擊階段算數。建造階段對手打不到你，站在中場砍怪是零風險的收入——那會讓
+     * 「該蓋牆還是該去搶怪」變成假選擇（當然去砍怪）。把賞金鎖在攻擊階段，搶怪才需要
+     * 承擔「這段時間對手正在打你的牆」的代價。
+     */
     private void onEntityDeath(LivingEntity entity, DamageSource source) {
         MobDef def = skills.definitionOf(entity);
         if (def == null || def.reward() <= 0) return;
@@ -81,6 +87,13 @@ public final class EconomyManager {
 
         Wallet wallet = wallets.get(killer.getUUID());
         if (wallet == null) return;
+
+        Duel duel = duels.duelOf(killer);
+        if (duel == null) return;
+        if (!duel.state().canAttack()) {
+            killer.sendSystemMessage(Msg.plain("建造階段不發賞金", ChatFormatting.GRAY), true);
+            return;
+        }
 
         wallet.earn(def.reward());
         killer.sendSystemMessage(Msg.plain("+$" + def.reward() + "  " + def.displayName()
@@ -100,7 +113,4 @@ public final class EconomyManager {
         return wallet == null ? 0 : wallet.balance();
     }
 
-    public boolean isInDuel(ServerPlayer player) {
-        return duels.duelOf(player) != null;
-    }
 }
