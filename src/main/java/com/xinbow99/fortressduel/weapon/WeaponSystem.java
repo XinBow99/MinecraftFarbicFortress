@@ -8,6 +8,7 @@ import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleOptions;
@@ -78,12 +79,48 @@ public final class WeaponSystem {
         UseItemCallback.EVENT.register((player, level, hand) ->
                 player instanceof ServerPlayer sp ? onUseItem(sp, hand) : InteractionResult.PASS);
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
-        DuelEvents.END.register((duel, result) -> {
-            blockDamage.remove(duel);
-            // 彈藥跟錢一樣不跨場：下一場從開場配給重新算起
-            pouches.remove(duel.north().playerId());
-            pouches.remove(duel.south().playerId());
-        });
+        PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> forgetBlock(pos));
+        DuelEvents.END.register((duel, result) -> cleanUp(duel));
+    }
+
+    /**
+     * 對戰收尾。
+     *
+     * <p>三件事都不能省：
+     * <ul>
+     *   <li><b>清掉還在飛的彈丸</b>——{@link Duel#finish} 是先發 END 事件、再還原地形。這時候空中
+     *       可能還有壽命長達 15 秒的無人機，不清掉的話它會在**已經還原好的**地形上炸出一個洞，
+     *       而快照已經用掉了，那個洞永遠不會被補回來。</li>
+     *   <li><b>清掉挖掘裂痕</b>——裂痕是送給客戶端的獨立狀態，不會因為方塊被還原就消失，
+     *       要明確送一次 −1 才會不見。</li>
+     *   <li>清掉累積傷害與彈藥。</li>
+     * </ul>
+     */
+    private void cleanUp(Duel duel) {
+        projectiles.removeIf(projectile -> projectile.duel == duel);
+
+        Map<BlockPos, Float> damaged = blockDamage.remove(duel);
+        if (damaged != null) {
+            ServerLevel level = duel.arena().level();
+            for (BlockPos pos : damaged.keySet()) {
+                level.destroyBlockProgress(progressId(pos), pos, -1);
+            }
+        }
+
+        // 彈藥跟錢一樣不跨場：下一場從開場配給重新算起
+        pouches.remove(duel.north().playerId());
+        pouches.remove(duel.south().playerId());
+    }
+
+    /**
+     * 玩家自己把方塊挖掉時，忘掉那一格的累積傷害。
+     *
+     * <p>不忘的話，補一塊新方塊上去會直接繼承舊的傷害——一面剛補好的牆一發就碎。
+     */
+    private void forgetBlock(BlockPos pos) {
+        for (Map<BlockPos, Float> damaged : blockDamage.values()) {
+            damaged.remove(pos);
+        }
     }
 
     // ---------- 開火 ----------
@@ -98,8 +135,10 @@ public final class WeaponSystem {
 
         Duel duel = duels.duelOf(player);
         if (duel == null) {
-            player.sendSystemMessage(Msg.warn("武器只在對戰中能用。"));
-            return InteractionResult.FAIL;
+            // 沒在對戰就完全不插手。武器綁的是鐵錠、燧石、TNT、煙火這類原版常見物品，
+            // 攔下來的話等於把整個伺服器的普通物品弄壞（煙火放不出去、終界之眼丟不了），
+            // 還會對每個右鍵的人洗一則訊息
+            return InteractionResult.PASS;
         }
         if (!duel.state().canAttack()) {
             player.sendSystemMessage(Msg.warn("建造階段不能開火。"));
@@ -157,9 +196,18 @@ public final class WeaponSystem {
         return config.weapons().byId(id);
     }
 
-    /** 玩家主手上拿的武器；不是武器就回 null。 */
+    /**
+     * 玩家手上拿的武器，主手優先；兩手都不是武器就回 null。
+     *
+     * <p>要看兩隻手：開火走的是 {@code getItemInHand(hand)}（兩手都能觸發），HUD 只看主手的話，
+     * 武器放副手就會變成「打得出去但看不到剩幾發」。
+     */
     public WeaponDef weaponInHand(ServerPlayer player) {
-        ItemStack stack = player.getMainHandItem();
+        WeaponDef main = weaponOf(player.getMainHandItem());
+        return main != null ? main : weaponOf(player.getOffhandItem());
+    }
+
+    private WeaponDef weaponOf(ItemStack stack) {
         if (stack.isEmpty()) return null;
         return config.weapons().byItem(BuiltInRegistries.ITEM.getKey(stack.getItem()));
     }
@@ -234,10 +282,13 @@ public final class WeaponSystem {
             return;
         }
 
+        // 把射手傳進去而不是 null：原版會自動把它排除在命中對象之外，而且不必再賭
+        // 「這個 API 收不收 null」——ClipContext 就是因為傳了 null 實體才讓伺服器崩過一次
+        ServerPlayer shooter = level.getServer().getPlayerList().getPlayer(projectile.shooterId);
         EntityHitResult entityHit = ProjectileUtil.getEntityHitResult(
-                level, null, from, to,
+                level, shooter, from, to,
                 new AABB(from, to).inflate(1.0),
-                entity -> entity.isAlive() && !entity.getUUID().equals(projectile.shooterId),
+                Entity::isAlive,
                 0.3f);
         if (entityHit != null) {
             onHit(projectile, level, entityHit.getLocation(), entityHit.getEntity(), null);
@@ -358,12 +409,12 @@ public final class WeaponSystem {
 
         if (accumulated < maxHp) {
             // 讓玩家看得到「這格快破了」——沿用原版的挖掘裂痕動畫
-            level.destroyBlockProgress(pos.hashCode(), pos, (int) (accumulated / maxHp * 10));
+            level.destroyBlockProgress(progressId(pos), pos, (int) (accumulated / maxHp * 10));
             return false;
         }
 
         damageMap.remove(pos);
-        level.destroyBlockProgress(pos.hashCode(), pos, -1);
+        level.destroyBlockProgress(progressId(pos), pos, -1);
         // false ＝ 不掉落物品：對戰中把牆炸開不該順便給對手一堆建材
         level.destroyBlock(pos, false, null, 512);
         return true;
@@ -377,6 +428,16 @@ public final class WeaponSystem {
     private float blockHp(float hardness, double pierce) {
         float base = Math.max(1f, hardness * (float) config.settings().blockHpPerHardness());
         return Math.max(1f, base * (float) (1.0 - pierce));
+    }
+
+    /**
+     * 挖掘裂痕的識別碼。原版拿它當「是誰在挖」，我們沒有對應的實體，所以直接用座標推。
+     *
+     * <p>重點是**同一格永遠得到同一個值**：更新進度與最後清除（送 −1）必須用同一個 id，
+     * 否則裂痕會清不掉。不同格之間偶爾撞號只會讓兩格的裂痕互相蓋掉，純視覺問題。
+     */
+    private static int progressId(BlockPos pos) {
+        return pos.hashCode();
     }
 
     private ParticleOptions particle(Identifier id) {
