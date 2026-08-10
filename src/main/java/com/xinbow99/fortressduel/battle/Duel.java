@@ -54,12 +54,24 @@ public final class Duel {
         }
     }
 
+    /** 單人練習模式裡那個靶子的名字，會出現在血條上。 */
+    public static final String DUMMY_NAME = "訓練假人";
+
     private final MinecraftServer server;
     private final Arena arena;
     private final DuelSettings settings;
     private final DuelServices services;
     private final Side north;
     private final Side south;
+    /**
+     * 靶子站的位置；null ＝ 這是正常的兩人對戰。
+     *
+     * <p>單人練習模式下南半場沒有真人，但競技場是就地框在「雙方位置」之間的、水晶也是長在
+     * 各自腳邊——所以得先替靶子釘一個座標下去，才有第二個點可以用。
+     */
+    private final BlockPos dummyPos;
+    /** 南半場是不是靶子。單人練習模式下沒有第二名玩家，很多「對雙方做某件事」的路徑要跳過。 */
+    private final boolean solo;
 
     private DuelState state = DuelState.PREPARE;
     /** 目前這個階段還剩幾 tick。倒數、建造、攻擊三個階段共用同一個計時器。 */
@@ -70,13 +82,15 @@ public final class Duel {
     private Result result;
 
     private Duel(MinecraftServer server, Arena arena, DuelSettings settings, DuelServices services,
-                 Side north, Side south) {
+                 Side north, Side south, BlockPos dummyPos) {
         this.server = server;
         this.arena = arena;
         this.settings = settings;
         this.services = services;
         this.north = north;
         this.south = south;
+        this.dummyPos = dummyPos;
+        this.solo = dummyPos != null;
         this.phaseTicks = settings.countdownSeconds() * 20;
     }
 
@@ -98,20 +112,58 @@ public final class Duel {
         Side south = new Side(target, settings.coreHp(),
                 ChatFormatting.RED, BossEvent.BossBarColor.RED);
 
-        Duel duel = new Duel(server, arena, settings, services, north, south);
+        Duel duel = new Duel(server, arena, settings, services, north, south, null);
 
         // 兩條血條雙方都要看得到——你必須知道自己還剩多少，也必須知道還要打幾下才贏
         for (ServerPlayer player : new ServerPlayer[]{challenger, target}) {
-            north.showTo(player);
-            south.showTo(player);
-            duel.giveStartingItems(player);
-            services.weapons().giveStartingAmmo(player);
+            duel.admit(player);
             player.sendSystemMessage(Msg.good("對戰開始！站好別亂跑——"
                     + settings.countdownSeconds() + " 秒後水晶會在你腳邊生成，那就是你要守的東西。"));
         }
 
         DuelEvents.START.invoker().onDuelStart(duel);
         return duel;
+    }
+
+    /**
+     * 單人練習模式：一名玩家對上一座不會還手的靶子。
+     *
+     * <p>存在的理由是測試——武器、怪物、技能、商店這些子系統全都要求「玩家正在對戰中」才會生效
+     * （見 {@code WeaponSystem.onUseItem}），所以沒有這個模式的話，改一個彈道參數都得開兩個
+     * 客戶端連線才看得到效果。
+     *
+     * <p>靶子那一方完全是靜態的：核心站在南半場、血條照常顯示，但沒有對應的線上玩家，
+     * 所以它不會移動、不會開火、不會拿收入。玩家照樣要熬過建造／攻擊的階段輪替，
+     * 把靶子的核心打到 0 就結束。
+     *
+     * <p>跟兩人對戰一樣不傳送人：場地就地框在玩家與 {@code dummyPos} 之間。
+     */
+    public static Duel startSolo(MinecraftServer server, ServerLevel level, BlockPos dummyPos,
+                                 DuelSettings settings, DuelServices services, ServerPlayer player) {
+        Arena arena = Arena.build(level, player.blockPosition(), dummyPos,
+                settings, services.buildings());
+
+        Side north = new Side(player, settings.coreHp(),
+                ChatFormatting.AQUA, BossEvent.BossBarColor.BLUE);
+        Side south = Side.dummy(DUMMY_NAME, settings.coreHp(),
+                ChatFormatting.RED, BossEvent.BossBarColor.RED);
+
+        Duel duel = new Duel(server, arena, settings, services, north, south, dummyPos);
+        duel.admit(player);
+        player.sendSystemMessage(Msg.good("單人練習開始！對手是不會還手的「" + DUMMY_NAME
+                + "」，站好別亂跑——" + settings.countdownSeconds()
+                + " 秒後雙方的水晶會生成，打掉它的核心就結束。想提前收場用 /duel forfeit。"));
+
+        DuelEvents.START.invoker().onDuelStart(duel);
+        return duel;
+    }
+
+    /** 進場手續：兩條血條都給他看、發開場物資與彈藥。 */
+    private void admit(ServerPlayer player) {
+        north.showTo(player);
+        south.showTo(player);
+        giveStartingItems(player);
+        services.weapons().giveStartingAmmo(player);
     }
 
     /**
@@ -149,6 +201,19 @@ public final class Duel {
         ticksElapsed++;
 
         ServerPlayer a = playerOf(north);
+
+        // 單人練習：南半場是靶子，本來就沒有對應的線上玩家，不能套用離線判負
+        if (solo) {
+            if (a == null) {
+                finish(Result.aborted());
+                return;
+            }
+            tickPhase(new ServerPlayer[]{a});
+            keepInside(a, north);
+            DuelEvents.TICK.invoker().onDuelTick(this);
+            return;
+        }
+
         ServerPlayer b = playerOf(south);
 
         // 有人離線就直接判給還在的那一方；兩個都不在就中止
@@ -161,7 +226,7 @@ public final class Duel {
             return;
         }
 
-        tickPhase(a, b);
+        tickPhase(new ServerPlayer[]{a, b});
 
         keepInside(a, north);
         keepInside(b, south);
@@ -175,17 +240,16 @@ public final class Duel {
      * <p>剩餘時間每一 tick 都寫進動作列，因為「還剩幾秒可以蓋」是玩家每一秒都要知道的事，
      * 塞在聊天欄會洗版。
      */
-    private void tickPhase(ServerPlayer a, ServerPlayer b) {
+    private void tickPhase(ServerPlayer[] players) {
         phaseTicks--;
-        ServerPlayer[] both = {a, b};
 
         if (phaseTicks > 0) {
-            for (ServerPlayer player : both) {
+            for (ServerPlayer player : players) {
                 player.sendSystemMessage(hud(player), true);
             }
             // 最後五秒每秒響一聲，讓人來得及放下手上的方塊
             if (phaseTicks <= 100 && phaseTicks % 20 == 0) {
-                for (ServerPlayer player : both) {
+                for (ServerPlayer player : players) {
                     beep(player, SoundEvents.NOTE_BLOCK_HAT.value(), 1f);
                 }
             }
@@ -194,11 +258,11 @@ public final class Duel {
 
         switch (state) {
             case PREPARE -> {
-                spawnCores(a, b);
-                enterBuild(both);
+                spawnCores(players);
+                enterBuild(players);
             }
-            case COMBAT -> enterBuild(both);
-            case BUILD -> enterCombat(both);
+            case COMBAT -> enterBuild(players);
+            case BUILD -> enterCombat(players);
             default -> { /* ENDED：不再換階段 */ }
         }
     }
@@ -208,13 +272,17 @@ public final class Duel {
      *
      * <p>位置是這一刻才決定的，不是開場那一刻——所以準備階段的十秒是玩家的：想把水晶擺在
      * 高地上、擺進山洞裡，就走過去站好。這也是為什麼開場不傳送人。
+     *
+     * @param players 場上的真人，依 north、south 的順序。單人練習模式只有一個，
+     *                南半場的位置改用開場時替靶子釘下的 {@link #dummyPos}
      */
-    private void spawnCores(ServerPlayer a, ServerPlayer b) {
-        arena.placeCores(a.blockPosition(), b.blockPosition(), settings, services.buildings());
+    private void spawnCores(ServerPlayer[] players) {
+        BlockPos posSouth = solo ? dummyPos : players[1].blockPosition();
+        arena.placeCores(players[0].blockPosition(), posSouth, settings, services.buildings());
         north.setCore(arena.coreA());
         south.setCore(arena.coreB());
 
-        for (ServerPlayer player : new ServerPlayer[]{a, b}) {
+        for (ServerPlayer player : players) {
             player.sendSystemMessage(Msg.good("水晶已生成！打掉對方的水晶就獲勝——順帶一提，"
                     + "軍火商也會被打死，他死了你就買不到東西。"));
             beep(player, SoundEvents.BEACON_ACTIVATE, 1f);
@@ -399,6 +467,11 @@ public final class Duel {
 
     public int round() {
         return round;
+    }
+
+    /** 是不是單人練習模式（南半場是靶子，不是真人）。 */
+    public boolean isSolo() {
+        return solo;
     }
 
     public boolean involves(UUID playerId) {

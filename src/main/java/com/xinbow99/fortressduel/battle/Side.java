@@ -22,6 +22,7 @@ public final class Side {
 
     private final UUID playerId;
     private final String playerName;
+    private final boolean dummy;
     /** 這一方的核心。準備階段結束才長出來，在那之前是 null。 */
     private BlockPos core;
 
@@ -36,14 +37,36 @@ public final class Side {
     private float hp;
 
     public Side(ServerPlayer player, float maxHp, ChatFormatting color, BossEvent.BossBarColor barColor) {
-        this.playerId = player.getUUID();
-        this.playerName = player.getGameProfile().name();
+        this(player.getUUID(), player.getGameProfile().name(), false,
+                player.level().dimension(), player.position(), player.getYRot(), player.getXRot(),
+                maxHp, color, barColor);
+    }
 
+    /**
+     * 一個沒有真人的靶子，給單人練習模式用。
+     *
+     * <p>UUID 隨機生成、每場都不一樣，所以它永遠不會撞到任何真實玩家的 UUID，也就不會被
+     * {@code duelsByPlayer}、錢包、彈藥袋這些以 UUID 為鍵的表當成玩家。{@code returnLevel}／
+     * {@code returnPos} 是佔位用的——沒有對應的線上玩家，{@code teleportOut} 會先一步跳過它。
+     */
+    public static Side dummy(String name, float maxHp,
+                             ChatFormatting color, BossEvent.BossBarColor barColor) {
+        return new Side(UUID.randomUUID(), name, true,
+                Level.OVERWORLD, Vec3.ZERO, 0f, 0f,
+                maxHp, color, barColor);
+    }
 
-        this.returnLevel = player.level().dimension();
-        this.returnPos = player.position();
-        this.returnYaw = player.getYRot();
-        this.returnPitch = player.getXRot();
+    private Side(UUID playerId, String playerName, boolean dummy,
+                 ResourceKey<Level> returnLevel, Vec3 returnPos, float returnYaw, float returnPitch,
+                 float maxHp, ChatFormatting color, BossEvent.BossBarColor barColor) {
+        this.playerId = playerId;
+        this.playerName = playerName;
+        this.dummy = dummy;
+
+        this.returnLevel = returnLevel;
+        this.returnPos = returnPos;
+        this.returnYaw = returnYaw;
+        this.returnPitch = returnPitch;
 
         this.maxHp = maxHp;
         this.hp = maxHp;
@@ -112,6 +135,11 @@ public final class Side {
 
     public void setCore(BlockPos core) {
         this.core = core;
+    }
+
+    /** 這一方是不是靶子（單人練習模式的對手）。 */
+    public boolean isDummy() {
+        return dummy;
     }
 
     public BlockPos core() {
