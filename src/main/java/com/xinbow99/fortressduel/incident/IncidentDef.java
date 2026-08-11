@@ -19,10 +19,22 @@ public record IncidentDef(
         String description,
         /** 抽中這個事件的相對權重。 */
         double weight,
-        /** 效果種類：spawn_mobs / message。 */
+        /** 效果種類：spawn_mobs / meteor / message。 */
         String action,
         /** action ＝ spawn_mobs 時要生成的怪物 id（對應 mobs.yml）。 */
         List<String> mobs,
+
+        // ---- action ＝ meteor 專用 ----
+        /** 每一方的頭上各落幾顆。 */
+        int meteorCount,
+        /** 從熊貓圈上方幾格落下。 */
+        int meteorHeight,
+        /** 以熊貓圈為中心，落點散佈幾格。 */
+        int meteorSpread,
+        /** 引信長度（tick）。要夠長才能讓它在半空中就開始掉、落地附近才爆。 */
+        int meteorFuseTicks,
+        /** 引信的隨機浮動（tick）。讓爆炸錯開成一陣雨，而不是同一瞬間全炸。 */
+        int meteorFuseJitter,
         /** 發生時播放的音樂／音效；null ＝ 不播。 */
         Identifier music,
         double musicVolume,
@@ -44,6 +56,11 @@ public record IncidentDef(
                 YamlConfig.d(section, "weight", 1.0),
                 YamlConfig.str(section, "action", "message"),
                 mobs,
+                Math.max(1, YamlConfig.i(section, "meteor_count", 10)),
+                Math.max(1, YamlConfig.i(section, "meteor_height", 26)),
+                Math.max(0, YamlConfig.i(section, "meteor_spread", 8)),
+                Math.max(1, YamlConfig.i(section, "meteor_fuse_ticks", 45)),
+                Math.max(0, YamlConfig.i(section, "meteor_fuse_jitter", 25)),
                 music.isBlank() ? null : Identifier.parse(music),
                 YamlConfig.d(section, "music_volume", 1.0),
                 YamlConfig.d(section, "music_pitch", 1.0));

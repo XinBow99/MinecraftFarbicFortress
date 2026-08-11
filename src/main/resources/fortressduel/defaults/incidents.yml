@@ -10,7 +10,13 @@
 #   action            效果種類：
 #                       message     只公告，沒有其他效果
 #                       spawn_mobs  在場中央生成 mobs 列出的怪
+#                       meteor      在雙方的熊貓圈上方落下一批已點燃的 TNT
 #   mobs              action = spawn_mobs 時要生成哪幾種（對應 mobs.yml 的 id）
+#   meteor_count      action = meteor 時，每一方的頭上各落幾顆
+#   meteor_height     從熊貓圈上方幾格落下
+#   meteor_spread     以熊貓圈為中心，落點散佈幾格
+#   meteor_fuse_ticks 引信長度。太短會在半空中就炸掉，太長會落地後躺一陣子才爆
+#   meteor_fuse_jitter 引信的隨機浮動。0 = 全部同時爆（一聲巨響，不是一陣雨）
 #   music             發生時播放的音樂／音效 id，省略 = 不播
 #                     走 MUSIC 頻道（玩家的「音樂」音量滑桿管得到），在雙方各自的位置各播一次，
 #                     所以離得再遠也聽得到自己這場的事件音樂
@@ -78,13 +84,27 @@ incidents:
     mobs: [boss]
     music: minecraft:entity.wither.spawn
 
-  # ---- 以下的效果還沒實作，目前只會公告（action: message）----
-
+  # 天災：不站在任何一邊，兩個要塞一起挨轟。所以它改變的是雙方的防禦狀態，
+  # 而不是誰領先——這也是為什麼它打的是雙方的熊貓圈，不是中場。
+  #
+  # 炸不到熊貓：TNT 沒有 owner，而熊貓只吃對手玩家的攻擊。天災拆的是你的牆，
+  # 不該直接決定勝負。
+  #
+  # 黑曜石的爆炸抗性擋得住 TNT、石頭擋不住，所以「花錢蓋好料」在天災面前真的有差。
   meteor:
     name: 隕石雨
-    description: 隕石襲擊雙方要塞。
+    description: 隕石襲擊雙方要塞，找掩護！
     weight: 5
-    action: message
+    action: meteor
+    meteor_count: 10
+    meteor_height: 26
+    meteor_spread: 8
+    meteor_fuse_ticks: 45
+    meteor_fuse_jitter: 25
+    music: minecraft:entity.generic.explode
+    music_pitch: 0.5
+
+  # ---- 以下的效果還沒實作，目前只會公告（action: message）----
 
   low_gravity:
     name: 低重力

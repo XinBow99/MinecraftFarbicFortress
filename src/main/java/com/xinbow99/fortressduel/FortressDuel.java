@@ -60,8 +60,9 @@ public class FortressDuel implements ModInitializer {
         economy.register();
         weapons.register();
         npcs.register();
-        new IncidentScheduler(config, skills).register();
-        new DuelCommands(duels, config, skills, weapons).register();
+        IncidentScheduler incidents = new IncidentScheduler(config, skills);
+        incidents.register();
+        new DuelCommands(duels, config, skills, weapons, incidents).register();
 
         LOGGER.info("Fortress Duel loaded. Config directory: {}", config.configDir());
     }
