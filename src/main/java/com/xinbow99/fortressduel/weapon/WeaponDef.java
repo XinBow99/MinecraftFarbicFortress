@@ -23,9 +23,11 @@ public record WeaponDef(
         double splashRadius,
         /** 穿甲：0~1。1 ＝ 完全無視方塊硬度。 */
         double pierce,
+        /** 命中生物時推開多遠（格/tick 的速度增量）。0 ＝ 不推。 */
+        double knockback,
         /** 一次擊發幾顆（散彈用）。 */
         int pellets,
-        /** 角度散佈（±度）。 */
+        /** 散佈：以視線為軸的圓錐半頂角（度）。0 ＝ 完全不散。 */
         double spreadDegrees,
         /** 裝填間隔（tick）。 */
         int cooldownTicks,
@@ -53,14 +55,21 @@ public record WeaponDef(
         Identifier fireSound
 ) {
 
+    /** 沒寫 knockback 時，用傷害推一個。乘數挑成讓導彈（180）大約推 1.4 格/tick。 */
+    private static final double KNOCKBACK_PER_DAMAGE = 0.008;
+
     public static WeaponDef from(String id, Map<String, Object> section) {
+        double damage = YamlConfig.d(section, "damage", 1.0);
         return new WeaponDef(
                 id,
                 YamlConfig.str(section, "name", id),
                 Identifier.parse(YamlConfig.str(section, "item", "minecraft:stick")),
-                YamlConfig.d(section, "damage", 1.0),
+                damage,
                 YamlConfig.d(section, "splash_radius", 0.0),
                 Math.clamp(YamlConfig.d(section, "pierce", 0.0), 0.0, 1.0),
+                // 預設值跟著傷害走，這樣既有的 weapons.yml（沒有這個欄位）也會有力道感——
+                // 設定檔是整份複製出去的、不會事後補鍵，預設 0 等於要玩家刪檔才吃得到這個功能
+                Math.max(0, YamlConfig.d(section, "knockback", damage * KNOCKBACK_PER_DAMAGE)),
                 Math.max(1, YamlConfig.i(section, "pellets", 1)),
                 YamlConfig.d(section, "spread_degrees", 0.0),
                 Math.max(1, YamlConfig.i(section, "cooldown_ticks", 20)),
