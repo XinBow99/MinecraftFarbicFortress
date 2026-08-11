@@ -206,7 +206,7 @@ public final class Duel {
         south.showTo(player);
         applyDuelGameMode(player);
         giveStartingItems(player);
-        services.weapons().giveStartingKit(player);
+        services.weapons().giveStartingAmmo(player);
     }
 
     /**
@@ -549,8 +549,6 @@ public final class Duel {
         for (ServerPlayer player : players) {
             player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 建造階段開始（"
                     + settings.buildSeconds() + " 秒）：可以蓋，不能攻擊。"));
-            // 弓掉了就補一把。沒有弓等於這一場再也打不出任何東西，不該是個無法挽回的意外
-            services.weapons().ensureBow(player);
             // 建造階段才發收入：這時你才有機會把錢花掉（蓋牆、去商店補彈藥）。
             // 第一輪不發——開局資金是 starting_money，第一輪就加一份收入的話，
             // 那個設定值講的就不是玩家實際開局拿到的錢了

@@ -202,29 +202,12 @@ public final class WeaponSystem {
     }
 
     /**
-     * 確保這個人手上有一把弓，沒有就補一把。
+     * 開場配給：把每種武器的 {@code starting_ammo} 當實物發下去。
      *
-     * <p><b>弓由程式保證，不能交給設定檔。</b>{@code YamlConfig.load} 只在檔案不存在時複製
-     * 一份預設出去、**不會**替既有的檔案補上新的鍵，所以把弓放進 {@code starting_items} 的話，
-     * 任何一個已經跑過一次的伺服器都永遠拿不到它——而沒有弓就等於整個武器系統是死的。
-     * 泥土、牽繩那種「配多少」的調校可以交給設定檔，「能不能開火」不行。
-     *
-     * <p>每個建造階段都會再檢查一次，所以弓掉進岩漿、被 {@code /clear} 清掉之類的意外
-     * 最多影響一個階段，不會讓整場打不下去。
-     *
-     * <p>不必擔心耐久：原版的耐久扣減寫在 {@code BowItem.releaseUsing} 裡，而
-     * {@code BowItemMixin} 在 HEAD 就把它整個取消掉了，所以這把弓根本不會損耗。
+     * <p>弓不在這裡發——它跟泥土、牽繩一樣是 {@code battle.starting_items} 的一項，
+     * 開場物資該由設定檔決定，程式不另外偷塞。
      */
-    public void ensureBow(ServerPlayer player) {
-        for (ItemStack stack : player.getInventory()) {
-            if (stack.is(Items.BOW)) return;
-        }
-        player.getInventory().placeItemBackInInventory(WeaponItems.createBow());
-    }
-
-    /** 開場配給：一把弓 ＋ 每種武器的 {@code starting_ammo} 實物。 */
-    public void giveStartingKit(ServerPlayer player) {
-        ensureBow(player);
+    public void giveStartingAmmo(ServerPlayer player) {
         for (WeaponDef weapon : config.weapons().all()) {
             if (weapon.startingAmmo() > 0) {
                 player.getInventory().placeItemBackInInventory(
