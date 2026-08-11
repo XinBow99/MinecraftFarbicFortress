@@ -570,6 +570,14 @@ public final class Duel {
 
         line.append(Msg.plain("   $" + services.economy().balanceOf(player), ChatFormatting.GOLD));
 
+        // 拉弓時把彈藥換成蓄力條——那一刻玩家要看的是力道，而且這條反映的是**我們算的**
+        // 力道而不是客戶端的動畫進度，曲線非線性時兩者不一樣
+        String charge = services.weapons().chargeDisplay(player);
+        if (charge != null) {
+            line.append(Msg.plain("   " + charge, ChatFormatting.YELLOW));
+            return line;
+        }
+
         String ammo = services.weapons().ammoDisplay(player);
         if (ammo != null) {
             line.append(Msg.plain("   " + ammo, ChatFormatting.AQUA));

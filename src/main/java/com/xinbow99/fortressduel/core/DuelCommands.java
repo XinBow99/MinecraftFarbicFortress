@@ -11,6 +11,7 @@ import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
+import com.xinbow99.fortressduel.weapon.WeaponItems;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
@@ -114,14 +115,11 @@ public final class DuelCommands {
             return 0;
         }
 
-        Item item = BuiltInRegistries.ITEM.getValue(weapon.item());
         ServerPlayer player = ctx.getSource().getPlayerOrException();
-        ItemStack stack = new ItemStack(item);
-        stack.set(DataComponents.CUSTOM_NAME, Msg.plain(weapon.displayName(), ChatFormatting.AQUA));
-        player.getInventory().placeItemBackInInventory(stack);
+        player.getInventory().placeItemBackInInventory(WeaponItems.create(weapon));
 
-        ctx.getSource().sendSuccess(() -> Msg.good("給了你「" + weapon.displayName() + "」（"
-                + weapon.item() + "），右鍵開火。"), false);
+        ctx.getSource().sendSuccess(() -> Msg.good("給了你「" + weapon.displayName() + "」"
+                + (weapon.bowLaunched() ? "，按住右鍵拉弓、放開發射。" : "，右鍵開火。")), false);
         return 1;
     }
 

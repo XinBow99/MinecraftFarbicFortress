@@ -3,6 +3,7 @@ package com.xinbow99.fortressduel.weapon;
 import com.xinbow99.fortressduel.util.YamlConfig;
 import net.minecraft.resources.Identifier;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -25,6 +26,23 @@ public record WeaponDef(
         double pierce,
         /** 命中生物時推開多遠（格/tick 的速度增量）。0 ＝ 不推。 */
         double knockback,
+        /**
+         * 怎麼擊發。{@code false} ＝ 右鍵即發（預設）、{@code true} ＝ 拿弓拉滿再放。
+         *
+         * <p>連射武器不能設 true：滿弓要 20 tick，而機槍的 cooldown 是 3、雷射是 2，
+         * 它們的設計就是連續潑灑，套上蓄力等於廢掉。
+         */
+        boolean bowLaunched,
+        /** 力道曲線。只有 {@code bowLaunched} 時有意義。 */
+        ChargeCurve chargeCurve,
+        /** 低於這個力道就不發射、也不耗彈（放空弓）。 */
+        double chargeMinDraw,
+        /** 力道要不要影響初速。 */
+        boolean chargeAffectsSpeed,
+        /** 力道要不要影響傷害。 */
+        boolean chargeAffectsDamage,
+        /** 力道要不要影響散佈（滿弓最準）。 */
+        boolean chargeAffectsSpread,
         /** 一次擊發幾顆（散彈用）。 */
         int pellets,
         /** 散佈：以視線為軸的圓錐半頂角（度）。0 ＝ 完全不散。 */
@@ -72,6 +90,15 @@ public record WeaponDef(
     public static WeaponDef from(String id, Map<String, Object> section) {
         double damage = YamlConfig.d(section, "damage", 1.0);
         double spread = YamlConfig.d(section, "spread_degrees", 0.0);
+
+        Map<String, Object> charge = section.get("charge") instanceof Map<?, ?> map
+                ? castCharge(map) : Map.of();
+        // 沒寫 affects 就當成「只影響初速」——那是拋物線武器最直覺的一條，
+        // 而且不會意外把傷害也變成蓄力的函數（那會讓平衡整個位移）
+        List<String> affects = section.get("charge") instanceof Map<?, ?> map
+                && map.get("affects") instanceof List<?> list
+                ? list.stream().map(String::valueOf).toList()
+                : List.of("speed");
         return new WeaponDef(
                 id,
                 YamlConfig.str(section, "name", id),
@@ -82,6 +109,12 @@ public record WeaponDef(
                 // 預設值跟著傷害走，這樣既有的 weapons.yml（沒有這個欄位）也會有力道感——
                 // 設定檔是整份複製出去的、不會事後補鍵，預設 0 等於要玩家刪檔才吃得到這個功能
                 Math.max(0, YamlConfig.d(section, "knockback", damage * KNOCKBACK_PER_DAMAGE)),
+                "bow".equalsIgnoreCase(YamlConfig.str(section, "launcher", "instant")),
+                ChargeCurve.parse(charge.get("curve"), id),
+                Math.clamp(YamlConfig.d(charge, "min_draw", 0.15), 0.0, 1.0),
+                affects.contains("speed"),
+                affects.contains("damage"),
+                affects.contains("spread"),
                 Math.max(1, YamlConfig.i(section, "pellets", 1)),
                 spread,
                 // 跟 knockback 同樣的理由：既有的設定檔沒有這些鍵，預設 0 等於要玩家刪檔
@@ -101,6 +134,11 @@ public record WeaponDef(
                 Math.max(0, YamlConfig.i(section, "starting_ammo", 0)),
                 Identifier.parse(YamlConfig.str(section, "trail_particle", "minecraft:crit")),
                 Identifier.parse(YamlConfig.str(section, "fire_sound", "minecraft:entity.generic.explode")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castCharge(Map<?, ?> map) {
+        return (Map<String, Object>) map;
     }
 
     /**

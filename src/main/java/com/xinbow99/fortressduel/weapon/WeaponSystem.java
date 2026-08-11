@@ -61,6 +61,18 @@ import java.util.UUID;
  */
 public final class WeaponSystem {
 
+    /**
+     * 滿弓要幾 tick。**這是客戶端寫死的，改了只會讓動畫跟數值對不起來**——拉弓動畫由客戶端
+     * 自己數 tick 播放，伺服器改不到，而客戶端是純原版。
+     */
+    private static final int FULL_DRAW_TICKS = 20;
+    /** 動作列上那條蓄力條有幾格。 */
+    private static final int CHARGE_BAR_SEGMENTS = 5;
+    /** 空弓的初速下限（滿速的幾成）。給 0 的話空弓的彈丸會原地落下，看起來像卡住。 */
+    private static final double CHARGE_SPEED_FLOOR = 0.35;
+    /** 空弓的傷害下限（滿傷的幾成）。 */
+    private static final double CHARGE_DAMAGE_FLOOR = 0.3;
+
     private final ConfigManager config;
     private final DuelManager duels;
 
@@ -85,6 +97,8 @@ public final class WeaponSystem {
     }
 
     public void register() {
+        // Mixin 織進原版類別，沒有建構子可以注入，只能走這道靜態橋
+        BowHooks.install(this);
         UseItemCallback.EVENT.register((player, level, hand) ->
                 player instanceof ServerPlayer sp ? onUseItem(sp, hand) : InteractionResult.PASS);
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
@@ -148,9 +162,10 @@ public final class WeaponSystem {
         ItemStack stack = player.getItemInHand(hand);
         if (stack.isEmpty()) return InteractionResult.PASS;
 
-        Identifier itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        WeaponDef weapon = config.weapons().byItem(itemId);
+        WeaponDef weapon = byStack(stack);
         if (weapon == null) return InteractionResult.PASS;
+        // 蓄力武器不在這裡開火：右鍵只是開始拉弓，發射在放開的時候（BowItemMixin）
+        if (weapon.bowLaunched()) return InteractionResult.PASS;
 
         Duel duel = duels.duelOf(player);
         if (duel == null) {
@@ -171,17 +186,21 @@ public final class WeaponSystem {
 
         AmmoPouch pouch = pouchOf(player);
         if (!pouch.consume(weapon.id(), weapon.ammoPerShot())) {
-            player.sendSystemMessage(Msg.plain("沒有子彈了！去武器商店補充", ChatFormatting.RED), true);
-            player.level().playSound(null, player.blockPosition(),
-                    SoundEvents.LEVER_CLICK, SoundSource.PLAYERS, 0.7f, 2.0f);
-            // 空槍也要進冷卻，不然按住不放會每 tick 洗一次「沒有子彈」
-            playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
+            outOfAmmo(player, weapon, playerCooldowns);
             return InteractionResult.FAIL;
         }
         playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
 
-        fire(player, duel, weapon);
+        fire(player, duel, weapon, 1.0);
         return InteractionResult.SUCCESS;
+    }
+
+    /** 沒子彈的回饋。空槍也要進冷卻，不然按住不放會每 tick 洗一次「沒有子彈」。 */
+    private void outOfAmmo(ServerPlayer player, WeaponDef weapon, Map<String, Integer> playerCooldowns) {
+        player.sendSystemMessage(Msg.plain("沒有子彈了！去武器商店補充", ChatFormatting.RED), true);
+        player.level().playSound(null, player.blockPosition(),
+                SoundEvents.LEVER_CLICK, SoundSource.PLAYERS, 0.7f, 2.0f);
+        playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
     }
 
     /** 這名玩家的彈藥袋，沒有就開一個。 */
@@ -252,12 +271,98 @@ public final class WeaponSystem {
         return main != null ? main : weaponOf(player.getOffhandItem());
     }
 
-    private WeaponDef weaponOf(ItemStack stack) {
+    /**
+     * 這個物品堆疊是哪把武器。
+     *
+     * <p>先看自訂標記再退回物品型別：蓄力武器全都是 {@code minecraft:bow}，光看型別分不出來
+     * （見 {@link WeaponItems}）。舊的即發武器沒有標記也仍然認得，所以已經在玩家背包裡的東西
+     * 不會因為這個改動失效。
+     */
+    public WeaponDef byStack(ItemStack stack) {
         if (stack.isEmpty()) return null;
+
+        String tagged = WeaponItems.weaponIdOf(stack);
+        if (tagged != null) {
+            WeaponDef weapon = config.weapons().byId(tagged);
+            if (weapon != null) return weapon;
+        }
         return config.weapons().byItem(BuiltInRegistries.ITEM.getKey(stack.getItem()));
     }
 
-    private void fire(ServerPlayer player, Duel duel, WeaponDef weapon) {
+    private WeaponDef weaponOf(ItemStack stack) {
+        return byStack(stack);
+    }
+
+    /**
+     * 放開弓 → 依蓄力程度開一發。
+     *
+     * <p>由 {@code BowItemMixin} 經 {@link BowHooks} 呼叫。這裡是唯一決定「拉多久 ＝ 多少力道」
+     * 的地方，原版的 {@code getPowerForTime} 完全不參與——曲線是逐武器的資料（見 {@link ChargeCurve}）。
+     *
+     * @param usedTicks 拉了幾 tick
+     * @return true ＝ 這一發由我們處理掉了
+     */
+    public boolean releaseCharged(ServerPlayer player, ItemStack stack, int usedTicks) {
+        WeaponDef weapon = byStack(stack);
+        if (weapon == null || !weapon.bowLaunched()) return false;
+
+        Duel duel = duels.duelOf(player);
+        if (duel == null) return true;   // 沒在對戰：吃掉這一發，但什麼都不做
+        if (!duel.state().canAttack()) {
+            player.sendSystemMessage(Msg.warn("建造階段不能開火。"));
+            return true;
+        }
+
+        // 滿弓固定 20 tick，對齊客戶端的拉弓動畫（見 ChargeCurve 的類別註解）
+        double power = weapon.chargeCurve().power(usedTicks / (double) FULL_DRAW_TICKS);
+        if (power < weapon.chargeMinDraw()) {
+            // 放空弓不耗彈也不進冷卻——那只是手滑，不該被罰
+            player.sendSystemMessage(Msg.plain("拉得不夠，這一發沒射出去", ChatFormatting.GRAY), true);
+            return true;
+        }
+
+        Map<String, Integer> playerCooldowns = cooldowns.computeIfAbsent(player.getUUID(), k -> new HashMap<>());
+        if (playerCooldowns.containsKey(weapon.id())) return true;
+
+        if (!pouchOf(player).consume(weapon.id(), weapon.ammoPerShot())) {
+            outOfAmmo(player, weapon, playerCooldowns);
+            return true;
+        }
+        playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
+
+        fire(player, duel, weapon, power);
+        return true;
+    }
+
+    /**
+     * 目前拉弓拉到哪裡，寫成 {@code ▮▮▮▯▯ 62%}；沒在拉就回 null。
+     *
+     * <p>反映的是**我們算的**力道，不是客戶端的動畫進度——曲線非線性時兩者不一樣，
+     * 而玩家該看到的是前者。
+     */
+    public String chargeDisplay(ServerPlayer player) {
+        if (!player.isUsingItem()) return null;
+
+        WeaponDef weapon = byStack(player.getUseItem());
+        if (weapon == null || !weapon.bowLaunched()) return null;
+
+        double power = weapon.chargeCurve().power(player.getTicksUsingItem() / (double) FULL_DRAW_TICKS);
+        int filled = (int) Math.round(power * CHARGE_BAR_SEGMENTS);
+
+        StringBuilder bar = new StringBuilder();
+        for (int i = 0; i < CHARGE_BAR_SEGMENTS; i++) {
+            bar.append(i < filled ? '▮' : '▯');
+        }
+        return bar + " " + Math.round(power * 100) + "%";
+    }
+
+    /**
+     * 開一發。
+     *
+     * @param power 蓄力程度 0~1。即發武器永遠傳 1.0——它們沒有蓄力這條軸，
+     *              所以走的是完全相同的路徑、只是力道恆滿
+     */
+    private void fire(ServerPlayer player, Duel duel, WeaponDef weapon, double power) {
         ServerLevel level = player.level();
         Vec3 origin = player.getEyePosition();
         Vec3 look = player.getLookAngle();
@@ -266,10 +371,23 @@ public final class WeaponSystem {
         double spread = weapon.spreadDegrees() + recoilOf(player, weapon);
         addRecoil(player, weapon);
 
+        double speed = weapon.projectileSpeed();
+        if (weapon.chargeAffectsSpeed()) {
+            // 下限給滿速的三分之一：空弓也該飛得出去，只是又慢又短
+            speed *= CHARGE_SPEED_FLOOR + (1 - CHARGE_SPEED_FLOOR) * power;
+        }
+        if (weapon.chargeAffectsSpread()) {
+            // 滿弓最準：力道越低散得越開，額外散佈最多再加一倍基礎值
+            spread += weapon.spreadDegrees() * (1 - power);
+        }
+        double damageScale = weapon.chargeAffectsDamage()
+                ? CHARGE_DAMAGE_FLOOR + (1 - CHARGE_DAMAGE_FLOOR) * power
+                : 1.0;
+
         for (int i = 0; i < weapon.pellets(); i++) {
             Vec3 direction = applySpread(level, look, spread);
             projectiles.add(new Projectile(weapon, duel, player, origin,
-                    direction.scale(weapon.projectileSpeed())));
+                    direction.scale(speed), damageScale));
         }
 
         SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(weapon.fireSound());
@@ -437,9 +555,9 @@ public final class WeaponSystem {
 
         if (directEntity instanceof LivingEntity living) {
             // 直擊：順著彈丸飛的方向推
-            damageEntity(projectile, level, living, weapon.damage(), projectile.velocity, 1.0);
+            damageEntity(projectile, level, living, projectile.damage(), projectile.velocity, 1.0);
         } else if (directBlock != null) {
-            damageBlock(projectile, level, directBlock, weapon.damageVsBlock());
+            damageBlock(projectile, level, directBlock, projectile.damageVsBlock());
         }
     }
 
@@ -453,7 +571,7 @@ public final class WeaponSystem {
             double distance = Math.sqrt(pos.distToCenterSqr(center));
             if (distance > radius) continue;
             damageBlock(projectile, level, pos.immutable(),
-                    projectile.weapon.damageVsBlock() * falloff(distance, radius));
+                    projectile.damageVsBlock() * falloff(distance, radius));
         }
 
         AABB box = new AABB(center, center).inflate(radius);
@@ -463,7 +581,7 @@ public final class WeaponSystem {
             // 濺射：從爆心往外推，而不是順著彈丸的方向——爆炸該把人推開，不是把人推著走
             double scale = falloff(distance, radius);
             damageEntity(projectile, level, (LivingEntity) entity,
-                    projectile.weapon.damage() * scale,
+                    projectile.damage() * scale,
                     entity.getBoundingBox().getCenter().subtract(center), scale);
         }
     }

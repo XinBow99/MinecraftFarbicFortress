@@ -6,6 +6,7 @@ import com.xinbow99.fortressduel.economy.Wallet;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.AmmoPouch;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
+import com.xinbow99.fortressduel.weapon.WeaponItems;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -307,16 +308,8 @@ public final class ShopMenu extends ChestMenu {
             return false;
         }
 
-        Item item = BuiltInRegistries.ITEM.getOptional(weapon.item()).orElse(null);
-        if (item == null) {
-            deny("這件商品設定錯誤（找不到物品 " + weapon.item() + "）");
-            return false;
-        }
-
-        ItemStack stack = new ItemStack(item);
-        stack.set(DataComponents.CUSTOM_NAME,
-                Component.literal(weapon.displayName()).withStyle(ChatFormatting.AQUA));
-        player.getInventory().placeItemBackInInventory(stack);
+        // 蓄力武器是一支帶標記的弓，即發武器是它綁的原版物品——差異收在 WeaponItems 裡
+        player.getInventory().placeItemBackInInventory(WeaponItems.create(weapon));
         weapons.pouchOf(player).refill(weapon.id(), entry.amount(), weapon.ammoCapacity());
         return true;
     }
