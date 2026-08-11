@@ -65,9 +65,10 @@ public final class DuelManager {
                 player instanceof ServerPlayer sp ? onUseBlock(sp, hand) : InteractionResult.PASS);
         ServerLivingEntityEvents.ALLOW_DAMAGE.register(this::allowDamage);
         ServerLivingEntityEvents.AFTER_DAMAGE.register(
-                (entity, source, dealt, taken, blocked) -> onGuardianDamaged(entity, source, taken));
-        // 最後一擊不會走 AFTER_DAMAGE 的存活路徑，全滅判斷得靠這個
-        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> onGuardianDamaged(entity, source, 0));
+                (entity, source, dealt, taken, blocked) -> onGuardianDamaged(entity, source));
+        // 致命一擊不會走 AFTER_DAMAGE 的存活路徑，全滅判斷得靠這個。
+        // 兩條路徑都不傳傷害量——扣了多少由 Duel 從血量差自己算
+        ServerLivingEntityEvents.AFTER_DEATH.register(this::onGuardianDamaged);
     }
 
     // ---------- 挑戰 ----------
@@ -326,13 +327,13 @@ public final class DuelManager {
     }
 
     /** 熊貓掉血／死掉之後，把它接回對戰的血條與勝負判斷。 */
-    private void onGuardianDamaged(LivingEntity entity, DamageSource source, float amount) {
+    private void onGuardianDamaged(LivingEntity entity, DamageSource source) {
         for (Duel duel : activeDuels) {
             Side owner = duel.sideOfGuardian(entity.getUUID());
             if (owner == null) continue;
 
             ServerPlayer attacker = source.getEntity() instanceof ServerPlayer p ? p : null;
-            duel.onGuardianChanged(owner, attacker, amount);
+            duel.onGuardianChanged(owner, attacker);
             return;
         }
     }

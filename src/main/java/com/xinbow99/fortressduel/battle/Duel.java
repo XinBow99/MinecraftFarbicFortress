@@ -386,13 +386,26 @@ public final class Duel {
                 && opponentOf(owner).playerId().equals(attacker.getUUID());
     }
 
-    /** 熊貓掉血或死掉之後重算這一方的血量，順便判斷是不是全滅了。 */
-    public void onGuardianChanged(Side owner, ServerPlayer attacker, float damage) {
+    /**
+     * 熊貓掉血或死掉之後重算這一方的血量，順便判斷是不是全滅了。
+     *
+     * <p>扣了多少是**自己從血量差算出來的**，不是相信事件帶進來的數字。兩個理由：
+     * <ul>
+     *   <li>致命一擊走的是 {@code AFTER_DEATH}，那條事件根本沒有傷害量可拿——照著事件走的話，
+     *       打死熊貓的那一發永遠不會發 {@code CORE_DAMAGED}，之後要做「打中目標給錢」或
+     *       戰報統計就會固定少算最後一擊。</li>
+     *   <li>血量差本來就是「真的扣掉多少」：剩 3 血時挨一發 70 傷害，記的是 3 而不是 70，
+     *       超殺的部分不會被灌進統計裡。</li>
+     * </ul>
+     */
+    public void onGuardianChanged(Side owner, ServerPlayer attacker) {
+        float before = owner.hp();
         refreshSides();
+        float applied = before - owner.hp();
 
-        if (damage > 0) {
+        if (applied > 0) {
             ServerPlayer ownerPlayer = playerOf(owner);
-            DuelEvents.CORE_DAMAGED.invoker().onCoreDamaged(this, ownerPlayer, attacker, damage);
+            DuelEvents.CORE_DAMAGED.invoker().onCoreDamaged(this, ownerPlayer, attacker, applied);
         }
 
         if (owner.isDestroyed()) {
