@@ -274,10 +274,16 @@ public final class WeaponSystem {
 
         Duel duel = duels.duelOf(player);
         if (duel == null) return true;   // 沒在對戰：吃掉這一發，但什麼都不做
+        // 這個判斷要排在連射的早退之前，不然連射武器在建造階段拉弓會完全沒有回饋——
+        // 打不出東西又不說為什麼，比擋下來更難理解
         if (!duel.state().canAttack()) {
             player.sendSystemMessage(Msg.warn("建造階段不能開火。"));
             return true;
         }
+
+        // 連射武器在按住的期間就已經一發一發打出去了（見 tickAutoFire），放開只是停火。
+        // 不在這裡再補一發——不然每次鬆手都會多送一發免費的
+        if (weapon.auto()) return true;
 
         // 滿弓固定 20 tick，對齊客戶端的拉弓動畫（見 ChargeCurve 的類別註解）
         double power = weapon.chargeCurve().power(usedTicks / (double) FULL_DRAW_TICKS);
@@ -287,16 +293,56 @@ public final class WeaponSystem {
             return true;
         }
 
+        tryFire(player, duel, weapon, power);
+        return true;
+    }
+
+    /**
+     * 連射：按住右鍵的期間，每過一次冷卻就自動打一發。
+     *
+     * <p>機槍的 cooldown 是 3、雷射是 2，它們的設計就是連續潑灑。改成弓之後如果要靠連點右鍵
+     * 達成每秒 7~10 發，手感差得有感（而且傷手）——所以 {@code auto: true} 的武器改成
+     * 「按住就一直打」，射速仍然完全由 {@code cooldown_ticks} 決定。
+     *
+     * <p>這也讓 {@code auto} 從一個從來沒被讀過的死欄位變成真的有意義。
+     */
+    private void tickAutoFire(MinecraftServer server) {
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            // isUsingItem 就是「右鍵按著沒放」。沒在拉弓的人一個判斷就篩掉了，所以這個
+            // 每 tick 掃全服的迴圈很便宜
+            if (!player.isUsingItem() || !player.getUseItem().is(Items.BOW)) continue;
+
+            WeaponDef weapon = armedWeaponOf(player);
+            if (weapon == null || !weapon.auto()) continue;
+
+            Duel duel = duels.duelOf(player);
+            if (duel == null || !duel.state().canAttack()) continue;
+
+            // 力道恆滿：連射武器不蓄力（weapons.yml 給它們 affects: []），
+            // 走的是跟其他武器完全相同的開火路徑，只是力道這條軸不參與
+            tryFire(player, duel, weapon, 1.0);
+        }
+    }
+
+    /**
+     * 冷卻與彈藥都過了就開一發。
+     *
+     * <p>連射與單發共用這條路徑，差別只在「誰來呼叫」——連射是每 tick 由 {@link #tickAutoFire}
+     * 問一次，單發是放開弓的時候問一次。
+     *
+     * @return true ＝ 真的打出去了
+     */
+    private boolean tryFire(ServerPlayer player, Duel duel, WeaponDef weapon, double power) {
         Map<String, Integer> playerCooldowns = cooldowns.computeIfAbsent(player.getUUID(), k -> new HashMap<>());
-        if (playerCooldowns.containsKey(weapon.id())) return true;
+        if (playerCooldowns.containsKey(weapon.id())) return false;
 
         if (!consumeAmmo(player, weapon)) {
             duels.notify(player, Msg.plain(weapon.displayName() + " 用完了！去軍火商補貨", ChatFormatting.RED));
             player.level().playSound(null, player.blockPosition(),
                     SoundEvents.LEVER_CLICK, SoundSource.PLAYERS, 0.7f, 2.0f);
-            // 空槍也要進冷卻，不然連點會每一下洗一次訊息
+            // 空槍也要進冷卻，不然連射會每一 tick 洗一次訊息
             playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
-            return true;
+            return false;
         }
         playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
 
@@ -331,6 +377,8 @@ public final class WeaponSystem {
 
         WeaponDef weapon = armedWeaponOf(player);
         if (weapon == null) return null;
+        // 連射武器沒有蓄力這條軸，畫一條會填滿的進度條只會讓人以為拉久一點比較痛
+        if (weapon.auto()) return null;
 
         double power = weapon.chargeCurve().power(player.getTicksUsingItem() / (double) FULL_DRAW_TICKS);
         int filled = (int) Math.round(power * CHARGE_BAR_SEGMENTS);
@@ -417,6 +465,9 @@ public final class WeaponSystem {
     private void onServerTick(MinecraftServer server) {
         tickCooldowns();
         tickRecoil();
+        // 要排在 tickCooldowns 之後：先讓冷卻減到 0，這一 tick 才打得出下一發。
+        // 反過來的話每一發都會多等一 tick，機槍的實際射速會比設定值慢三成
+        tickAutoFire(server);
         tickProjectiles();
     }
 
