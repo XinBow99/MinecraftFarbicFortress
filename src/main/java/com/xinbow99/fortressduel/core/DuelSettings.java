@@ -69,8 +69,21 @@ public record DuelSettings(
 
         // ---- 對戰中 ----
         int countdownSeconds,
-        /** 建造階段長度（秒）。這段時間可以擺方塊、不能攻擊。 */
+        /** 建造階段長度（秒）。只在 {@link #buildUntilReady()} 關掉時當長度用。 */
         int buildSeconds,
+        /**
+         * 建造階段等雙方 {@code /duel ready} 才開戰，而不是倒數固定秒數。
+         *
+         * <p>蓋一座能守的房子要多久，取決於你想蓋什麼——固定秒數逼所有人蓋同一種規模的東西，
+         * 而那正是這個遊戲想讓玩家自己決定的部分。攻擊階段仍然計時：那是節奏的來源。
+         */
+        boolean buildUntilReady,
+        /**
+         * ready 模式下最多等幾秒，時間到就強制開戰。0 ＝ 不限。
+         *
+         * <p>純粹是掛機的保險。離線會直接判負，但掛在原地不按 ready 的話這一場會永遠停住。
+         */
+        int buildTimeoutSeconds,
         /** 攻擊階段長度（秒）。這段時間不能擺方塊、可以攻擊。 */
         int combatSeconds,
         int outOfBoundsGraceTicks,
@@ -137,6 +150,8 @@ public record DuelSettings(
 
                 cfg.getInt("battle.countdown_seconds", 10),
                 cfg.getInt("battle.build_seconds", 60),
+                cfg.getBoolean("battle.build_until_ready", true),
+                Math.max(0, cfg.getInt("battle.build_timeout_seconds", 300)),
                 cfg.getInt("battle.combat_seconds", 60),
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
                 startingItems(cfg),

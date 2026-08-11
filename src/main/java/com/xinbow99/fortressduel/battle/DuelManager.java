@@ -20,6 +20,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -63,7 +64,7 @@ public final class DuelManager {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> onJoin(handler.player));
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) ->
-                allowBreak(player instanceof ServerPlayer sp ? sp : null, pos));
+                onBlockBreak(level, player instanceof ServerPlayer sp ? sp : null, pos));
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
                 player instanceof ServerPlayer sp
                         ? onUseBlock(sp, hand, hit.getBlockPos().relative(hit.getDirection()))
@@ -180,6 +181,14 @@ public final class DuelManager {
     }
 
     /** @return 給投降者看的結果訊息；null ＝ 已投降 */
+    /** {@code /duel ready}：建造階段蓋完了，雙方都按了就開戰。 */
+    public String ready(ServerPlayer player) {
+        Duel duel = duelsByPlayer.get(player.getUUID());
+        if (duel == null) return "你目前沒有在對戰。";
+
+        return duel.markReady(player);
+    }
+
     public String forfeit(ServerPlayer player) {
         Duel duel = duelsByPlayer.get(player.getUUID());
         if (duel == null) return "你目前沒有在對戰。";
@@ -282,6 +291,36 @@ public final class DuelManager {
         if (returned > 0) {
             player.sendSystemMessage(Msg.good("上一場對戰寄放的 " + returned + " 疊物品還你了。"));
         }
+    }
+
+    /**
+     * 玩家挖方塊：先問准不准，再決定掉不掉東西。
+     *
+     * <p><b>對戰中場內挖到的方塊一律不掉落。</b>掉落的話建材就有了一個免費的來源——挖一片
+     * 山壁就有幾百塊石頭，商店的定價（石頭 $100/64、黑曜石 $800/16）與「每元買到多少血量」
+     * 那整套比較全部失去意義，錢也就不再是選擇的來源。買才是唯一的管道。
+     *
+     * <p>連自己剛放下的方塊也收不回來——「拆掉重蓋」因此是有成本的，那也是刻意的：
+     * 建造階段的決定應該要能後悔，但不能免費後悔。
+     *
+     * <p>做法是自己 {@code destroyBlock(pos, false, …)} 然後否決原版那條路——原版的
+     * {@code playerDestroy} 一定會掉東西，攔不住。副作用是工具不會耗耐久（挖掘動作沒有
+     * 真的走完原版流程），算是可以接受的偏差。
+     */
+    private boolean onBlockBreak(Level level, ServerPlayer player, BlockPos pos) {
+        if (!allowBreak(player, pos)) return false;
+        if (player == null || player.isCreative()) return true;
+
+        Duel duel = duelsByPlayer.get(player.getUUID());
+        if (duel == null || !duel.arena().region().contains(pos)) return true;
+
+        level.destroyBlock(pos, false, player);
+        // AFTER 事件被我們否決掉了，所以武器系統累積的方塊傷害要自己通知它清掉——
+        // 不清的話在原地補一塊新方塊會直接繼承舊的傷害，一面剛補好的牆一發就碎
+        if (services != null) {
+            services.weapons().forgetBlock(pos);
+        }
+        return false;
     }
 
     /** 對戰中不准挖競技場外面的方塊，也不准挖核心與框線；場內其他地方隨便挖。 */

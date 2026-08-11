@@ -147,7 +147,7 @@ public final class WeaponSystem {
      *
      * <p>不忘的話，補一塊新方塊上去會直接繼承舊的傷害——一面剛補好的牆一發就碎。
      */
-    private void forgetBlock(BlockPos pos) {
+    public void forgetBlock(BlockPos pos) {
         for (Map<BlockPos, Float> damaged : blockDamage.values()) {
             damaged.remove(pos);
         }

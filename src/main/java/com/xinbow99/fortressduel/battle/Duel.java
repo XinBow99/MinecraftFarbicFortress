@@ -38,6 +38,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -125,6 +126,12 @@ public final class Duel {
      * 「中彈 −$100」在對戰中全部等於隱形。要顯示在動作列上的東西必須交給 HUD 自己排版。
      */
     private final Map<UUID, Notice> notices = new HashMap<>();
+    /**
+     * 這一輪建造階段已經按過 {@code /duel ready} 的人。每次進建造階段清空。
+     *
+     * <p>只在 {@code battle.build_until_ready} 開著時有意義。
+     */
+    private final Set<UUID> ready = new HashSet<>();
 
     /** 一則短訊與它的到期時間。 */
     private record Notice(Component text, long until) {
@@ -609,10 +616,16 @@ public final class Duel {
     private void enterBuild(ServerPlayer[] players) {
         state = DuelState.BUILD;
         round++;
-        phaseTicks = settings.buildSeconds() * 20;
+        ready.clear();
+        phaseTicks = buildPhaseTicks();
+
+        String howItEnds = settings.buildUntilReady()
+                ? "蓋完打 /duel ready，雙方都按了就開戰。"
+                : "（" + settings.buildSeconds() + " 秒）";
+
         for (ServerPlayer player : players) {
-            player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 建造階段開始（"
-                    + settings.buildSeconds() + " 秒）：可以蓋，不能攻擊。"));
+            player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 建造階段開始"
+                    + howItEnds + "：可以蓋，不能攻擊。"));
             // 建造階段才發收入：這時你才有機會把錢花掉（蓋牆、去商店補彈藥）。
             // 第一輪不發——開局資金是 starting_money，第一輪就加一份收入的話，
             // 那個設定值講的就不是玩家實際開局拿到的錢了
@@ -621,6 +634,68 @@ public final class Duel {
             }
             beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 0.8f);
         }
+    }
+
+    /**
+     * 建造階段的計時器要設多久。
+     *
+     * <p>ready 模式下這個數字不是「階段長度」而是**掛機的保險上限**，時間到就強制開戰。
+     * {@code build_timeout_seconds: 0} ＝ 不限，那就給一個大到不會在一場對戰內走完的值——
+     * 用同一個計時器而不是額外加一個「無限」的狀態，換來 {@link #tickPhase} 只有一條路徑。
+     */
+    private int buildPhaseTicks() {
+        if (!settings.buildUntilReady()) return settings.buildSeconds() * 20;
+        return settings.buildTimeoutSeconds() > 0
+                ? settings.buildTimeoutSeconds() * 20
+                : Integer.MAX_VALUE;
+    }
+
+    /**
+     * {@code /duel ready}：這一方蓋完了。
+     *
+     * <p>雙方都按了就立刻進攻擊階段——不用等計時器，那個計時器在 ready 模式下只是掛機保險。
+     *
+     * <p>單人練習模式下靶子那一方永遠算就緒，所以一個人按就開戰。
+     *
+     * @return 給玩家看的錯誤訊息；null ＝ 成功
+     */
+    public String markReady(ServerPlayer player) {
+        if (state != DuelState.BUILD) {
+            return "現在不是建造階段。";
+        }
+        if (!settings.buildUntilReady()) {
+            return "這場對戰的建造階段是計時的，不用按就緒。";
+        }
+        if (!ready.add(player.getUUID())) {
+            return "你已經按過就緒了，正在等對手。";
+        }
+
+        ServerPlayer[] players = onlinePlayers();
+        for (ServerPlayer other : players) {
+            other.sendSystemMessage(Msg.info(player.getGameProfile().name() + " 蓋完了。"
+                    + (isEveryoneReady() ? "" : "等另一方 /duel ready。")));
+        }
+        if (isEveryoneReady()) {
+            enterCombat(players);
+        }
+        return null;
+    }
+
+    /** 目前線上的參戰玩家。單人練習模式下只有一個。 */
+    private ServerPlayer[] onlinePlayers() {
+        ServerPlayer a = playerOf(north);
+        ServerPlayer b = solo ? null : playerOf(south);
+
+        if (a != null && b != null) return new ServerPlayer[]{a, b};
+        if (a != null) return new ServerPlayer[]{a};
+        if (b != null) return new ServerPlayer[]{b};
+        return new ServerPlayer[0];
+    }
+
+    /** 靶子沒有真人可以按就緒，所以它永遠算就緒——不然單人練習會卡在建造階段。 */
+    private boolean isEveryoneReady() {
+        if (!ready.contains(north.playerId())) return false;
+        return south.isDummy() || ready.contains(south.playerId());
     }
 
     private void enterCombat(ServerPlayer[] players) {
@@ -663,7 +738,7 @@ public final class Duel {
         int seconds = (phaseTicks + 19) / 20;
         MutableComponent line = switch (state) {
             case PREPARE -> Msg.plain("熊貓生成倒數 " + seconds + "s  站好別亂跑", ChatFormatting.YELLOW);
-            case BUILD -> Msg.plain("建造 " + seconds + "s", ChatFormatting.GREEN);
+            case BUILD -> buildHud(player, seconds);
             case COMBAT -> Msg.plain("攻擊 " + seconds + "s", ChatFormatting.RED);
             case ENDED -> Component.literal("");
         };
@@ -686,6 +761,21 @@ public final class Duel {
 
         // 彈藥數不用畫：它現在是副手的實物，原版自己會在那一格畫數量
         return line;
+    }
+
+    /**
+     * 建造階段那一行。
+     *
+     * <p>ready 模式下不畫秒數：那個計時器是掛機保險，把它當成「剩餘時間」會讓人以為要趕工，
+     * 而不趕工正是這個模式的重點。玩家真正要知道的是「還在等誰」。
+     */
+    private MutableComponent buildHud(ServerPlayer player, int seconds) {
+        if (!settings.buildUntilReady()) {
+            return Msg.plain("建造 " + seconds + "s", ChatFormatting.GREEN);
+        }
+        return ready.contains(player.getUUID())
+                ? Msg.plain("建造 — 已就緒，等對手", ChatFormatting.GRAY)
+                : Msg.plain("建造 — 蓋完打 /duel ready", ChatFormatting.GREEN);
     }
 
     /** 在玩家腳下放一個提示音。用世界的 playSound 而不是只送給他一個人——兩邊聽到的節奏會一致。 */
