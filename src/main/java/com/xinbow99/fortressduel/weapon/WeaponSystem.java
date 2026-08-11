@@ -40,7 +40,6 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -97,7 +96,13 @@ public final class WeaponSystem {
      * </ul>
      */
     private void cleanUp(Duel duel) {
-        projectiles.removeIf(projectile -> projectile.duel == duel);
+        // 標記成死的再移除：結束這一刻很可能就在 tickProjectiles 的迴圈裡（是這一發打爆核心的），
+        // 那邊握著清單的複本，只有 dead 這個旗標能讓它知道剩下的彈丸已經作廢
+        projectiles.removeIf(projectile -> {
+            if (projectile.duel != duel) return false;
+            projectile.dead = true;
+            return true;
+        });
 
         Map<BlockPos, Float> damaged = blockDamage.remove(duel);
         if (damaged != null) {
@@ -259,15 +264,22 @@ public final class WeaponSystem {
         cooldowns.values().removeIf(Map::isEmpty);
     }
 
+    /**
+     * 推進所有彈丸。
+     *
+     * <p>不能直接對 {@code projectiles} 開 iterator：{@link #step} 可能打爆核心而結束整場對戰，
+     * END 事件會同步走到 {@link #cleanUp}、在迴圈中途改動這個清單，於是
+     * {@code ConcurrentModificationException}。所以走一份複本，回頭再一次清掉死掉的。
+     *
+     * <p>複本裡可能有已經被 {@code cleanUp} 作廢的彈丸（同一場對戰的其他發），那些要跳過——
+     * 對戰結束後地形已經還原，再讓它們飛下去就會在還原好的地形上炸洞。
+     */
     private void tickProjectiles() {
-        Iterator<Projectile> it = projectiles.iterator();
-        while (it.hasNext()) {
-            Projectile projectile = it.next();
+        for (Projectile projectile : List.copyOf(projectiles)) {
+            if (projectile.dead) continue;
             step(projectile);
-            if (projectile.dead) {
-                it.remove();
-            }
         }
+        projectiles.removeIf(projectile -> projectile.dead);
     }
 
     /** 推進一顆彈丸：先檢查這一步會不會打到東西，沒有的話才真的往前移動。 */
