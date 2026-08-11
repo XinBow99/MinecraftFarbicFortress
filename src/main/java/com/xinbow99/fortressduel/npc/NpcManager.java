@@ -66,7 +66,7 @@ public final class NpcManager {
     /**
      * NPC 被打死。
      *
-     * <p>不重生、不還原——這正是他能當成戰術目標的原因：與其硬啃對方的水晶，
+     * <p>不重生、不還原——這正是他能當成戰術目標的原因：與其硬啃對方的熊貓，
      * 先把他的軍火商做掉，對面接下來就補不到子彈。
      */
     private void onNpcDeath(LivingEntity entity) {

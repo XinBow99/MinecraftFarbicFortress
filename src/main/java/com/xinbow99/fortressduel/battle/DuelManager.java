@@ -6,7 +6,6 @@ import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -62,11 +61,13 @@ public final class DuelManager {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) ->
                 allowBreak(player instanceof ServerPlayer sp ? sp : null, pos));
-        AttackBlockCallback.EVENT.register((player, level, hand, pos, direction) ->
-                player instanceof ServerPlayer sp ? onAttackBlock(sp, pos) : InteractionResult.PASS);
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
                 player instanceof ServerPlayer sp ? onUseBlock(sp, hand) : InteractionResult.PASS);
         ServerLivingEntityEvents.ALLOW_DAMAGE.register(this::allowDamage);
+        ServerLivingEntityEvents.AFTER_DAMAGE.register(
+                (entity, source, dealt, taken, blocked) -> onGuardianDamaged(entity, source, taken));
+        // 最後一擊不會走 AFTER_DAMAGE 的存活路徑，全滅判斷得靠這個
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> onGuardianDamaged(entity, source, 0));
     }
 
     // ---------- 挑戰 ----------
@@ -266,10 +267,6 @@ public final class DuelManager {
             player.sendSystemMessage(Msg.warn("對戰期間不能挖競技場外面的方塊。"));
             return false;
         }
-        if (duel.arena().isCoreBlock(pos)) {
-            // 核心不是用挖的，是用打的（見 onAttackBlock）
-            return false;
-        }
         if (region.isHorizontalEdge(pos.getX(), pos.getZ())) {
             player.sendSystemMessage(Msg.warn("那是競技場的框線，拆不掉。"));
             return false;
@@ -299,6 +296,9 @@ public final class DuelManager {
      * <p>只擋「對手打你」這一種來源——摔傷、溺水、怪物照樣算，否則建造階段會變成無敵時間。
      */
     private boolean allowDamage(LivingEntity entity, DamageSource source, float amount) {
+        Boolean guardian = filterGuardianDamage(entity, source);
+        if (guardian != null) return guardian;
+
         if (!(entity instanceof ServerPlayer victim)) return true;
 
         Duel duel = duelsByPlayer.get(victim.getUUID());
@@ -307,25 +307,34 @@ public final class DuelManager {
         return !(source.getEntity() instanceof ServerPlayer attacker) || !duel.involves(attacker.getUUID());
     }
 
-    /** 左鍵打敵方核心 → 扣核心血量。打自己的核心沒有效果。 */
-    private InteractionResult onAttackBlock(ServerPlayer player, BlockPos pos) {
-        Duel duel = duelsByPlayer.get(player.getUUID());
-        if (duel == null || !duel.arena().isCoreBlock(pos)) return InteractionResult.PASS;
-
-        Side owner = duel.sideOfCore(pos);
-        if (owner == null) return InteractionResult.PASS;
-
-        if (owner.playerId().equals(player.getUUID())) {
-            player.sendSystemMessage(Msg.warn("那是你自己的核心。"));
-            return InteractionResult.FAIL;
+    /**
+     * 熊貓身上的傷害要不要放行。
+     *
+     * <p>目標從方塊改成實體之後，「打得到／打不到」不再是挖掘與左鍵的問題，而是傷害來源的問題：
+     * 只有對手的攻擊算數，摔落、怪物、自己人的濺射一律免疫（見 {@code Duel.allowGuardianDamage}）。
+     *
+     * @return null ＝ 這不是任何一場對戰的熊貓，交給其他規則處理
+     */
+    private Boolean filterGuardianDamage(LivingEntity entity, DamageSource source) {
+        for (Duel duel : activeDuels) {
+            Side owner = duel.sideOfGuardian(entity.getUUID());
+            if (owner != null) {
+                return duel.allowGuardianDamage(owner, source);
+            }
         }
-        if (!duel.state().canAttack()) {
-            player.sendSystemMessage(Msg.warn("建造階段打不動核心，等攻擊階段。"));
-            return InteractionResult.FAIL;
-        }
+        return null;
+    }
 
-        duel.damageCore(pos, player, duel.settings().coreHitDamage());
-        return InteractionResult.SUCCESS;
+    /** 熊貓掉血／死掉之後，把它接回對戰的血條與勝負判斷。 */
+    private void onGuardianDamaged(LivingEntity entity, DamageSource source, float amount) {
+        for (Duel duel : activeDuels) {
+            Side owner = duel.sideOfGuardian(entity.getUUID());
+            if (owner == null) continue;
+
+            ServerPlayer attacker = source.getEntity() instanceof ServerPlayer p ? p : null;
+            duel.onGuardianChanged(owner, attacker, amount);
+            return;
+        }
     }
 
     // ---------- 查詢 ----------

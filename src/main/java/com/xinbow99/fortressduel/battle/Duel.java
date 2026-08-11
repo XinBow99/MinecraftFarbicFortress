@@ -3,9 +3,11 @@ package com.xinbow99.fortressduel.battle;
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.core.DuelSettings;
+import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.util.Msg;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -17,19 +19,31 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.BossEvent;
-import net.minecraft.world.entity.Relative;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.damagesource.DamageTypes;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
 /**
  * 一場進行中的對戰。
  *
- * <p>開場不傳送玩家：競技場就地框在雙方站的位置之間，準備倒數結束才在各自腳邊長出水晶。
- * 之後建造與攻擊階段輪替，勝負條件只有一條：把對方的水晶打到 0。
+ * <p>開場不傳送玩家：競技場就地框在雙方站的位置之間，準備倒數結束才在各自腳邊圍出熊貓圈。
+ * 之後建造與攻擊階段輪替，勝負條件只有一條：把對方的熊貓全部打死。
+ *
+ * <p>目標是**實體**而不是方塊，這是刻意的——熊貓可以被牽繩帶走、藏進地下室或假房間，
+ * 所以「打哪裡」本身變成攻方要解的問題，蓋房子的 3D 結構也才有意義。代價是要自己處理
+ * 一堆實體才有的問題：意外死亡、被推走、對戰結束要清乾淨。
  *
  * <p>所有狀態變更都只在伺服器主執行緒（tick 或指令）發生，所以這裡沒有任何同步處理。
  */
@@ -38,7 +52,7 @@ public final class Duel {
     /** 對戰結束的原因與贏家。{@code winner} 為 null 代表沒有贏家（雙方都離開之類）。 */
     public record Result(UUID winner, String reason) {
         public static Result coreDestroyed(UUID winner) {
-            return new Result(winner, "核心被摧毀");
+            return new Result(winner, "對方的熊貓全滅");
         }
 
         public static Result forfeit(UUID winner) {
@@ -66,7 +80,7 @@ public final class Duel {
     /**
      * 靶子站的位置；null ＝ 這是正常的兩人對戰。
      *
-     * <p>單人練習模式下南半場沒有真人，但競技場是就地框在「雙方位置」之間的、水晶也是長在
+     * <p>單人練習模式下南半場沒有真人，但競技場是就地框在「雙方位置」之間的、熊貓圈也是圍在
      * 各自腳邊——所以得先替靶子釘一個座標下去，才有第二個點可以用。
      */
     private final BlockPos dummyPos;
@@ -107,10 +121,8 @@ public final class Duel {
         Arena arena = Arena.build(level, challenger.blockPosition(), target.blockPosition(),
                 settings, services.buildings());
 
-        Side north = new Side(challenger, settings.coreHp(),
-                ChatFormatting.AQUA, BossEvent.BossBarColor.BLUE);
-        Side south = new Side(target, settings.coreHp(),
-                ChatFormatting.RED, BossEvent.BossBarColor.RED);
+        Side north = new Side(challenger, ChatFormatting.AQUA, BossEvent.BossBarColor.BLUE);
+        Side south = new Side(target, ChatFormatting.RED, BossEvent.BossBarColor.RED);
 
         Duel duel = new Duel(server, arena, settings, services, north, south, null);
 
@@ -118,7 +130,8 @@ public final class Duel {
         for (ServerPlayer player : new ServerPlayer[]{challenger, target}) {
             duel.admit(player);
             player.sendSystemMessage(Msg.good("對戰開始！站好別亂跑——"
-                    + settings.countdownSeconds() + " 秒後水晶會在你腳邊生成，那就是你要守的東西。"));
+                    + settings.countdownSeconds() + " 秒後你的熊貓會在腳邊的柵欄圈裡生成，"
+                    + "那就是你要守的東西。"));
         }
 
         DuelEvents.START.invoker().onDuelStart(duel);
@@ -143,16 +156,14 @@ public final class Duel {
         Arena arena = Arena.build(level, player.blockPosition(), dummyPos,
                 settings, services.buildings());
 
-        Side north = new Side(player, settings.coreHp(),
-                ChatFormatting.AQUA, BossEvent.BossBarColor.BLUE);
-        Side south = Side.dummy(DUMMY_NAME, settings.coreHp(),
-                ChatFormatting.RED, BossEvent.BossBarColor.RED);
+        Side north = new Side(player, ChatFormatting.AQUA, BossEvent.BossBarColor.BLUE);
+        Side south = Side.dummy(DUMMY_NAME, ChatFormatting.RED, BossEvent.BossBarColor.RED);
 
         Duel duel = new Duel(server, arena, settings, services, north, south, dummyPos);
         duel.admit(player);
         player.sendSystemMessage(Msg.good("單人練習開始！對手是不會還手的「" + DUMMY_NAME
                 + "」，站好別亂跑——" + settings.countdownSeconds()
-                + " 秒後雙方的水晶會生成，打掉它的核心就結束。想提前收場用 /duel forfeit。"));
+                + " 秒後雙方的熊貓會生成，把它的熊貓全部打死就結束。想提前收場用 /duel forfeit。"));
 
         DuelEvents.START.invoker().onDuelStart(duel);
         return duel;
@@ -199,6 +210,12 @@ public final class Duel {
     public void tick() {
         if (state == DuelState.ENDED) return;
         ticksElapsed++;
+
+        // 每秒一次就夠：封死是持續狀態，不是瞬間事件，而且掉血的單位本來就是「每秒」
+        if (ticksElapsed % 20 == 0) {
+            tickSuffocation();
+            if (state == DuelState.ENDED) return;
+        }
 
         ServerPlayer a = playerOf(north);
 
@@ -258,7 +275,7 @@ public final class Duel {
 
         switch (state) {
             case PREPARE -> {
-                spawnCores(players);
+                spawnObjectives(players);
                 enterBuild(players);
             }
             case COMBAT -> enterBuild(players);
@@ -268,24 +285,175 @@ public final class Duel {
     }
 
     /**
-     * 準備階段結束：在雙方**當下站的位置**旁邊長出水晶。
+     * 準備階段結束：在雙方**當下站的位置**旁邊圍出熊貓圈並生成熊貓。
      *
-     * <p>位置是這一刻才決定的，不是開場那一刻——所以準備階段的十秒是玩家的：想把水晶擺在
+     * <p>位置是這一刻才決定的，不是開場那一刻——所以準備階段的十秒是玩家的：想把圈擺在
      * 高地上、擺進山洞裡，就走過去站好。這也是為什麼開場不傳送人。
      *
      * @param players 場上的真人，依 north、south 的順序。單人練習模式只有一個，
      *                南半場的位置改用開場時替靶子釘下的 {@link #dummyPos}
      */
-    private void spawnCores(ServerPlayer[] players) {
+    private void spawnObjectives(ServerPlayer[] players) {
         BlockPos posSouth = solo ? dummyPos : players[1].blockPosition();
-        arena.placeCores(players[0].blockPosition(), posSouth, settings, services.buildings());
-        north.setCore(arena.coreA());
-        south.setCore(arena.coreB());
+        arena.placePens(players[0].blockPosition(), posSouth, settings, services.buildings());
+
+        north.setPen(arena.penA());
+        south.setPen(arena.penB());
+        north.setGuardians(spawnPandas(north, arena.penA()), settings.pandaHp());
+        south.setGuardians(spawnPandas(south, arena.penB()), settings.pandaHp());
 
         for (ServerPlayer player : players) {
-            player.sendSystemMessage(Msg.good("水晶已生成！打掉對方的水晶就獲勝——順帶一提，"
-                    + "軍火商也會被打死，他死了你就買不到東西。"));
-            beep(player, SoundEvents.BEACON_ACTIVATE, 1f);
+            player.sendSystemMessage(Msg.good("熊貓已生成！把對方的 " + settings.pandaCount()
+                    + " 隻熊貓全部打死就獲勝。牠們可以用**牽繩**拉走藏起來——但別把牠們封死，"
+                    + "空間太小會讓牠們持續掉血。"));
+            beep(player, SoundEvents.PANDA_AMBIENT, 1f);
+        }
+    }
+
+    /**
+     * 生成一方的熊貓。
+     *
+     * <p>刻意**不關 AI**：關掉的話牽繩拉不動，「自己安排佈局」這件事就沒了。代價是牠們會亂晃，
+     * 所以柵欄圈疊了兩格高（見 {@code Arena.placePen}）。
+     */
+    private List<UUID> spawnPandas(Side side, BlockPos pen) {
+        ServerLevel level = arena.level();
+        List<UUID> ids = new ArrayList<>();
+
+        // 走 registry 而不是 EntityType.PANDA：跟 MobSpawner／NpcManager 同一個模式，
+        // 換一種目標生物只要改 YAML，而且不會因為 mapping 改欄位名就編不過
+        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE
+                .getOptional(Identifier.parse(settings.pandaEntity())).orElse(null);
+        if (type == null) {
+            FortressDuel.LOGGER.error("Objective entity '{}' does not exist, this duel has no objective",
+                    settings.pandaEntity());
+            return ids;
+        }
+
+        for (int i = 0; i < settings.pandaCount(); i++) {
+            Entity entity = type.spawn(level, arena.guardianSpot(pen, i), EntitySpawnReason.EVENT);
+            if (!(entity instanceof LivingEntity panda)) {
+                FortressDuel.LOGGER.warn("Failed to spawn objective #{} for {} at {}", i, side.playerName(), pen);
+                if (entity != null) entity.discard();
+                continue;
+            }
+
+            panda.setCustomName(Component.literal(side.playerName() + " 的熊貓")
+                    .withStyle(ChatFormatting.GREEN));
+            panda.setCustomNameVisible(true);
+            // 沒有玩家在附近時原版會把牠清掉，那等於隨機判輸
+            if (panda instanceof Mob mob) {
+                mob.setPersistenceRequired();
+            }
+            MobSpawner.setMaxHealth(panda, settings.pandaHp());
+            panda.setHealth(panda.getMaxHealth());
+            ids.add(panda.getUUID());
+        }
+        return ids;
+    }
+
+    /**
+     * 這隻實體是不是某一方要守的熊貓；是的話回傳牠的主人。
+     *
+     * <p>{@code DuelManager} 用它把傷害事件接回來——熊貓的血量就是這一方的血量，
+     * 但「誰打的、算不算數」只有這裡知道。
+     */
+    public Side sideOfGuardian(UUID entityId) {
+        if (north.owns(entityId)) return north;
+        if (south.owns(entityId)) return south;
+        return null;
+    }
+
+    /**
+     * 熊貓身上的傷害算不算數。
+     *
+     * <p>只有**對手的攻擊**與我們自己送的窒息傷害算。摔落、突發事件的怪、自己人的濺射誤傷
+     * 一律免疫——因為一個你無法控制的意外而輸掉整場是很糟的體驗，而這些來源全都不是對手的操作。
+     * 建造階段也一律免疫，那時本來就不能攻擊。
+     */
+    public boolean allowGuardianDamage(Side owner, DamageSource source) {
+        if (source.is(DamageTypes.STARVE)) return true;  // 我們自己送的窒息傷害
+        if (!state.canAttack()) return false;
+
+        return source.getEntity() instanceof ServerPlayer attacker
+                && opponentOf(owner).playerId().equals(attacker.getUUID());
+    }
+
+    /** 熊貓掉血或死掉之後重算這一方的血量，順便判斷是不是全滅了。 */
+    public void onGuardianChanged(Side owner, ServerPlayer attacker, float damage) {
+        refreshSides();
+
+        if (damage > 0) {
+            ServerPlayer ownerPlayer = playerOf(owner);
+            DuelEvents.CORE_DAMAGED.invoker().onCoreDamaged(this, ownerPlayer, attacker, damage);
+        }
+
+        if (owner.isDestroyed()) {
+            finish(Result.coreDestroyed(opponentOf(owner).playerId()));
+        }
+    }
+
+    /** 從世界裡的實體重算兩邊的血量與存活數。 */
+    private void refreshSides() {
+        ServerLevel level = arena.level();
+        for (Side side : new Side[]{north, south}) {
+            side.refresh(id -> {
+                Entity entity = level.getEntity(id);
+                return entity instanceof LivingEntity living && living.isAlive() ? living.getHealth() : 0;
+            });
+        }
+    }
+
+    /**
+     * 每秒檢查一次：被封死的熊貓要掉血。
+     *
+     * <p>沒有這條規則的話最優解固定是「1×1 黑曜石棺材，封死不動」，佈局的博弈就不存在了。
+     * 判準是牠周圍 3×3×3 裡有幾格站得進去——空曠地面約 18 格，棺材只有 1~2 格。
+     */
+    private void tickSuffocation() {
+        ServerLevel level = arena.level();
+
+        for (Side side : new Side[]{north, south}) {
+            for (UUID id : side.guardians()) {
+                if (!(level.getEntity(id) instanceof LivingEntity panda) || !panda.isAlive()) continue;
+                if (freeSpaceAround(level, panda.blockPosition()) >= settings.suffocationMinSpace()) continue;
+
+                // 不必自己叫 onGuardianChanged：hurtServer 會走 AFTER_DAMAGE，
+                // DuelManager 已經把那條路接回來了。自己再叫一次只會讓 CORE_DAMAGED 發兩遍
+                panda.hurtServer(level, level.damageSources().starve(), (float) settings.suffocationDamage());
+                level.sendParticles(ParticleTypes.ANGRY_VILLAGER,
+                        panda.getX(), panda.getY() + 1.0, panda.getZ(), 1, 0.2, 0.2, 0.2, 0);
+                if (state == DuelState.ENDED) return;
+            }
+        }
+    }
+
+    /** 這一格周圍 3×3×3（含自己）有幾格是站得進去的，也就是不擋碰撞的。 */
+    private static int freeSpaceAround(ServerLevel level, BlockPos center) {
+        int free = 0;
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-1, -1, -1), center.offset(1, 1, 1))) {
+            if (level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()) {
+                free++;
+            }
+        }
+        return free;
+    }
+
+    /**
+     * 對戰結束時把熊貓清掉。
+     *
+     * <p>{@link ArenaSnapshot} 只還原方塊。熊貓是實體，不明確移除的話會留在世界上——
+     * 而且牠們是 {@code persistenceRequired}，連自然消失都不會。
+     */
+    private void removeGuardians() {
+        ServerLevel level = arena.level();
+        for (Side side : new Side[]{north, south}) {
+            for (UUID id : side.guardians()) {
+                Entity entity = level.getEntity(id);
+                if (entity != null) {
+                    entity.discard();
+                }
+            }
         }
     }
 
@@ -325,7 +493,7 @@ public final class Duel {
     private Component hud(ServerPlayer player) {
         int seconds = (phaseTicks + 19) / 20;
         MutableComponent line = switch (state) {
-            case PREPARE -> Msg.plain("水晶生成倒數 " + seconds + "s  站好別亂跑", ChatFormatting.YELLOW);
+            case PREPARE -> Msg.plain("熊貓生成倒數 " + seconds + "s  站好別亂跑", ChatFormatting.YELLOW);
             case BUILD -> Msg.plain("建造 " + seconds + "s", ChatFormatting.GREEN);
             case COMBAT -> Msg.plain("攻擊 " + seconds + "s", ChatFormatting.RED);
             case ENDED -> Component.literal("");
@@ -355,37 +523,10 @@ public final class Duel {
                 && arena.region().containsHorizontally(player.getX(), player.getZ())) {
             return;
         }
-        Vec3 spawn = arena.spawnFor(side.core());
+        Vec3 spawn = arena.spawnFor(side.pen());
         player.teleportTo(arena.level(), spawn.x, spawn.y, spawn.z,
-                Set.of(), arena.spawnYawFor(side.core()), 0f, true);
+                Set.of(), arena.spawnYawFor(side.pen()), 0f, true);
         player.sendSystemMessage(Msg.warn("你離開了競技場範圍，已被拉回。"));
-    }
-
-    // ---------- 核心 ----------
-
-    /**
-     * 對某一座核心造成傷害。
-     *
-     * @param core     被打的那一座烽火台
-     * @param attacker 出手的人，可能是 null（怪物、突發事件）
-     */
-    public void damageCore(BlockPos core, ServerPlayer attacker, float amount) {
-        if (!state.canAttack()) return;
-
-        Side side = sideOfCore(core);
-        if (side == null) return;
-
-        float applied = side.damage(amount);
-        if (applied <= 0) return;
-
-        ServerPlayer owner = playerOf(side);
-        DuelEvents.CORE_DAMAGED.invoker().onCoreDamaged(this, owner, attacker, applied);
-
-        arena.level().playSound(null, core, SoundEvents.ANVIL_LAND, SoundSource.BLOCKS, 0.6f, 1.4f);
-
-        if (side.isDestroyed()) {
-            finish(Result.coreDestroyed(opponentOf(side).playerId()));
-        }
     }
 
     // ---------- 結束 ----------
@@ -396,6 +537,9 @@ public final class Duel {
         this.result = result;
 
         DuelEvents.END.invoker().onDuelEnd(this, result);
+
+        // 要在 arena.restore() 之前：還原只處理方塊，實體得自己收
+        removeGuardians();
 
         announce(result);
 
@@ -484,11 +628,6 @@ public final class Duel {
         return null;
     }
 
-    public Side sideOfCore(BlockPos core) {
-        if (north.core().equals(core)) return north;
-        if (south.core().equals(core)) return south;
-        return null;
-    }
 
     public Side opponentOf(Side side) {
         return side == north ? south : north;
