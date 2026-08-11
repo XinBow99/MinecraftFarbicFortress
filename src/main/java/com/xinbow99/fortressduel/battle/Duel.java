@@ -5,6 +5,7 @@ import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.core.DuelSettings;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.util.Msg;
+import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -27,6 +28,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -69,6 +72,11 @@ public final class Duel {
 
     /** 單人練習模式裡那個靶子的名字，會出現在血條上。 */
     public static final String DUMMY_NAME = "訓練假人";
+
+    /** 被夾回區塊時要離邊界多遠（格）。太小的話下一 tick 又剛好壓在線上，會一直觸發。 */
+    private static final double CONFINE_BUFFER = 1.0;
+    /** 越界提示的最短間隔（tick）。 */
+    private static final long BOUNDARY_WARN_INTERVAL = 40;
 
     private final MinecraftServer server;
     private final Arena arena;
@@ -180,8 +188,37 @@ public final class Duel {
     private void admit(ServerPlayer player) {
         north.showTo(player);
         south.showTo(player);
+        applyDuelGameMode(player);
         giveStartingItems(player);
         services.weapons().giveStartingAmmo(player);
+    }
+
+    /**
+     * 開場把玩家切成設定裡的模式（預設 survival），結束再還原成他原本的。
+     *
+     * <p>**這是防呆，不是防弊**——對戰中自己 {@code /gamemode creative} 不會被改回來。
+     * 刻意的：持續強制會讓開發期間沒辦法隨時切模式測試，而作弊本來就該用權限管，不是用遊戲規則管。
+     *
+     * <p>不要設成 adventure。它看起來更安全，但 adventure 挖不了方塊，而本作的前提是
+     * 「建材自己挖、自己蓋」——那等於把玩法整個廢掉。
+     */
+    private void applyDuelGameMode(ServerPlayer player) {
+        GameType mode = gameType(settings.gameMode());
+        if (mode == null) {
+            FortressDuel.LOGGER.warn("battle.gamemode '{}' is not a valid game mode, leaving {} as they are",
+                    settings.gameMode(), player.getGameProfile().name());
+            return;
+        }
+        sideOf(player.getUUID()).setReturnGameMode(player.gameMode());
+        player.setGameMode(mode);
+    }
+
+    /** 設定檔寫的模式名（survival／creative／…）對到原版的 {@link GameType}；認不得回 null。 */
+    private static GameType gameType(String name) {
+        for (GameType type : GameType.values()) {
+            if (type.getName().equalsIgnoreCase(name)) return type;
+        }
+        return null;
     }
 
     /**
@@ -234,6 +271,7 @@ public final class Duel {
             }
             tickPhase(new ServerPlayer[]{a});
             keepInside(a, north);
+            enforceZones();
             DuelEvents.TICK.invoker().onDuelTick(this);
             return;
         }
@@ -254,6 +292,7 @@ public final class Duel {
 
         keepInside(a, north);
         keepInside(b, south);
+        enforceZones();
 
         DuelEvents.TICK.invoker().onDuelTick(this);
     }
@@ -543,6 +582,90 @@ public final class Duel {
         player.level().playSound(null, player.blockPosition(), sound, SoundSource.MASTER, 1f, pitch);
     }
 
+    /**
+     * 把場上所有活物夾回它該待的區塊。
+     *
+     * <p>場地沿著兩座熊貓圈的連線分成三塊——A 的半場、中場、B 的半場。誰該待在哪：
+     * <ul>
+     *   <li><b>玩家</b>：自己的半場。這是「只靠遠程決勝」的實作——衝進對方陣地拆牆、
+     *       貼臉砍熊貓都不該是一個選項。</li>
+     *   <li><b>熊貓</b>：主人的半場。擊退仍然推得動牠們（那是刻意保留的手感），
+     *       但推不出自家邊界。</li>
+     *   <li><b>其他活物</b>：中場。突發事件的怪生在中場，賞金是唯一的競爭性收入，
+     *       讓牠們跑進任何一邊的陣地都會讓那一方白白多守一輪。</li>
+     * </ul>
+     *
+     * <p>關掉 AI 的實體（軍火商那種站定點的 NPC）不動——牠本來就該待在自己那一側的店裡，
+     * 而且被移動之後沒有 AI 可以走回去。
+     */
+    private void enforceZones() {
+        if (!arena.zonesReady()) return;
+
+        confinePlayer(playerOf(north), north, Arena.Zone.A);
+        confinePlayer(playerOf(south), south, Arena.Zone.B);
+
+        confineGuardians(north, Arena.Zone.A);
+        confineGuardians(south, Arena.Zone.B);
+
+        // 中場的怪每 5 tick 掃一次就好：牠們走得慢，而這是唯一需要遍歷實體的一段
+        if (ticksElapsed % 5 == 0) {
+            confineBystanders();
+        }
+    }
+
+    private void confinePlayer(ServerPlayer player, Side side, Arena.Zone zone) {
+        if (player == null || player.isDeadOrDying()) return;
+
+        Vec3 corrected = arena.confine(player.position(), zone, CONFINE_BUFFER);
+        if (corrected == null) return;
+
+        player.teleportTo(arena.level(), corrected.x, corrected.y, corrected.z,
+                Set.of(), player.getYRot(), player.getXRot(), true);
+        if (side.shouldWarnBoundary(ticksElapsed, BOUNDARY_WARN_INTERVAL)) {
+            player.sendSystemMessage(Msg.warn("那是對方的陣地，過不去——用武器打。"));
+        }
+    }
+
+    private void confineGuardians(Side side, Arena.Zone zone) {
+        ServerLevel level = arena.level();
+        for (UUID id : side.guardians()) {
+            if (level.getEntity(id) instanceof LivingEntity panda && panda.isAlive()) {
+                confineCreature(panda, zone);
+            }
+        }
+    }
+
+    /** 場上除了玩家與熊貓以外的活物，一律關在中場。 */
+    private void confineBystanders() {
+        ServerLevel level = arena.level();
+        Region region = arena.region();
+        AABB box = new AABB(region.minX(), region.minY(), region.minZ(),
+                region.maxX() + 1.0, region.maxY() + 1.0, region.maxZ() + 1.0);
+
+        for (LivingEntity entity : level.getEntitiesOfClass(LivingEntity.class, box)) {
+            if (entity instanceof ServerPlayer) continue;
+            if (sideOfGuardian(entity.getUUID()) != null) continue;
+            if (entity instanceof Mob mob && mob.isNoAi()) continue;
+
+            confineCreature(entity, Arena.Zone.NEUTRAL);
+        }
+    }
+
+    /**
+     * 夾一隻非玩家的生物。
+     *
+     * <p>夾完要把速度歸零：被擊退推出界的那一下帶著動量，只改位置的話下一 tick 又會衝出去，
+     * 看起來像在邊界上彈跳。
+     */
+    private void confineCreature(LivingEntity entity, Arena.Zone zone) {
+        Vec3 corrected = arena.confine(entity.position(), zone, CONFINE_BUFFER);
+        if (corrected == null) return;
+
+        entity.teleportTo(corrected.x, corrected.y, corrected.z);
+        entity.setDeltaMovement(Vec3.ZERO);
+        entity.hurtMarked = true;
+    }
+
     /** 走出框線就拉回自己的出生點。只看水平方向——跳起來、挖到腳下都不算離場。 */
     private void keepInside(ServerPlayer player, Side side) {
         // 死亡畫面期間不要動他：那時原版正要把他移到重生點，兩邊搶著傳送會把人丟到奇怪的位置。
@@ -600,6 +723,11 @@ public final class Duel {
     private void teleportOut(Side side) {
         ServerPlayer player = playerOf(side);
         if (player == null) return;
+
+        // 模式跟座標一樣是「怎麼把人放回去」的一部分，所以收在同一個地方
+        if (side.returnGameMode() != null) {
+            player.setGameMode(side.returnGameMode());
+        }
 
         ServerLevel level = server.getLevel(side.returnLevel());
         if (level == null) {

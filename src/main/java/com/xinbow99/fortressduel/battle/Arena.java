@@ -33,6 +33,13 @@ public final class Arena {
     /** 圈內可以用來散開熊貓的半徑（柵欄往內縮一格）。 */
     private int penRadiusInner;
 
+    /** A 的圈 → B 的圈的水平單位向量。圈放好才有。 */
+    private Vec3 axisDir;
+    /** 兩圈的水平中點，也就是中場的正中央。 */
+    private Vec3 axisMid;
+    /** 中場的半寬（格）。 */
+    private double neutralHalf;
+
     private Arena(ServerLevel level, Region region, ArenaSnapshot snapshot) {
         this.level = level;
         this.region = region;
@@ -86,6 +93,29 @@ public final class Arena {
         placePen(penB, settings);
         placeBuildings(settings, buildings, penA, penB);
         placeBuildings(settings, buildings, penB, penA);
+
+        setUpZones(settings);
+    }
+
+    /**
+     * 算出三個區塊的分界。
+     *
+     * <p>切法是沿著「A 的圈 → B 的圈」這條軸，不是沿著世界的 X 或 Z——場地是就地框在雙方
+     * 之間的，兩個人站成東西向、南北向、或任何斜角都可能，照座標軸切一定會有一邊是錯的。
+     *
+     * <p>中場寬度取兩圈距離的一個比例而不是固定格數：玩家可能站得很近（場地有最小邊長，
+     * 但兩座圈不會因此被推開），固定 16 格的中場在那種局面會把整個場地吃掉，兩邊都無處可站。
+     */
+    private void setUpZones(DuelSettings settings) {
+        Vec3 a = new Vec3(penA.getX() + 0.5, 0, penA.getZ() + 0.5);
+        Vec3 b = new Vec3(penB.getX() + 0.5, 0, penB.getZ() + 0.5);
+
+        Vec3 axis = b.subtract(a);
+        double length = axis.length();
+        axisMid = a.add(axis.scale(0.5));
+        // 兩座圈幾乎重疊（理論上不會，但不想留一個會 NaN 的除法）就退化成「沒有分界」
+        axisDir = length < 1.0E-3 ? null : axis.scale(1.0 / length);
+        neutralHalf = length * Math.clamp(settings.neutralFraction(), 0.0, 0.9) / 2.0;
     }
 
     /** 從 self 往「遠離 enemy」的方向退 offset 格，再貼回地面。 */
@@ -207,6 +237,59 @@ public final class Arena {
 
     public Region region() {
         return region;
+    }
+
+    // ---------- 區塊 ----------
+
+    /** 場上的三個區塊，沿著兩座熊貓圈的連線切開。 */
+    public enum Zone {
+        /** A 的半場（penA 那一側）。 */
+        A,
+        /** 中場：突發事件的怪待的地方，雙方都進不去。 */
+        NEUTRAL,
+        /** B 的半場（penB 那一側）。 */
+        B
+    }
+
+    /** 圈放好了沒。沒放好之前沒有分界，也就不做任何範圍限制。 */
+    public boolean zonesReady() {
+        return axisDir != null;
+    }
+
+    /** 沿著軸的有號距離：0 在中場正中央，負的靠 A、正的靠 B。 */
+    private double offsetAlongAxis(double x, double z) {
+        return new Vec3(x, 0, z).subtract(axisMid).dot(axisDir);
+    }
+
+    /**
+     * 把一個位置夾回指定的區塊，同時夾進競技場的垂直範圍。
+     *
+     * <p>水平方向只沿著軸推——保留橫向位置，體感上是撞到一道看不見的牆，而不是被抓走。
+     * 已經在範圍內就回傳 null，呼叫端據此決定要不要動它（每 tick 硬夾會讓站在邊界上的東西抖個不停）。
+     *
+     * @param buffer 推回去之後要離邊界多遠，避免下一 tick 又剛好壓在線上
+     */
+    public Vec3 confine(Vec3 pos, Zone zone, double buffer) {
+        if (!zonesReady()) return null;
+
+        double s = offsetAlongAxis(pos.x, pos.z);
+        double target = s;
+        switch (zone) {
+            case A -> { if (s >= -neutralHalf) target = -neutralHalf - buffer; }
+            case B -> { if (s <= neutralHalf) target = neutralHalf + buffer; }
+            case NEUTRAL -> {
+                if (s < -neutralHalf) target = -neutralHalf + buffer;
+                else if (s > neutralHalf) target = neutralHalf - buffer;
+            }
+        }
+
+        // 天空給得比地底寬，是 arena.height 與 arena.depth 兩個設定拉開的，這裡只負責執行
+        double y = Math.clamp(pos.y, region.minY() + 1, region.maxY() - 1);
+
+        if (target == s && y == pos.y) return null;
+
+        Vec3 shifted = pos.add(axisDir.scale(target - s));
+        return new Vec3(shifted.x, y, shifted.z);
     }
 
     public BlockPos penA() {

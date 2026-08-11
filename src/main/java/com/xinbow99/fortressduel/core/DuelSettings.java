@@ -28,6 +28,12 @@ public record DuelSettings(
         int coreOffset,
         /** 開場時兩側各蓋哪幾棟建築（對應 buildings.yml）。 */
         List<String> arenaBuildings,
+        /**
+         * 中場佔兩座熊貓圈距離的比例。0.3 ＝ 中間 30%，兩邊各 35%。
+         *
+         * <p>用比例而不是固定格數：玩家可能站得很近，固定寬度的中場在那種局面會把整個場地吃掉。
+         */
+        double neutralFraction,
 
         // ---- 目標（要保護的熊貓）----
         /** 目標生物的實體 id。換成別種生物只要改這裡，不用寫 Java。 */
@@ -57,6 +63,8 @@ public record DuelSettings(
         int outOfBoundsGraceTicks,
         /** 開場發給雙方的物資，每一項寫成 {@code "minecraft:dirt 20"}。 */
         List<String> startingItems,
+        /** 開場把玩家切成哪個模式，結束還原成他原本的。名稱同原版：survival／adventure／… */
+        String gameMode,
 
         // ---- 突發事件 ----
         int incidentIntervalSeconds,
@@ -86,6 +94,7 @@ public record DuelSettings(
                 cfg.getInt("arena.margin", 16),
                 cfg.getInt("arena.core_offset", 3),
                 cfg.getStringList("arena.buildings"),
+                cfg.getDouble("arena.neutral_fraction", 0.3),
 
                 cfg.getString("objective.entity", "minecraft:panda"),
                 Math.max(1, cfg.getInt("objective.panda_count", 4)),
@@ -100,6 +109,7 @@ public record DuelSettings(
                 cfg.getInt("battle.combat_seconds", 60),
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
                 startingItems(cfg),
+                cfg.getString("battle.gamemode", "survival"),
 
                 cfg.getInt("incident.interval_seconds", 120),
 

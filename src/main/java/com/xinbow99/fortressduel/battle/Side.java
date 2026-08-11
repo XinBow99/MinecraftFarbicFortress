@@ -7,6 +7,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.BossEvent;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
@@ -46,6 +47,10 @@ public final class Side {
     private int alive;
     /** 熊貓生成過了沒。沒生成之前不能算「全滅」，否則開場第一 tick 就判輸。 */
     private boolean spawned;
+    /** 上次因為越界被提示的 tick。用來節流訊息。 */
+    private long lastBoundaryWarnTick = Long.MIN_VALUE;
+    /** 進場前的遊戲模式，打完要還原。null ＝ 沒改過（靶子，或設定值認不得）。 */
+    private GameType returnGameMode;
 
     public Side(ServerPlayer player, ChatFormatting color, BossEvent.BossBarColor barColor) {
         this(player.getUUID(), player.getGameProfile().name(), false,
@@ -196,6 +201,26 @@ public final class Side {
     /** 這一方是不是靶子（單人練習模式的對手）。 */
     public boolean isDummy() {
         return dummy;
+    }
+
+    /**
+     * 這一刻要不要提示玩家「你越界了」。
+     *
+     * <p>越界是持續狀態不是瞬間事件——貼著邊界走的人每一 tick 都會被夾回來，不節流的話
+     * 聊天欄會被同一句話洗滿。
+     */
+    public boolean shouldWarnBoundary(long now, long intervalTicks) {
+        if (now - lastBoundaryWarnTick < intervalTicks) return false;
+        lastBoundaryWarnTick = now;
+        return true;
+    }
+
+    public void setReturnGameMode(GameType mode) {
+        this.returnGameMode = mode;
+    }
+
+    public GameType returnGameMode() {
+        return returnGameMode;
     }
 
     public BlockPos pen() {

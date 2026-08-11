@@ -62,7 +62,9 @@ public final class DuelManager {
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) ->
                 allowBreak(player instanceof ServerPlayer sp ? sp : null, pos));
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
-                player instanceof ServerPlayer sp ? onUseBlock(sp, hand) : InteractionResult.PASS);
+                player instanceof ServerPlayer sp
+                        ? onUseBlock(sp, hand, hit.getBlockPos().relative(hit.getDirection()))
+                        : InteractionResult.PASS);
         ServerLivingEntityEvents.ALLOW_DAMAGE.register(this::allowDamage);
         ServerLivingEntityEvents.AFTER_DAMAGE.register(
                 (entity, source, dealt, taken, blocked) -> onGuardianDamaged(entity, source));
@@ -276,19 +278,31 @@ public final class DuelManager {
     }
 
     /**
-     * 建造階段以外不能擺放方塊。
+     * 建造階段以外、或競技場範圍外，不能擺放方塊。
      *
      * <p>只擋「拿著方塊右鍵」——右鍵開箱子、按拉桿、用武器都還是通的，所以攻擊階段照樣能操作場地，
      * 只是不能再長出新的牆。
+     *
+     * <p>範圍檢查不能省，而且要跟 {@link #allowBreak} 對稱：{@link ArenaSnapshot} 只記錄
+     * 競技場範圍內的格子，蓋在外面的方塊打完不會被還原——那會在世界上留下永久痕跡。
+     * 玩家站在邊緣往外搆得到五格左右，所以這不是理論問題。
+     *
+     * @param target 方塊會被放到哪一格（命中面往外一格），不是被點到的那一格
      */
-    private InteractionResult onUseBlock(ServerPlayer player, InteractionHand hand) {
+    private InteractionResult onUseBlock(ServerPlayer player, InteractionHand hand, BlockPos target) {
         Duel duel = duelsByPlayer.get(player.getUUID());
         if (duel == null) return InteractionResult.PASS;
         if (!(player.getItemInHand(hand).getItem() instanceof BlockItem)) return InteractionResult.PASS;
-        if (duel.state().canPlaceBlocks()) return InteractionResult.PASS;
 
-        player.sendSystemMessage(Msg.warn("攻擊階段不能擺放方塊，等下一輪建造階段。"));
-        return InteractionResult.FAIL;
+        if (!duel.state().canPlaceBlocks()) {
+            player.sendSystemMessage(Msg.warn("攻擊階段不能擺放方塊，等下一輪建造階段。"));
+            return InteractionResult.FAIL;
+        }
+        if (!duel.arena().region().contains(target)) {
+            player.sendSystemMessage(Msg.warn("那已經在競技場外面了，蓋不了。"));
+            return InteractionResult.FAIL;
+        }
+        return InteractionResult.PASS;
     }
 
     /**
