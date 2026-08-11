@@ -15,6 +15,7 @@ import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -27,6 +28,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
@@ -234,19 +236,34 @@ public final class WeaponSystem {
         }
     }
 
-    /** 把散佈角度套到視線方向上。散佈是圓錐狀的，所以兩個軸各抖一次。 */
+    /**
+     * 把散佈角度套到視線方向上：以視線為軸的圓錐，{@code spreadDegrees} 是半頂角。
+     *
+     * <p>兩個地方跟直覺寫法不一樣，都是必要的：
+     * <ul>
+     *   <li><b>半徑要開根號</b>——直接 {@code nextDouble()} 當半徑會讓彈著點擠在圓心，
+     *       因為圓盤的面積是隨半徑平方成長的。{@code sqrt} 之後才是均勻分布。</li>
+     *   <li><b>偏轉要用視線自己的正交基底</b>，不是世界的 Y 軸。在世界 Y 軸上加偏移的話，
+     *       視線越接近垂直、水平分量越小，垂直方向的散佈就跟著塌掉——仰角 60° 時大約只剩一半，
+     *       打高牆或對空看得很明顯。</li>
+     * </ul>
+     */
     private Vec3 applySpread(ServerLevel level, Vec3 look, double spreadDegrees) {
-        if (spreadDegrees <= 0) return look.normalize();
+        Vec3 forward = look.normalize();
+        if (spreadDegrees <= 0) return forward;
 
-        double spread = Math.toRadians(spreadDegrees);
-        double yaw = (level.getRandom().nextDouble() * 2 - 1) * spread;
-        double pitch = (level.getRandom().nextDouble() * 2 - 1) * spread;
+        double theta = level.getRandom().nextDouble() * Math.PI * 2;
+        double radius = Math.sqrt(level.getRandom().nextDouble()) * Math.tan(Math.toRadians(spreadDegrees));
 
-        // 繞世界的 Y 軸轉 yaw、再往上下偏 pitch。視線接近正上下時這個近似會失真，
-        // 但散佈本來就只有幾度，那點誤差看不出來
-        double cos = Math.cos(yaw), sin = Math.sin(yaw);
-        Vec3 rotated = new Vec3(look.x * cos - look.z * sin, look.y, look.x * sin + look.z * cos);
-        return rotated.add(0, Math.tan(pitch), 0).normalize();
+        // 視線接近正上下時 (0,1,0) 會跟它平行、外積退化成零向量，那時改拿 X 軸當參考
+        Vec3 reference = Math.abs(forward.y) > 0.999 ? new Vec3(1, 0, 0) : new Vec3(0, 1, 0);
+        Vec3 right = forward.cross(reference).normalize();
+        Vec3 up = right.cross(forward).normalize();
+
+        return forward
+                .add(right.scale(Math.cos(theta) * radius))
+                .add(up.scale(Math.sin(theta) * radius))
+                .normalize();
     }
 
     // ---------- 每 tick ----------
@@ -345,7 +362,8 @@ public final class WeaponSystem {
         }
 
         if (directEntity instanceof LivingEntity living) {
-            damageEntity(projectile, level, living, weapon.damage());
+            // 直擊：順著彈丸飛的方向推
+            damageEntity(projectile, level, living, weapon.damage(), projectile.velocity, 1.0);
         } else if (directBlock != null) {
             damageBlock(projectile, level, directBlock, weapon.damageVsBlock());
         }
@@ -368,8 +386,11 @@ public final class WeaponSystem {
         for (Entity entity : level.getEntities((Entity) null, box, e -> e instanceof LivingEntity && e.isAlive())) {
             double distance = entity.position().distanceTo(center);
             if (distance > radius) continue;
+            // 濺射：從爆心往外推，而不是順著彈丸的方向——爆炸該把人推開，不是把人推著走
+            double scale = falloff(distance, radius);
             damageEntity(projectile, level, (LivingEntity) entity,
-                    projectile.weapon.damage() * falloff(distance, radius));
+                    projectile.weapon.damage() * scale,
+                    entity.getBoundingBox().getCenter().subtract(center), scale);
         }
     }
 
@@ -377,7 +398,14 @@ public final class WeaponSystem {
         return Math.max(0.2, 1.0 - distance / radius);
     }
 
-    private void damageEntity(Projectile projectile, ServerLevel level, LivingEntity target, double damage) {
+    /**
+     * 打中一個生物：扣血並推開。
+     *
+     * @param direction 推的方向，不必先正規化；長度為 0 時只扣血不推
+     * @param scale     力道倍率，濺射用距離衰減、直擊給 1.0
+     */
+    private void damageEntity(Projectile projectile, ServerLevel level, LivingEntity target,
+                              double damage, Vec3 direction, double scale) {
         if (damage <= 0) return;
 
         ServerPlayer shooter = level.getServer().getPlayerList().getPlayer(projectile.shooterId);
@@ -386,6 +414,33 @@ public final class WeaponSystem {
                 ? level.damageSources().playerAttack(shooter)
                 : level.damageSources().generic();
         target.hurtServer(level, source, (float) damage);
+        knockBack(target, direction, projectile.weapon.knockback() * scale);
+    }
+
+    /**
+     * 把目標推開。
+     *
+     * <p>三個細節不能省：
+     * <ul>
+     *   <li><b>一定要往上抬一點</b>——純水平的推力會被地面摩擦當場吃掉大半，看起來像沒推到。
+     *       原版的擊退也是這樣加垂直分量的。</li>
+     *   <li><b>被推的如果是玩家，要自己把速度送給客戶端</b>——玩家的移動是客戶端說了算，
+     *       伺服器改完 {@code deltaMovement} 不通知的話，下一個移動封包就把它蓋回去了，
+     *       等於完全沒推。{@code hurtMarked} 只能讓**旁觀者**看到，本人看不到。</li>
+     *   <li><b>關掉 AI 的生物不推</b>——軍火商那種站定點的 NPC 沒有 AI 可以走回去，推一次就
+     *       永遠歪在那裡，商店的互動範圍也跟著跑掉。被打死是設計，被推走不是。</li>
+     * </ul>
+     */
+    private void knockBack(LivingEntity target, Vec3 direction, double strength) {
+        if (strength <= 0 || direction.lengthSqr() < 1.0E-6) return;
+        if (target instanceof Mob mob && mob.isNoAi()) return;
+
+        Vec3 push = direction.normalize().scale(strength);
+        target.push(push.x, Math.max(push.y, strength * 0.35), push.z);
+        target.hurtMarked = true;
+        if (target instanceof ServerPlayer player) {
+            player.connection.send(new ClientboundSetEntityMotionPacket(player));
+        }
     }
 
     /**

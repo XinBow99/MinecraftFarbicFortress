@@ -13,8 +13,11 @@
 #   damage            單發傷害（同時作用在方塊與生物上）
 #   splash_radius     濺射半徑（格），0 = 單點命中
 #   pierce            穿甲 0~1。折減目標方塊的血量，1.0 = 血量壓到 1（一發破，但仍要打中）
+#   knockback         命中生物時推開的力道（格/tick）。0 = 不推
+#                     不寫的話 = damage × 0.008，所以舊設定檔不改也會有力道感
+#                     濺射武器照爆心距離衰減，跟傷害用同一條曲線
 #   pellets           一次擊發幾顆（散彈）
-#   spread_degrees    角度散佈（±度）
+#   spread_degrees    以視線為軸的圓錐半頂角（度）。彈著點在圓盤上均勻分布
 #   cooldown_ticks    裝填間隔（20 tick = 1 秒）
 #   projectile_speed  彈丸初速（格/tick）
 #   gravity           重力（格/tick²），0 = 直線飛行
@@ -34,6 +37,7 @@ weapons:
     damage: 20
     splash_radius: 0
     pierce: 0
+    knockback: 0.16
     spread_degrees: 1.0
     cooldown_ticks: 18
     projectile_speed: 3.0
@@ -51,6 +55,8 @@ weapons:
     damage: 12
     splash_radius: 0
     pierce: 0
+    # 每秒近 7 發，單發推得多一點點就會把人黏在牆上動不了
+    knockback: 0.08
     spread_degrees: 3.0
     cooldown_ticks: 3
     projectile_speed: 3.8
@@ -70,6 +76,7 @@ weapons:
     splash_radius: 0
     # 完全無視硬度：鋼鐵、黑曜石也是一發一格
     pierce: 1.0
+    knockback: 0.16
     spread_degrees: 1.6
     cooldown_ticks: 20
     projectile_speed: 3.4
@@ -86,6 +93,8 @@ weapons:
     damage: 11
     splash_radius: 0
     pierce: 0
+    # 逐顆結算，貼臉全中等於推 5 次
+    knockback: 0.09
     pellets: 5
     spread_degrees: 1.5
     cooldown_ticks: 24
@@ -103,6 +112,7 @@ weapons:
     damage: 52
     splash_radius: 0
     pierce: 0.25
+    knockback: 0.45
     spread_degrees: 0
     cooldown_ticks: 30
     projectile_speed: 5.0
@@ -120,6 +130,7 @@ weapons:
     damage: 38
     splash_radius: 2.5
     pierce: 0
+    knockback: 0.7
     spread_degrees: 1.6
     cooldown_ticks: 40
     projectile_speed: 2.4
@@ -136,6 +147,7 @@ weapons:
     damage: 5
     splash_radius: 0
     pierce: 0
+    knockback: 0.03
     spread_degrees: 0.3
     cooldown_ticks: 2
     # 一 tick 飛 20 格 + 零重力 ＝ 幾乎是即時命中的直線光束
@@ -154,6 +166,7 @@ weapons:
     damage: 180
     splash_radius: 1.5
     pierce: 0.5
+    knockback: 1.5
     spread_degrees: 0
     cooldown_ticks: 80
     projectile_speed: 2.0
@@ -170,6 +183,7 @@ weapons:
     damage: 70
     splash_radius: 3.5
     pierce: 0
+    knockback: 1.0
     spread_degrees: 0
     cooldown_ticks: 120
     projectile_speed: 1.4
