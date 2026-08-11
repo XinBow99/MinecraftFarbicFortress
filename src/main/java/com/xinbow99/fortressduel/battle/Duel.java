@@ -4,6 +4,7 @@ import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.core.DuelSettings;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
+import com.xinbow99.fortressduel.util.DuelItems;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
@@ -26,6 +27,7 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
@@ -260,7 +262,9 @@ public final class Duel {
                     FortressDuel.LOGGER.warn("Invalid amount in starting_items entry '{}', treating it as 1", entry);
                 }
             }
-            player.getInventory().placeItemBackInInventory(new ItemStack(item, count));
+            // 標記成「對戰發的」，結束時才收得回來——玩家是帶著自己的背包就地進場的，
+            // 不能靠清空背包收尾（見 DuelItems）
+            player.getInventory().placeItemBackInInventory(DuelItems.issue(new ItemStack(item, count)));
         }
     }
 
@@ -740,6 +744,7 @@ public final class Duel {
 
         // 要在 arena.restore() 之前：還原只處理方塊，實體得自己收
         removeGuardians();
+        reclaimIssuedItems();
 
         announce(result);
 
@@ -750,6 +755,49 @@ public final class Duel {
         teleportOut(south);
 
         arena.restore();
+    }
+
+    /**
+     * 把對戰發的東西收回來：開場物資、彈藥、商店買的建材，還有那把弓。
+     *
+     * <p>不收的話這些東西會被帶回主世界——彈藥、黑曜石、TNT 全都是免費的，開一場對戰就等於
+     * 一次補給。錢本來就是虛擬且不跨場的（見 {@code Wallet}），物資沒有理由例外。
+     *
+     * <p>只收帶標記的，不是清空背包：玩家是帶著自己原本的背包就地進場的（開場不傳送人），
+     * 清空等於沒收他的家當。
+     *
+     * <p>離線的人這裡碰不到，改在他下次上線時收（見 {@code DuelManager} 的 JOIN 處理）。
+     */
+    private void reclaimIssuedItems() {
+        for (Side side : new Side[]{north, south}) {
+            ServerPlayer player = playerOf(side);
+            if (player == null) continue;
+
+            int removed = DuelItems.stripFrom(player);
+            if (removed > 0) {
+                player.sendSystemMessage(Msg.info("對戰結束，收回了對戰期間發放與購買的 "
+                        + removed + " 疊物資。"));
+            }
+        }
+        clearDroppedIssuedItems();
+    }
+
+    /**
+     * 掃掉散落在場上的對戰物資。
+     *
+     * <p>只收背包是不夠的：玩家可以在結束前把東西丟在地上，那些掉落物不屬於任何人的背包，
+     * 地形還原也只處理方塊——不清的話它們會留在世界上，撿起來就等於繞過了回收。
+     */
+    private void clearDroppedIssuedItems() {
+        Region region = arena.region();
+        AABB box = new AABB(region.minX(), region.minY(), region.minZ(),
+                region.maxX() + 1.0, region.maxY() + 1.0, region.maxZ() + 1.0);
+
+        for (ItemEntity dropped : arena.level().getEntitiesOfClass(ItemEntity.class, box)) {
+            if (DuelItems.isIssued(dropped.getItem())) {
+                dropped.discard();
+            }
+        }
     }
 
     private void announce(Result result) {

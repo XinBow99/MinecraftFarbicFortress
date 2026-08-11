@@ -11,6 +11,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.particles.SimpleParticleType;
@@ -567,7 +568,7 @@ public final class WeaponSystem {
     }
 
     private void trail(ServerLevel level, Projectile projectile, Vec3 from, Vec3 to) {
-        ParticleOptions particle = particle(projectile.weapon.trailParticle());
+        ParticleOptions particle = particle(projectile.weapon);
         // 一格一顆：速度快的武器（雷射一 tick 飛 20 格）也要畫成一條連續的線，不是一串點
         int steps = Math.max(1, (int) from.distanceTo(to));
         for (int i = 0; i < steps; i++) {
@@ -735,13 +736,28 @@ public final class WeaponSystem {
         return pos.hashCode();
     }
 
-    private ParticleOptions particle(Identifier id) {
+    /**
+     * 這把武器的彈道粒子。
+     *
+     * <p>{@code trail_color} 有指定就走 {@code dust}——那是原版唯一能任意上色的粒子，所以
+     * 「紫色的光束」這種需求只能從這裡來。沒指定就用 {@code trail_particle} 那顆原樣。
+     *
+     * <p>兩條路分開的理由：{@code trail_particle} 只吃得下一個 id，而 dust 需要顏色與大小
+     * 兩個參數——沒辦法把它們塞進同一個欄位，硬要的話就變成自己發明一套 id 語法。
+     */
+    private ParticleOptions particle(WeaponDef weapon) {
+        if (weapon.trailColor() >= 0) {
+            return new DustParticleOptions(weapon.trailColor(), (float) weapon.trailScale());
+        }
+
+        Identifier id = weapon.trailParticle();
         var type = BuiltInRegistries.PARTICLE_TYPE.getValue(id);
         if (type instanceof SimpleParticleType simple) {
             return simple;
         }
-        // 帶參數的粒子（例如 dust 要指定顏色）沒辦法只用一個 id 建出來，退回一個看得見的預設
-        FortressDuel.LOGGER.warn("Particle '{}' is missing or needs parameters, falling back to crit", id);
+        // 帶參數的粒子沒辦法只用一個 id 建出來。想要顏色的話用 trail_color，那條路走 dust
+        FortressDuel.LOGGER.warn("Particle '{}' is missing or needs parameters, falling back to crit"
+                + " (use trail_color if you want a coloured trail)", id);
         return ParticleTypes.CRIT;
     }
 

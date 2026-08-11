@@ -2,6 +2,7 @@ package com.xinbow99.fortressduel.battle;
 
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelSettings;
+import com.xinbow99.fortressduel.util.DuelItems;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -59,6 +60,7 @@ public final class DuelManager {
     public void register() {
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> onJoin(handler.player));
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) ->
                 allowBreak(player instanceof ServerPlayer sp ? sp : null, pos));
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
@@ -253,6 +255,24 @@ public final class DuelManager {
 
         // 對戰本身不在這裡收尾——下一個 tick 的 Duel.tick() 會發現人不見了並判給對手，
         // 這樣「離線判負」只有一條路徑
+    }
+
+    /**
+     * 上線時把身上殘留的對戰物資收掉。
+     *
+     * <p>對戰中途離線的人，{@link Duel#finish} 那一輪碰不到他——他已經不在線上了，而背包早就
+     * 隨著登出寫進存檔。所以「離線帶著一整套彈藥跑掉」這條路要在他回來的時候補收。
+     *
+     * <p>只在他**沒有**正在對戰時收：正常情況下上線本來就不會在對戰中（離線會判負），
+     * 這個判斷純粹是為了不去動一場真的還在進行的對戰。
+     */
+    private void onJoin(ServerPlayer player) {
+        if (player == null || isInDuel(player)) return;
+
+        int removed = DuelItems.stripFrom(player);
+        if (removed > 0) {
+            player.sendSystemMessage(Msg.info("收回了上一場對戰發放與購買的 " + removed + " 疊物資。"));
+        }
     }
 
     /** 對戰中不准挖競技場外面的方塊，也不准挖核心與框線；場內其他地方隨便挖。 */

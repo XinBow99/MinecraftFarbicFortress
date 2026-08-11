@@ -51,7 +51,12 @@
 #                     連射武器只能設 true：機槍 cooldown 3、雷射 2，也就是每秒 7~10 發，
 #                     靠連點右鍵打到那個速度手感差得有感
 #   breaks_blocks     命中的方塊會不會被打掉（只在競技場範圍內生效）
-#   trail_particle    飛行時拖的粒子
+#   trail_particle    飛行時拖的粒子（沒指定 trail_color 時才用它）
+#   trail_color       彈道的顏色，"#RRGGBB"。指定之後就改走 dust 粒子——那是原版唯一能
+#                     任意上色的粒子，所以「紫色的光束」這種需求只能從這裡來。
+#                     trail_particle 只吃得下一個 id，塞不進顏色，所以是兩個欄位
+#                     寫法三種都吃：#A020F0 / A020F0 / 0xA020F0
+#   trail_scale       粒子大小倍率，預設 1.4。只有指定 trail_color 時有意義（dust 才吃得到）
 #   fire_sound        開火音效
 #   ammo_per_shot     一次擊發消耗幾發（散彈打 5 顆但只算 1 發，跟 pellets 是兩回事）
 #                     只從**副手那一疊**扣，不會去背包裡湊——副手就是上膛的彈匣
@@ -80,6 +85,7 @@ weapons:
     lifetime_ticks: 120
     breaks_blocks: true
     trail_particle: minecraft:crit
+    trail_color: "#C8C8C8"
     fire_sound: minecraft:entity.arrow.shoot
     starting_ammo: 60
 
@@ -108,6 +114,7 @@ weapons:
     auto: true
     breaks_blocks: true
     trail_particle: minecraft:smoke
+    trail_color: "#FFB03A"
     fire_sound: minecraft:entity.arrow.shoot
     starting_ammo: 60
 
@@ -134,6 +141,7 @@ weapons:
     lifetime_ticks: 120
     breaks_blocks: true
     trail_particle: minecraft:enchanted_hit
+    trail_color: "#5AC8FF"
     fire_sound: minecraft:item.crossbow.shoot
 
   buck:
@@ -160,6 +168,7 @@ weapons:
     lifetime_ticks: 40
     breaks_blocks: true
     trail_particle: minecraft:crit
+    trail_color: "#FFE9A8"
     fire_sound: minecraft:entity.firework_rocket.blast
 
   sniper:
@@ -190,6 +199,8 @@ weapons:
     lifetime_ticks: 160
     breaks_blocks: true
     trail_particle: minecraft:end_rod
+    trail_color: "#FFFFFF"
+    trail_scale: 0.9
     fire_sound: minecraft:item.crossbow.shoot
 
   he:
@@ -214,6 +225,7 @@ weapons:
     lifetime_ticks: 120
     breaks_blocks: true
     trail_particle: minecraft:flame
+    trail_color: "#FF5A2A"
     fire_sound: minecraft:entity.generic.explode
 
   laser:
@@ -240,6 +252,8 @@ weapons:
     auto: true
     breaks_blocks: true
     trail_particle: minecraft:end_rod
+    trail_color: "#A020F0"
+    trail_scale: 1.8
     fire_sound: minecraft:block.beacon.power_select
 
   missile:
@@ -264,6 +278,8 @@ weapons:
     lifetime_ticks: 200
     breaks_blocks: true
     trail_particle: minecraft:flame
+    trail_color: "#FF2E2E"
+    trail_scale: 1.8
     fire_sound: minecraft:entity.firework_rocket.launch
 
   drone:
@@ -287,4 +303,6 @@ weapons:
     lifetime_ticks: 300
     breaks_blocks: true
     trail_particle: minecraft:portal
+    trail_color: "#00E5A0"
+    trail_scale: 1.6
     fire_sound: minecraft:entity.generic.explode

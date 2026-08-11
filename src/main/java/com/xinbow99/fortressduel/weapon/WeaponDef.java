@@ -1,5 +1,6 @@
 package com.xinbow99.fortressduel.weapon;
 
+import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.util.YamlConfig;
 import net.minecraft.resources.Identifier;
 
@@ -73,6 +74,15 @@ public record WeaponDef(
 
         /** 飛行時拖的粒子。 */
         Identifier trailParticle,
+        /**
+         * 彈道的顏色（打包成 0xRRGGBB）。{@code -1} ＝ 不指定，用 {@link #trailParticle} 那顆原樣。
+         *
+         * <p>指定顏色時走 {@code dust} 粒子——那是原版唯一能任意上色的粒子，
+         * 而 {@code trail_particle} 只吃得下一個 id，沒辦法把顏色一起塞進去。
+         */
+        int trailColor,
+        /** 彈道粒子的大小倍率。只有指定顏色時有意義（dust 才吃得到）。 */
+        double trailScale,
         /** 開火音效。 */
         Identifier fireSound
 ) {
@@ -129,7 +139,32 @@ public record WeaponDef(
                 Math.max(1, YamlConfig.i(section, "ammo_per_shot", 1)),
                 Math.max(0, YamlConfig.i(section, "starting_ammo", 0)),
                 Identifier.parse(YamlConfig.str(section, "trail_particle", "minecraft:crit")),
+                parseColor(YamlConfig.str(section, "trail_color", ""), id),
+                Math.max(0.1, YamlConfig.d(section, "trail_scale", 1.4)),
                 Identifier.parse(YamlConfig.str(section, "fire_sound", "minecraft:entity.generic.explode")));
+    }
+
+    /**
+     * 把設定裡的顏色字串解析成 0xRRGGBB。
+     *
+     * <p>接受 {@code "#A020F0"}、{@code "A020F0"}、{@code "0xA020F0"} 三種寫法——顏色是玩家
+     * 從調色盤複製貼上的東西，為了一個 # 就整條變成預設值太苛刻了。
+     *
+     * @return -1 ＝ 沒指定或格式不對
+     */
+    private static int parseColor(String raw, String weaponId) {
+        String text = raw.trim();
+        if (text.isEmpty()) return -1;
+
+        String hex = text.startsWith("#") ? text.substring(1)
+                : text.toLowerCase().startsWith("0x") ? text.substring(2)
+                : text;
+        try {
+            return Integer.parseInt(hex, 16) & 0xFFFFFF;
+        } catch (NumberFormatException e) {
+            FortressDuel.LOGGER.warn("Weapon {} has an unparsable trail_color '{}', ignoring it", weaponId, raw);
+            return -1;
+        }
     }
 
     @SuppressWarnings("unchecked")
