@@ -92,6 +92,8 @@ public final class ShopMenu extends ChestMenu {
         lore.add(Component.literal("價格 $" + entry.price()).withStyle(ChatFormatting.GOLD));
 
         switch (entry.type()) {
+            case "launcher" -> lore.add(Component.literal("主手拿它、副手放彈藥")
+                    .withStyle(ChatFormatting.GRAY));
             case "ammo" -> {
                 lore.add(Component.literal("補充 " + entry.amount() + " 發")
                         .withStyle(ChatFormatting.GRAY));
@@ -276,6 +278,7 @@ public final class ShopMenu extends ChestMenu {
         }
 
         boolean delivered = switch (entry.type()) {
+            case "launcher" -> giveLauncher();
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
             default -> {
@@ -291,6 +294,19 @@ public final class ShopMenu extends ChestMenu {
         player.level().playSound(null, player.blockPosition(),
                 SoundEvents.NOTE_BLOCK_PLING.value(), SoundSource.PLAYERS, 0.8f, 1.6f);
         refresh();
+    }
+
+    /**
+     * 給那把弓。
+     *
+     * <p>不能走 {@code type: item}：那條路是給建材用的，直接發原版物品，所以買到的會是一支
+     * 名字叫「弓」的普通弓——櫃子上寫「發射器」、拿到手變成「弓」。發射器是武器系統的東西，
+     * 要跟開場那把、{@code /duel give} 那把長得一模一樣，所以統一由 {@link WeaponItems#createBow}
+     * 產生（它也順手打上「對戰發的」標記，結束時收得回來）。
+     */
+    private boolean giveLauncher() {
+        player.getInventory().placeItemBackInInventory(WeaponItems.createBow());
+        return true;
     }
 
     /**

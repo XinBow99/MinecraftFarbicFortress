@@ -1,5 +1,6 @@
 package com.xinbow99.fortressduel.weapon;
 
+import com.xinbow99.fortressduel.util.DuelItems;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -23,12 +24,12 @@ public final class WeaponItems {
     private WeaponItems() {
     }
 
-    /** 全場通用的那把弓。開場由 {@code battle.starting_items} 發，商店不賣。 */
+    /** 全場通用的那把弓。開場發一把，商店也擺一把 $0 的備品。 */
     public static ItemStack createBow() {
         ItemStack stack = new ItemStack(Items.BOW);
         stack.set(DataComponents.CUSTOM_NAME,
                 Component.literal("發射器").withStyle(ChatFormatting.AQUA));
-        return stack;
+        return DuelItems.issue(stack);
     }
 
     /**
@@ -43,6 +44,6 @@ public final class WeaponItems {
                 BuiltInRegistries.ITEM.getOptional(weapon.item()).orElse(Items.STICK), count);
         stack.set(DataComponents.CUSTOM_NAME,
                 Component.literal(weapon.displayName()).withStyle(ChatFormatting.AQUA));
-        return stack;
+        return DuelItems.issue(stack);
     }
 }
