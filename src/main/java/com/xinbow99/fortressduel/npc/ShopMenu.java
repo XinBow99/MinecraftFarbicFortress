@@ -4,7 +4,6 @@ import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
 import com.xinbow99.fortressduel.util.Msg;
-import com.xinbow99.fortressduel.weapon.AmmoPouch;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponItems;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
@@ -98,17 +97,11 @@ public final class ShopMenu extends ChestMenu {
                         .withStyle(ChatFormatting.GRAY));
                 WeaponDef weapon = weapons.byId(entry.weapon());
                 if (weapon != null) {
-                    // 直接把「你現在有幾發」畫在商品上，玩家不用退出去看 HUD 再決定要不要買
-                    lore.add(Component.literal("目前 "
-                                    + weapons.pouchOf(player).get(weapon.id())
-                                    + "/" + weapon.ammoCapacity())
+                    // 直接把「你現在有幾發」畫在商品上，玩家不用關掉商店翻背包再決定要不要買
+                    lore.add(Component.literal("目前 " + weapons.ammoCount(player, weapon) + " 發")
                             .withStyle(ChatFormatting.GRAY));
+                    describeWeapon(lore, weapon, player, weapons);
                 }
-            }
-            case "weapon" -> {
-                lore.add(Component.literal("附 " + entry.amount() + " 發子彈")
-                        .withStyle(ChatFormatting.GRAY));
-                describeWeapon(lore, weapons.byId(entry.weapon()), player, weapons);
             }
             default -> {
                 lore.add(Component.literal("數量 " + entry.amount())
@@ -283,7 +276,6 @@ public final class ShopMenu extends ChestMenu {
         }
 
         boolean delivered = switch (entry.type()) {
-            case "weapon" -> giveWeapon(entry);
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
             default -> {
@@ -301,19 +293,12 @@ public final class ShopMenu extends ChestMenu {
         refresh();
     }
 
-    private boolean giveWeapon(ShopEntry entry) {
-        WeaponDef weapon = weapons.byId(entry.weapon());
-        if (weapon == null) {
-            deny("這件商品設定錯誤（找不到武器 " + entry.weapon() + "）");
-            return false;
-        }
-
-        // 蓄力武器是一支帶標記的弓，即發武器是它綁的原版物品——差異收在 WeaponItems 裡
-        player.getInventory().placeItemBackInInventory(WeaponItems.create(weapon));
-        weapons.pouchOf(player).refill(weapon.id(), entry.amount(), weapon.ammoCapacity());
-        return true;
-    }
-
+    /**
+     * 給彈藥。
+     *
+     * <p>彈藥是真的背包物品，所以沒有「彈藥袋滿了」這種狀態——上限由堆疊上限與背包空間決定。
+     * 背包滿了的話 {@code placeItemBackInInventory} 會把剩下的丟在腳邊，跟原版一致。
+     */
     private boolean giveAmmo(ShopEntry entry) {
         WeaponDef weapon = weapons.byId(entry.weapon());
         if (weapon == null) {
@@ -321,13 +306,8 @@ public final class ShopMenu extends ChestMenu {
             return false;
         }
 
-        AmmoPouch pouch = weapons.pouchOf(player);
-        int added = pouch.refill(weapon.id(), entry.amount(), weapon.ammoCapacity());
-        if (added <= 0) {
-            // 買滿了就不收錢——不然玩家會在沒有任何提示的情況下把錢丟進水裡
-            deny(weapon.displayName() + " 的子彈已經滿了（" + weapon.ammoCapacity() + " 發）");
-            return false;
-        }
+        player.getInventory().placeItemBackInInventory(
+                WeaponItems.createAmmo(weapon, entry.amount()));
         return true;
     }
 

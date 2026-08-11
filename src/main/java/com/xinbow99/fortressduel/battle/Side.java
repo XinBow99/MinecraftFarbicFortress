@@ -62,7 +62,7 @@ public final class Side {
      * 一個沒有真人的靶子，給單人練習模式用。
      *
      * <p>UUID 隨機生成、每場都不一樣，所以它永遠不會撞到任何真實玩家的 UUID，也就不會被
-     * {@code duelsByPlayer}、錢包、彈藥袋這些以 UUID 為鍵的表當成玩家。{@code returnLevel}／
+     * {@code duelsByPlayer}、錢包這些以 UUID 為鍵的表當成玩家。{@code returnLevel}／
      * {@code returnPos} 是佔位用的——沒有對應的線上玩家，{@code teleportOut} 會先一步跳過它。
      */
     public static Side dummy(String name, ChatFormatting color, BossEvent.BossBarColor barColor) {

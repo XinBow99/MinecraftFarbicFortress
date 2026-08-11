@@ -1,30 +1,34 @@
 # 要塞對戰 — 武器
 #
-# 數值移植自網頁版的 AMMO 表，但拿掉了價格：MC 版不買彈藥，武器就是手上的物品，
-# 建材也不用買（自己挖、自己蓋）。
+# 數值移植自網頁版的 AMMO 表。建材不用買（自己挖、自己蓋），彈藥要去軍火商買。
 #
-# 拿著 item 指定的物品「右鍵」開火，只在對戰的攻擊階段有效。
+# **全場只有一把弓，副手放什麼彈藥就射什麼。**
+# 主手拿弓、副手放 item 指定的物品，按住右鍵拉弓、放開發射，只在攻擊階段有效。
+# 這就是原版弓的運作方式（原版找箭也是優先看副手），所以玩家不用學新規則；而且彈藥是真的
+# 背包物品，剩幾發由原版自己畫在那一格上，HUD 不用再擠一段數字。
+#
 # 方塊血量 = 原版硬度 × duel.yml 的 weapon.block_hp_per_hardness（預設 10），
 # 所以 damage 是「打幾發破一格」而不是絕對值：石頭硬度 1.5 → 血量 15 → 廢鐵彈(20) 一發破。
 #
 # 欄位
 #   name              顯示名稱
-#   item              綁定的物品；拿著它右鍵就是用這把武器
+#   item              這種武器的**彈藥物品**。放進副手就是用這把武器
+#                     9 種彈藥剛好是 9 個一眼分得出來的原版物品，這是熱鍵欄的辨識依據
 #   damage            單發傷害（同時作用在方塊與生物上）
 #   splash_radius     濺射半徑（格），0 = 單點命中
 #   pierce            穿甲 0~1。折減目標方塊的血量，1.0 = 血量壓到 1（一發破，但仍要打中）
 #   knockback         命中生物時推開的力道（格/tick）。0 = 不推
 #                     不寫的話 = damage × 0.008，所以舊設定檔不改也會有力道感
 #                     濺射武器照爆心距離衰減，跟傷害用同一條曲線
-#   launcher          instant = 右鍵即發（預設）
-#                     bow     = 拿弓拉滿再放。武器物品會變成一支帶標記的弓，
-#                               拉弓動畫與力道回饋由原版客戶端提供，玩家不用裝任何東西
-#                     連射武器不能設 bow：滿弓要 20 tick，而機槍的 cooldown 是 3、雷射是 2
-#   charge            只有 launcher: bow 時有意義
+#   charge            蓄力設定
 #     curve           力道曲線。vanilla（前快後緩）/ linear，或直接畫折線：
 #                     [[0, 0.2], [0.7, 0.45], [1.0, 1.0]] = 後段暴衝，逼你拉滿
 #     min_draw        低於這個力道就不發射也不耗彈（放空弓只是手滑，不該被罰）
+#                     設 0 = 點一下右鍵就發射，射速完全由 cooldown_ticks 決定。
+#                     連射武器（機槍 cooldown 3、雷射 2）只能這樣設：滿弓要 20 tick，
+#                     套上蓄力等於廢掉它們「連續潑灑」的定位
 #     affects         力道影響什麼：speed / damage / spread 可複選，預設只有 speed
+#                     連射武器給空的 []，蓄力不影響任何數值
 #
 #   ※ 滿弓固定 20 tick，這是客戶端寫死的。曲線只改 0→1 之間的形狀，兩端永遠對齊動畫——
 #     設成「40 tick 才滿力道」的話，玩家看到的弓在第 20 tick 就拉滿了，視覺會說謊
@@ -43,9 +47,9 @@
 #   breaks_blocks     命中的方塊會不會被打掉（只在競技場範圍內生效）
 #   trail_particle    飛行時拖的粒子
 #   fire_sound        開火音效
-#   ammo_capacity     最多帶幾發，也就是 HUD 上 100/120 的分母
 #   ammo_per_shot     一次擊發消耗幾發（散彈打 5 顆但只算 1 發，跟 pellets 是兩回事）
-#   starting_ammo     開場就配給的量
+#                     只從**副手那一疊**扣，不會去背包裡湊——副手就是上膛的彈匣
+#   starting_ammo     開場就配給的量。上限由堆疊上限與背包空間決定，沒有另外的彈藥上限
 
 weapons:
   scrap:
@@ -55,6 +59,11 @@ weapons:
     splash_radius: 0
     pierce: 0
     knockback: 0.16
+    # 萬用彈：門檻低、蓄力只影響射程，隨手打也打得出去
+    charge:
+      curve: vanilla
+      min_draw: 0.1
+      affects: [speed]
     spread_degrees: 1.0
     recoil: 0.6
     recoil_max: 4.0
@@ -64,7 +73,6 @@ weapons:
     gravity: 0.04
     lifetime_ticks: 120
     breaks_blocks: true
-    ammo_capacity: 120
     trail_particle: minecraft:crit
     fire_sound: minecraft:entity.arrow.shoot
     starting_ammo: 60
@@ -77,6 +85,11 @@ weapons:
     pierce: 0
     # 每秒近 7 發，單發推得多一點點就會把人黏在牆上動不了
     knockback: 0.08
+    # 連射武器：點一下就發射，射速完全由 cooldown 決定。
+    # 套上蓄力等於廢掉它「連續潑灑」的定位——滿弓 20 tick 比它的 cooldown 慢七倍
+    charge:
+      min_draw: 0
+      affects: []
     spread_degrees: 3.0
     # 連射的代價全在這裡：打滿一梭最後幾發已經散到 9 度
     recoil: 0.9
@@ -88,7 +101,6 @@ weapons:
     lifetime_ticks: 80
     auto: true
     breaks_blocks: true
-    ammo_capacity: 300
     trail_particle: minecraft:smoke
     fire_sound: minecraft:entity.arrow.shoot
     starting_ammo: 60
@@ -101,6 +113,11 @@ weapons:
     # 完全無視硬度：鋼鐵、黑曜石也是一發一格
     pierce: 1.0
     knockback: 0.16
+    # 力道決定傷害：半弓打不穿黑曜石，逼你把整發拉滿再放
+    charge:
+      curve: linear
+      min_draw: 0.25
+      affects: [damage]
     spread_degrees: 1.6
     recoil: 0.8
     recoil_max: 4.0
@@ -110,7 +127,6 @@ weapons:
     gravity: 0.03
     lifetime_ticks: 120
     breaks_blocks: true
-    ammo_capacity: 60
     trail_particle: minecraft:enchanted_hit
     fire_sound: minecraft:item.crossbow.shoot
 
@@ -122,6 +138,11 @@ weapons:
     pierce: 0
     # 逐顆結算，貼臉全中等於推 5 次
     knockback: 0.09
+    # 力道收攏彈著：速射噴一片，拉滿才是一束
+    charge:
+      curve: linear
+      min_draw: 0.15
+      affects: [spread]
     pellets: 5
     spread_degrees: 1.5
     recoil: 0.7
@@ -132,7 +153,6 @@ weapons:
     gravity: 0.05
     lifetime_ticks: 40
     breaks_blocks: true
-    ammo_capacity: 120
     trail_particle: minecraft:crit
     fire_sound: minecraft:entity.firework_rocket.blast
 
@@ -143,6 +163,11 @@ weapons:
     splash_radius: 0
     pierce: 0.25
     knockback: 0.45
+    # 逼你站定：門檻最高，而且力道直接換成準度
+    charge:
+      curve: linear
+      min_draw: 0.3
+      affects: [spread]
     spread_degrees: 0
     # 單發極準，但連著開就完全失去狙擊的意義
     recoil: 2.5
@@ -154,7 +179,6 @@ weapons:
     gravity: 0.01
     lifetime_ticks: 160
     breaks_blocks: true
-    ammo_capacity: 40
     trail_particle: minecraft:end_rod
     fire_sound: minecraft:item.crossbow.shoot
 
@@ -165,12 +189,7 @@ weapons:
     splash_radius: 2.5
     pierce: 0
     knockback: 0.7
-    # 目前唯一的蓄力武器。慢速拋物線本來就該蓄力：力道決定射程，
-    # 拉弓變成測距的動作，而不是多按一個鍵
-    #
-    # 先只改這一把是刻意的——蓄力的手感只能實測，一次全改的話出問題很難判斷
-    # 是機制不對還是某把武器的曲線不對。要推廣到其他武器只要加這兩段設定
-    launcher: bow
+    # 慢速拋物線本來就該蓄力：力道決定射程，拉弓變成測距的動作
     charge:
       curve: linear      # 線性最好抓落點
       min_draw: 0.2
@@ -184,7 +203,6 @@ weapons:
     gravity: 0.06
     lifetime_ticks: 120
     breaks_blocks: true
-    ammo_capacity: 30
     trail_particle: minecraft:flame
     fire_sound: minecraft:entity.generic.explode
 
@@ -195,6 +213,10 @@ weapons:
     splash_radius: 0
     pierce: 0
     knockback: 0.03
+    # 同機槍：連射武器不蓄力
+    charge:
+      min_draw: 0
+      affects: []
     spread_degrees: 0.3
     # 每秒 10 發，單發加一點點就會在持續射擊時明顯散開
     recoil: 0.25
@@ -207,7 +229,6 @@ weapons:
     lifetime_ticks: 6
     auto: true
     breaks_blocks: true
-    ammo_capacity: 40
     trail_particle: minecraft:end_rod
     fire_sound: minecraft:block.beacon.power_select
 
@@ -218,6 +239,10 @@ weapons:
     splash_radius: 1.5
     pierce: 0.5
     knockback: 1.5
+    charge:
+      curve: linear
+      min_draw: 0.2
+      affects: [speed]
     spread_degrees: 0
     # 一次一發、80 tick 裝填，後座力沒有意義
     recoil: 0.0
@@ -228,7 +253,6 @@ weapons:
     gravity: 0
     lifetime_ticks: 200
     breaks_blocks: true
-    ammo_capacity: 30
     trail_particle: minecraft:flame
     fire_sound: minecraft:entity.firework_rocket.launch
 
@@ -239,6 +263,10 @@ weapons:
     splash_radius: 3.5
     pierce: 0
     knockback: 1.0
+    charge:
+      curve: linear
+      min_draw: 0.2
+      affects: [speed]
     spread_degrees: 0
     recoil: 0.0
     recoil_max: 0.0
@@ -248,6 +276,5 @@ weapons:
     gravity: 0
     lifetime_ticks: 300
     breaks_blocks: true
-    ammo_capacity: 6
     trail_particle: minecraft:portal
     fire_sound: minecraft:entity.generic.explode

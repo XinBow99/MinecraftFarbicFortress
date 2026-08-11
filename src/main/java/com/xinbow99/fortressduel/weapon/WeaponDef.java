@@ -17,6 +17,7 @@ import java.util.Map;
 public record WeaponDef(
         String id,
         String displayName,
+        /** 這種武器的**彈藥物品**。副手放著它，主手的弓射出去的就是這一種。 */
         Identifier item,
 
         double damage,
@@ -26,14 +27,7 @@ public record WeaponDef(
         double pierce,
         /** 命中生物時推開多遠（格/tick 的速度增量）。0 ＝ 不推。 */
         double knockback,
-        /**
-         * 怎麼擊發。{@code false} ＝ 右鍵即發（預設）、{@code true} ＝ 拿弓拉滿再放。
-         *
-         * <p>連射武器不能設 true：滿弓要 20 tick，而機槍的 cooldown 是 3、雷射是 2，
-         * 它們的設計就是連續潑灑，套上蓄力等於廢掉。
-         */
-        boolean bowLaunched,
-        /** 力道曲線。只有 {@code bowLaunched} 時有意義。 */
+        /** 力道曲線。 */
         ChargeCurve chargeCurve,
         /** 低於這個力道就不發射、也不耗彈（放空弓）。 */
         double chargeMinDraw,
@@ -66,8 +60,6 @@ public record WeaponDef(
         /** 命中的方塊是否會被打掉（只在競技場範圍內生效）。 */
         boolean breaksBlocks,
 
-        /** 最多能帶幾發，也就是 HUD 上 {@code 100/120} 的分母。 */
-        int ammoCapacity,
         /** 一次擊發消耗幾發。散彈打出 5 顆但通常只算 1 發，所以這跟 pellets 是兩回事。 */
         int ammoPerShot,
         /** 開場就配給的量。 */
@@ -109,7 +101,6 @@ public record WeaponDef(
                 // 預設值跟著傷害走，這樣既有的 weapons.yml（沒有這個欄位）也會有力道感——
                 // 設定檔是整份複製出去的、不會事後補鍵，預設 0 等於要玩家刪檔才吃得到這個功能
                 Math.max(0, YamlConfig.d(section, "knockback", damage * KNOCKBACK_PER_DAMAGE)),
-                "bow".equalsIgnoreCase(YamlConfig.str(section, "launcher", "instant")),
                 ChargeCurve.parse(charge.get("curve"), id),
                 Math.clamp(YamlConfig.d(charge, "min_draw", 0.15), 0.0, 1.0),
                 affects.contains("speed"),
@@ -129,7 +120,6 @@ public record WeaponDef(
                 Math.max(1, YamlConfig.i(section, "lifetime_ticks", 120)),
                 YamlConfig.bool(section, "auto", false),
                 YamlConfig.bool(section, "breaks_blocks", true),
-                Math.max(1, YamlConfig.i(section, "ammo_capacity", 120)),
                 Math.max(1, YamlConfig.i(section, "ammo_per_shot", 1)),
                 Math.max(0, YamlConfig.i(section, "starting_ammo", 0)),
                 Identifier.parse(YamlConfig.str(section, "trail_particle", "minecraft:crit")),
