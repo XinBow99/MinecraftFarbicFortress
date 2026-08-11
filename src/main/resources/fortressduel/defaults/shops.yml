@@ -107,13 +107,15 @@ shops:
         item: minecraft:iron_shovel
         lore: 挖土、挖沙；地堡跟壕溝都靠它
 
-      tool_lead:
-        name: 牽繩 ×2
+      # 熊貓栓不了（原版 Panda.canBeLeashed 寫死回 false），牠只吃竹子——
+      # 手上拿著竹子牠就跟著你走，這是搬動熊貓的唯一手段
+      tool_bamboo:
+        name: 竹子 ×16
         type: item
         price: 60
-        item: minecraft:lead
-        amount: 2
-        lore: 熊貓的移動手段；開場那 4 條不夠用再來拿
+        item: minecraft:bamboo
+        amount: 16
+        lore: 拿在手上熊貓就跟著走；開場那 16 根不夠用再來拿
 
       # ---- 建材 ----
       mat_stone:

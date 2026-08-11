@@ -42,6 +42,14 @@ public record DuelSettings(
         int pandaCount,
         /** 每隻熊貓的血量。原版熊貓只有 20，不上調的話狙擊一發一隻。 */
         int pandaHp,
+        /**
+         * 每隻熊貓的個性，照順序對到第 1、2、3… 隻（不夠就從頭循環）。
+         *
+         * <p>原版是隨機抽的，而個性直接決定牠好不好牽：worried 會主動躲開玩家、lazy 會躺著
+         * 不動、aggressive 會反過來打你。抽籤決定的話，一方拿到三隻膽小、另一方三隻正常，
+         * 就是純運氣造成的優劣勢——所以這裡寫死。
+         */
+        List<String> pandaPersonalities,
         /** 開場柵欄圈的半徑（格）。2 ＝ 5×5 的圈。 */
         int penRadius,
         String penBlock,
@@ -118,6 +126,7 @@ public record DuelSettings(
                 cfg.getString("objective.entity", "minecraft:panda"),
                 Math.max(1, cfg.getInt("objective.panda_count", 4)),
                 Math.max(1, cfg.getInt("objective.panda_hp", 100)),
+                pandaPersonalities(cfg),
                 Math.max(1, cfg.getInt("objective.pen_radius", 2)),
                 cfg.getString("objective.pen_block", "minecraft:oak_fence"),
                 Math.max(0, cfg.getInt("arena.platform_radius", 5)),
@@ -149,7 +158,19 @@ public record DuelSettings(
      */
     private static List<String> startingItems(YamlConfig cfg) {
         List<String> configured = cfg.getStringList("battle.starting_items");
-        return configured.isEmpty() ? List.of("minecraft:dirt 20", "minecraft:lead 4") : configured;
+        return configured.isEmpty() ? List.of("minecraft:dirt 20", "minecraft:bamboo 16") : configured;
+    }
+
+    /**
+     * 設定檔沒寫 personalities 時的預設：三隻正常、一隻懶惰。
+     *
+     * <p>不是全部正常——四隻一模一樣的話牠們會擠成一團動作一致，看起來像四個複製品。
+     * 一隻懶惰的躺在旁邊剛好給這一圈一點差異，而且懶惰只是不太走動，不會像 worried
+     * 那樣主動躲開你，牽起來仍然是可預期的。
+     */
+    private static List<String> pandaPersonalities(YamlConfig cfg) {
+        List<String> configured = cfg.getStringList("objective.personalities");
+        return configured.isEmpty() ? List.of("normal", "normal", "normal", "lazy") : configured;
     }
 
     /** 全部用預設值，設定檔還沒讀進來時的退路。 */

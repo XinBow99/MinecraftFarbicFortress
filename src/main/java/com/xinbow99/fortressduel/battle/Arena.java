@@ -81,7 +81,7 @@ public final class Arena {
      * 而且熊貓貼著自己的臉也不好守。退開的方向由「對手在哪邊」決定，所以兩座圈天生就是
      * 一個背對背的佈局。
      *
-     * <p>柵欄只是**起始**位置：熊貓可以被牽繩帶走，藏到哪裡是玩家的決定。
+     * <p>柵欄只是**起始**位置：熊貓可以拿竹子引走，藏到哪裡是玩家的決定。
      */
     public void placePens(BlockPos playerA, BlockPos playerB, DuelSettings settings,
                           BuildingPlacer buildings) {
@@ -120,7 +120,9 @@ public final class Arena {
         if (r <= 0) return;
 
         BlockState planks = blockState(settings.platformBlock(), Blocks.OAK_PLANKS);
-        int surface = center.getY() - 1;   // 圈的腳下那一層
+        // 站的那一格的下面一格 ＝ 玩家腳下踩著的方塊。木板是**取代**它（草地變木板），
+        // 不是鋪在它上面——鋪上面的話所有人都會被墊高一格
+        int surface = center.getY() - 1;
 
         for (int dx = -r; dx <= r; dx++) {
             for (int dz = -r; dz <= r; dz++) {
@@ -202,8 +204,12 @@ public final class Arena {
         int z = self.getZ() + (Math.abs(dz) > Math.abs(dx) ? Integer.signum(dz) * offset : 0);
 
         // 退開之後可能踩空或撞進山壁，夾回競技場的垂直範圍內
+        //
+        // 回傳的是**站的那一格**（腳下的地面在它下面一格）。surfaceY 走的是 getHeight，
+        // 它回的已經是地表上方第一格空氣——再 +1 的話整座圈連同平台都會浮高一層，
+        // 玩家原本站的草地不會被木板取代，而是被木板頂到頭上
         int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 4);
-        return new BlockPos(x, y + 1, z);
+        return new BlockPos(x, y, z);
     }
 
     private static int surfaceY(ServerLevel level, int x, int z) {

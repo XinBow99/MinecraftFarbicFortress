@@ -28,6 +28,7 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.animal.panda.Panda;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -48,7 +49,7 @@ import java.util.UUID;
  * <p>開場不傳送玩家：競技場就地框在雙方站的位置之間，準備倒數結束才在各自腳邊圍出熊貓圈。
  * 之後建造與攻擊階段輪替，勝負條件只有一條：把對方的熊貓全部打死。
  *
- * <p>目標是**實體**而不是方塊，這是刻意的——熊貓可以被牽繩帶走、藏進地下室或假房間，
+ * <p>目標是**實體**而不是方塊，這是刻意的——熊貓可以拿竹子引走、藏進地下室或假房間，
  * 所以「打哪裡」本身變成攻方要解的問題，蓋房子的 3D 結構也才有意義。代價是要自己處理
  * 一堆實體才有的問題：意外死亡、被推走、對戰結束要清乾淨。
  *
@@ -391,7 +392,7 @@ public final class Duel {
 
         for (ServerPlayer player : players) {
             player.sendSystemMessage(Msg.good("熊貓已生成！把對方的 " + settings.pandaCount()
-                    + " 隻熊貓全部打死就獲勝。牠們可以用**牽繩**拉走藏起來——但別把牠們封死，"
+                    + " 隻熊貓全部打死就獲勝。牠們可以拿**竹子**引走藏起來——但別把牠們封死，"
                     + "空間太小會讓牠們持續掉血。"));
             beep(player, SoundEvents.PANDA_AMBIENT, 1f);
         }
@@ -400,7 +401,7 @@ public final class Duel {
     /**
      * 生成一方的熊貓。
      *
-     * <p>刻意**不關 AI**：關掉的話牽繩拉不動，「自己安排佈局」這件事就沒了。代價是牠們會亂晃，
+     * <p>刻意**不關 AI**：關掉的話竹子引不動，「自己安排佈局」這件事就沒了。代價是牠們會亂晃，
      * 所以柵欄圈疊了兩格高（見 {@code Arena.placePen}）。
      */
     private List<UUID> spawnPandas(Side side, BlockPos pen) {
@@ -432,11 +433,49 @@ public final class Duel {
             if (panda instanceof Mob mob) {
                 mob.setPersistenceRequired();
             }
+            applyPersonality(panda, i);
             MobSpawner.setMaxHealth(panda, settings.pandaHp());
             panda.setHealth(panda.getMaxHealth());
             ids.add(panda.getUUID());
         }
         return ids;
+    }
+
+    /**
+     * 指定第 {@code index} 隻熊貓的個性（設定檔的 {@code objective.personalities}）。
+     *
+     * <p>原版是隨機抽的，而個性直接決定牠好不好牽——worried 會**主動躲開玩家**、lazy 會躺著
+     * 不動、aggressive 會反過來打你。抽籤的話，一方三隻正常、另一方三隻膽小是有可能的，
+     * 而那是純運氣造成的優劣勢，跟這個遊戲想比的東西無關。
+     *
+     * <p>顯性與隱性兩個基因都設成同一個值。只設顯性的話，隱性基因仍然是隨機的，遇到
+     * 隱性性狀（brown／weak）的判定或是繁殖出下一代時還是會跑出沒指定的個性。
+     *
+     * <p>目標生物不是熊貓（{@code objective.entity} 換過）就跳過——那時本來就沒有個性可言。
+     */
+    private void applyPersonality(LivingEntity entity, int index) {
+        if (!(entity instanceof Panda panda)) return;
+
+        List<String> wanted = settings.pandaPersonalities();
+        if (wanted.isEmpty()) return;
+
+        String name = wanted.get(index % wanted.size());
+        Panda.Gene gene = geneByName(name);
+        if (gene == null) {
+            FortressDuel.LOGGER.warn("objective.personalities has unknown personality '{}', "
+                    + "leaving panda #{} as vanilla rolled it", name, index);
+            return;
+        }
+        panda.setMainGene(gene);
+        panda.setHiddenGene(gene);
+    }
+
+    /** 設定檔寫的個性名（normal／lazy／…）對到原版的基因；認不得回 null。 */
+    private static Panda.Gene geneByName(String name) {
+        for (Panda.Gene gene : Panda.Gene.values()) {
+            if (gene.getSerializedName().equalsIgnoreCase(name.trim())) return gene;
+        }
+        return null;
     }
 
     /**
