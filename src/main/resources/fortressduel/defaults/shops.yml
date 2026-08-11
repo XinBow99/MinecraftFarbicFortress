@@ -12,9 +12,11 @@
 #   weapon  type = weapon/ammo 時指向 weapons.yml 的武器 id
 #   item    type = item 時要給的物品；type = weapon 時可省略（用武器綁的物品當圖示）
 #   amount  買一次給幾發／幾個
-#   lore    說明文字
+#   lore    說明文字（**補充用**：血量、每元血量、幾發打得破、傷害、射速都由程式從實際數值
+#           算出來印在上面，不用也不該手寫進 lore——手寫的會跟設定漂移而且沒人會發現）
 #
 # 錢從哪來：打怪的賞金（mobs.yml 的 reward）＋ 每輪建造階段的固定收入（duel.yml 的 economy）
+#           錢會因為被對手打中而扣（duel.yml 的 economy.damage_penalty）
 
 shops:
   arms_dealer:
@@ -119,12 +121,19 @@ shops:
         price: 100
         item: minecraft:stone
         amount: 64
-        lore: 硬度 1.5，一般牆體
+        lore: 便宜大碗的一般牆體
 
+      # 定價說明：黑曜石 500 血、石頭 15 血，差 33 倍。
+      # 舊價 $400/16（= $25/格）等於每塊錢買到 20 血量，石頭只有 9.6——性價比高一倍多，
+      # 石頭因此變成嚴格劣勢的選項，建材選擇整個塌縮成「有錢就全蓋黑曜石」。
+      #
+      # 改成 $800/16（= $50/格）之後兩者的每元血量都在 10 上下。黑曜石保留的優勢換成
+      # 「同樣的血量只要放 1/33 的格數」——在 60 秒的建造階段裡，少放方塊本身就是優勢。
+      # 穿甲彈的克制關係也更明確了：$5 一發拆掉 $50 一格。
       mat_obsidian:
         name: 黑曜石 ×16
         type: item
-        price: 400
+        price: 800
         item: minecraft:obsidian
         amount: 16
-        lore: 硬度 50，只有穿甲彈打得動
+        lore: 蓋得快、佔得少；但穿甲彈一發一格

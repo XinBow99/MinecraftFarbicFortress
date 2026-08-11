@@ -52,6 +52,42 @@ public final class EconomyManager {
             wallets.remove(duel.south().playerId());
         });
         ServerLivingEntityEvents.AFTER_DEATH.register(this::onEntityDeath);
+        ServerLivingEntityEvents.AFTER_DAMAGE.register(
+                (entity, source, dealt, taken, blocked) -> onPlayerHurt(entity, source, taken));
+    }
+
+    /**
+     * 被對手打中 → 扣錢。
+     *
+     * <p>這是「擊殺玩家＝獲勝」的替代方案。直接判勝負的話，狙擊 52、導彈 180 對上只有 20 血的
+     * 玩家，等於先命中的人贏，前面的建造、經濟、佈局全部失去意義。改成扣錢之後，打中人仍然是
+     * 一筆實質收穫（對手少了一輪的補給），但不會一發終結整場。
+     *
+     * <p>只算對手造成的傷害。摔落、岩漿、突發事件的怪不算——那些不是對手的操作，
+     * 讓它們也扣錢等於「在自己家踩空一次就少半輪收入」，跟這個機制想獎勵的行為無關。
+     */
+    private void onPlayerHurt(LivingEntity entity, DamageSource source, float amount) {
+        int rate = config.settings().damagePenalty();
+        if (rate <= 0 || amount <= 0) return;
+        if (!(entity instanceof ServerPlayer victim)) return;
+        if (!(source.getEntity() instanceof ServerPlayer attacker) || attacker == victim) return;
+
+        Duel duel = duels.duelOf(victim);
+        if (duel == null || !duel.state().canAttack() || !duel.involves(attacker.getUUID())) return;
+
+        Wallet wallet = wallets.get(victim.getUUID());
+        if (wallet == null) return;
+
+        // 以滿血量為上限：狙擊一發 52 傷害打在 20 血的人身上，罰的是「一條命份量」的錢。
+        // 不設上限的話，高傷害武器的罰款會脫離「你被打掉多少血」這個直覺
+        float effective = Math.min(amount, victim.getMaxHealth());
+        int lost = wallet.lose(Math.round(effective * rate));
+        if (lost <= 0) return;
+
+        victim.sendSystemMessage(Msg.plain("中彈 −$" + lost + "  （$" + wallet.balance() + "）",
+                ChatFormatting.RED), true);
+        attacker.sendSystemMessage(Msg.plain("命中 " + victim.getGameProfile().name()
+                + "  對手 −$" + lost, ChatFormatting.GOLD), true);
     }
 
     private void onDuelStart(Duel duel) {

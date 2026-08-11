@@ -41,6 +41,7 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +67,13 @@ public final class WeaponSystem {
     private final List<Projectile> projectiles = new ArrayList<>();
     /** 玩家 → 各武器的剩餘冷卻（tick）。 */
     private final Map<UUID, Map<String, Integer>> cooldowns = new HashMap<>();
+    /**
+     * 玩家 → 各武器目前累積的後座力（度）。
+     *
+     * <p>逐武器而不是逐玩家：切到另一把槍不該繼承前一把的後座力，而放下一把槍去打別的、
+     * 再切回來時它應該已經回穩了——這由 {@link #tickRecoil} 的固定衰減自然達成。
+     */
+    private final Map<UUID, Map<String, Double>> recoil = new HashMap<>();
     /** 玩家 → 他的彈藥袋。 */
     private final Map<UUID, AmmoPouch> pouches = new HashMap<>();
     /** 每一場對戰裡、每一格已經累積的傷害。 */
@@ -117,6 +125,10 @@ public final class WeaponSystem {
         // 彈藥跟錢一樣不跨場：下一場從開場配給重新算起
         pouches.remove(duel.north().playerId());
         pouches.remove(duel.south().playerId());
+
+        // 後座力也不跨場，否則上一場最後那串連射會讓下一場的第一發歪掉
+        recoil.remove(duel.north().playerId());
+        recoil.remove(duel.south().playerId());
     }
 
     /**
@@ -203,6 +215,32 @@ public final class WeaponSystem {
         return config.weapons().byId(id);
     }
 
+    /** 全部武器，依設定檔的順序。商店的說明文字要靠它算「哪幾把打得動」。 */
+    public Collection<WeaponDef> allWeapons() {
+        return config.weapons().all();
+    }
+
+    /**
+     * 一格硬度 {@code hardness} 的方塊有多少血量（不含穿甲折減）。
+     *
+     * <p>商店要用它把「硬度 50」翻譯成玩家真正在乎的「血量 500」——原版硬度是「挖多久」的單位，
+     * 在這個 mod 裡沒有直接意義。
+     */
+    public float blockHpOf(float hardness) {
+        return blockHp(hardness, 0);
+    }
+
+    /**
+     * 這把武器要幾發才打得破一格硬度 {@code hardness} 的方塊。
+     *
+     * @return 打不破（傷害 0 或不破壞方塊）時回傳 -1
+     */
+    public int shotsToBreak(WeaponDef weapon, float hardness) {
+        if (!weapon.breaksBlocks() || weapon.damageVsBlock() <= 0) return -1;
+        float hp = blockHp(hardness, weapon.pierce());
+        return (int) Math.ceil(hp / weapon.damageVsBlock());
+    }
+
     /**
      * 玩家手上拿的武器，主手優先；兩手都不是武器就回 null。
      *
@@ -224,8 +262,12 @@ public final class WeaponSystem {
         Vec3 origin = player.getEyePosition();
         Vec3 look = player.getLookAngle();
 
+        // 這一發用的是「開火前」的後座力：第一發永遠是準的，代價從第二發才開始付
+        double spread = weapon.spreadDegrees() + recoilOf(player, weapon);
+        addRecoil(player, weapon);
+
         for (int i = 0; i < weapon.pellets(); i++) {
-            Vec3 direction = applySpread(level, look, weapon.spreadDegrees());
+            Vec3 direction = applySpread(level, look, spread);
             projectiles.add(new Projectile(weapon, duel, player, origin,
                     direction.scale(weapon.projectileSpeed())));
         }
@@ -270,7 +312,39 @@ public final class WeaponSystem {
 
     private void onServerTick(MinecraftServer server) {
         tickCooldowns();
+        tickRecoil();
         tickProjectiles();
+    }
+
+    /** 目前這把武器累積了多少後座力（度）。 */
+    private double recoilOf(ServerPlayer player, WeaponDef weapon) {
+        Map<String, Double> perWeapon = recoil.get(player.getUUID());
+        return perWeapon == null ? 0 : perWeapon.getOrDefault(weapon.id(), 0.0);
+    }
+
+    private void addRecoil(ServerPlayer player, WeaponDef weapon) {
+        if (weapon.recoil() <= 0) return;
+        recoil.computeIfAbsent(player.getUUID(), k -> new HashMap<>())
+                .merge(weapon.id(), weapon.recoil(),
+                        (old, add) -> Math.min(weapon.recoilMax(), old + add));
+    }
+
+    /**
+     * 後座力回穩。
+     *
+     * <p>固定速率往下掉而不是按比例衰減：按比例的話尾巴會拖很長，玩家永遠等不到「完全回穩」
+     * 的那一刻，而「停火多久才會恢復準度」是要能被背下來的。
+     */
+    private void tickRecoil() {
+        for (Map.Entry<UUID, Map<String, Double>> entry : recoil.entrySet()) {
+            entry.getValue().replaceAll((id, degrees) -> {
+                WeaponDef weapon = config.weapons().byId(id);
+                double perTick = (weapon == null ? 6.0 : weapon.recoilRecovery()) / 20.0;
+                return degrees - perTick;
+            });
+            entry.getValue().values().removeIf(degrees -> degrees <= 0);
+        }
+        recoil.values().removeIf(Map::isEmpty);
     }
 
     private void tickCooldowns() {

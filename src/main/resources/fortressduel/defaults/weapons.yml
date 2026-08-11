@@ -18,6 +18,11 @@
 #                     濺射武器照爆心距離衰減，跟傷害用同一條曲線
 #   pellets           一次擊發幾顆（散彈）
 #   spread_degrees    以視線為軸的圓錐半頂角（度）。彈著點在圓盤上均勻分布
+#   recoil            後座力：每擊發一次散佈額外增加幾度
+#                     不寫的話 = spread_degrees × 0.5，所以舊設定檔不改也會有後座力
+#   recoil_max        後座力累積的上限（度）。不寫 = max(3, spread_degrees × 3)
+#   recoil_recovery   後座力每秒回復幾度。固定速率，不是按比例衰減——
+#                     「停火多久才會恢復準度」要能被背下來
 #   cooldown_ticks    裝填間隔（20 tick = 1 秒）
 #   projectile_speed  彈丸初速（格/tick）
 #   gravity           重力（格/tick²），0 = 直線飛行
@@ -39,6 +44,9 @@ weapons:
     pierce: 0
     knockback: 0.16
     spread_degrees: 1.0
+    recoil: 0.6
+    recoil_max: 4.0
+    recoil_recovery: 6.0
     cooldown_ticks: 18
     projectile_speed: 3.0
     gravity: 0.04
@@ -58,6 +66,10 @@ weapons:
     # 每秒近 7 發，單發推得多一點點就會把人黏在牆上動不了
     knockback: 0.08
     spread_degrees: 3.0
+    # 連射的代價全在這裡：打滿一梭最後幾發已經散到 9 度
+    recoil: 0.9
+    recoil_max: 9.0
+    recoil_recovery: 7.0
     cooldown_ticks: 3
     projectile_speed: 3.8
     gravity: 0.03
@@ -78,6 +90,9 @@ weapons:
     pierce: 1.0
     knockback: 0.16
     spread_degrees: 1.6
+    recoil: 0.8
+    recoil_max: 4.0
+    recoil_recovery: 5.0
     cooldown_ticks: 20
     projectile_speed: 3.4
     gravity: 0.03
@@ -97,6 +112,9 @@ weapons:
     knockback: 0.09
     pellets: 5
     spread_degrees: 1.5
+    recoil: 0.7
+    recoil_max: 4.5
+    recoil_recovery: 6.0
     cooldown_ticks: 24
     projectile_speed: 2.6
     gravity: 0.05
@@ -114,6 +132,10 @@ weapons:
     pierce: 0.25
     knockback: 0.45
     spread_degrees: 0
+    # 單發極準，但連著開就完全失去狙擊的意義
+    recoil: 2.5
+    recoil_max: 8.0
+    recoil_recovery: 10.0
     cooldown_ticks: 30
     projectile_speed: 5.0
     # 彈道平直：重力極低，背下來的落點不會隨距離大幅改變
@@ -132,6 +154,9 @@ weapons:
     pierce: 0
     knockback: 0.7
     spread_degrees: 1.6
+    recoil: 1.2
+    recoil_max: 5.0
+    recoil_recovery: 6.0
     cooldown_ticks: 40
     projectile_speed: 2.4
     gravity: 0.06
@@ -149,6 +174,10 @@ weapons:
     pierce: 0
     knockback: 0.03
     spread_degrees: 0.3
+    # 每秒 10 發，單發加一點點就會在持續射擊時明顯散開
+    recoil: 0.25
+    recoil_max: 5.0
+    recoil_recovery: 5.0
     cooldown_ticks: 2
     # 一 tick 飛 20 格 + 零重力 ＝ 幾乎是即時命中的直線光束
     projectile_speed: 20.0
@@ -168,6 +197,10 @@ weapons:
     pierce: 0.5
     knockback: 1.5
     spread_degrees: 0
+    # 一次一發、80 tick 裝填，後座力沒有意義
+    recoil: 0.0
+    recoil_max: 0.0
+    recoil_recovery: 6.0
     cooldown_ticks: 80
     projectile_speed: 2.0
     gravity: 0
@@ -185,6 +218,9 @@ weapons:
     pierce: 0
     knockback: 1.0
     spread_degrees: 0
+    recoil: 0.0
+    recoil_max: 0.0
+    recoil_recovery: 6.0
     cooldown_ticks: 120
     projectile_speed: 1.4
     gravity: 0

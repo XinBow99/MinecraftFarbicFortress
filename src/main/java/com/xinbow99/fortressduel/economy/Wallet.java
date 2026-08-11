@@ -24,6 +24,21 @@ public final class Wallet {
         }
     }
 
+    /**
+     * 罰款：扣得動多少扣多少，扣不出負債。
+     *
+     * <p>跟 {@link #spend} 不同——花錢是自願的交易，錢不夠就整筆不成立；罰款是被動的，
+     * 餘額只剩 30 卻要罰 100 時，正確的行為是歸零而不是「因為付不起所以免罰」。
+     *
+     * @return 實際扣掉的金額
+     */
+    public int lose(int amount) {
+        if (amount <= 0) return 0;
+        int applied = Math.min(amount, balance);
+        balance -= applied;
+        return applied;
+    }
+
     public boolean canAfford(int price) {
         return balance >= price;
     }

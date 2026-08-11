@@ -29,6 +29,12 @@ public record WeaponDef(
         int pellets,
         /** 散佈：以視線為軸的圓錐半頂角（度）。0 ＝ 完全不散。 */
         double spreadDegrees,
+        /** 後座力：每擊發一次，散佈額外增加幾度。 */
+        double recoil,
+        /** 後座力累積的上限（度）。 */
+        double recoilMax,
+        /** 後座力每秒回復幾度。 */
+        double recoilRecovery,
         /** 裝填間隔（tick）。 */
         int cooldownTicks,
         /** 彈丸初速（格/tick）。 */
@@ -57,9 +63,15 @@ public record WeaponDef(
 
     /** 沒寫 knockback 時，用傷害推一個。乘數挑成讓導彈（180）大約推 1.4 格/tick。 */
     private static final double KNOCKBACK_PER_DAMAGE = 0.008;
+    /** 沒寫 recoil 時，用基礎散佈推一個：本來就不準的槍，連射時散得更快。 */
+    private static final double RECOIL_PER_SPREAD = 0.5;
+    /** 後座力上限的預設倍率（相對基礎散佈），並且至少給這麼多度。 */
+    private static final double RECOIL_MAX_FACTOR = 3.0;
+    private static final double RECOIL_MAX_FLOOR = 3.0;
 
     public static WeaponDef from(String id, Map<String, Object> section) {
         double damage = YamlConfig.d(section, "damage", 1.0);
+        double spread = YamlConfig.d(section, "spread_degrees", 0.0);
         return new WeaponDef(
                 id,
                 YamlConfig.str(section, "name", id),
@@ -71,7 +83,13 @@ public record WeaponDef(
                 // 設定檔是整份複製出去的、不會事後補鍵，預設 0 等於要玩家刪檔才吃得到這個功能
                 Math.max(0, YamlConfig.d(section, "knockback", damage * KNOCKBACK_PER_DAMAGE)),
                 Math.max(1, YamlConfig.i(section, "pellets", 1)),
-                YamlConfig.d(section, "spread_degrees", 0.0),
+                spread,
+                // 跟 knockback 同樣的理由：既有的設定檔沒有這些鍵，預設 0 等於要玩家刪檔
+                // 才吃得到後座力。用基礎散佈推一個——本來就不準的槍，連射時散得更快
+                Math.max(0, YamlConfig.d(section, "recoil", spread * RECOIL_PER_SPREAD)),
+                Math.max(0, YamlConfig.d(section, "recoil_max",
+                        Math.max(RECOIL_MAX_FLOOR, spread * RECOIL_MAX_FACTOR))),
+                Math.max(0, YamlConfig.d(section, "recoil_recovery", 6.0)),
                 Math.max(1, YamlConfig.i(section, "cooldown_ticks", 20)),
                 YamlConfig.d(section, "projectile_speed", 3.0),
                 YamlConfig.d(section, "gravity", 0.04),

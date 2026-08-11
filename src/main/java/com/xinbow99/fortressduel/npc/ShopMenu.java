@@ -8,6 +8,7 @@ import com.xinbow99.fortressduel.weapon.AmmoPouch;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -23,9 +24,13 @@ import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -99,10 +104,16 @@ public final class ShopMenu extends ChestMenu {
                             .withStyle(ChatFormatting.GRAY));
                 }
             }
-            case "weapon" -> lore.add(Component.literal("附 " + entry.amount() + " 發子彈")
-                    .withStyle(ChatFormatting.GRAY));
-            default -> lore.add(Component.literal("數量 " + entry.amount())
-                    .withStyle(ChatFormatting.GRAY));
+            case "weapon" -> {
+                lore.add(Component.literal("附 " + entry.amount() + " 發子彈")
+                        .withStyle(ChatFormatting.GRAY));
+                describeWeapon(lore, weapons.byId(entry.weapon()), player, weapons);
+            }
+            default -> {
+                lore.add(Component.literal("數量 " + entry.amount())
+                        .withStyle(ChatFormatting.GRAY));
+                describeBuildingBlock(lore, entry, player, weapons);
+            }
         }
 
         if (!entry.lore().isEmpty()) {
@@ -112,6 +123,80 @@ public final class ShopMenu extends ChestMenu {
 
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
+    }
+
+    /**
+     * 建材的說明：血量，以及哪幾把武器打得動。
+     *
+     * <p>**從實際數值算出來，不是手寫的。** 手寫有兩個問題：改了 {@code block_hp_per_hardness}
+     * 之後說明就對不上（而且沒有任何機制會提醒），新增一種建材忘了寫就完全沒有資訊。
+     *
+     * <p>顯示血量而不是原版硬度——硬度是「挖多久」的單位，在這個 mod 裡沒有直接意義；
+     * 玩家真正要拿來比價的是「這格能挨幾發」。
+     */
+    private static void describeBuildingBlock(List<Component> lore, ShopEntry entry,
+                                              ServerPlayer player, WeaponSystem weapons) {
+        Item item = BuiltInRegistries.ITEM.getOptional(Identifier.parse(entry.item())).orElse(null);
+        if (!(item instanceof BlockItem block)) return;
+
+        BlockState state = block.getBlock().defaultBlockState();
+        float hardness = state.getDestroySpeed(player.level(), BlockPos.ZERO);
+        if (hardness < 0) return; // 基岩之類，本來就打不掉
+
+        float hp = weapons.blockHpOf(hardness);
+        lore.add(Component.literal("血量 " + Math.round(hp) + " / 格")
+                .withStyle(ChatFormatting.AQUA));
+
+        // 每塊錢買到多少血量——「黑曜石貴 16 倍但硬 33 倍」這種比較，玩家自己在腦中算不出來
+        if (entry.price() > 0 && entry.amount() > 0) {
+            double perMoney = hp * entry.amount() / (double) entry.price();
+            lore.add(Component.literal(String.format("每 $1 買到 %.1f 血量", perMoney))
+                    .withStyle(ChatFormatting.AQUA));
+        }
+
+        String shots = weapons.allWeapons().stream()
+                .map(weapon -> {
+                    int n = weapons.shotsToBreak(weapon, hardness);
+                    return n < 0 ? null : weapon.displayName() + " " + n + " 發";
+                })
+                .filter(java.util.Objects::nonNull)
+                .limit(4)
+                .collect(java.util.stream.Collectors.joining("、"));
+        if (!shots.isEmpty()) {
+            lore.add(Component.literal(shots).withStyle(ChatFormatting.DARK_AQUA));
+        }
+    }
+
+    /** 武器的說明：傷害、射速，以及打石頭與黑曜石各要幾發。 */
+    private static void describeWeapon(List<Component> lore, WeaponDef weapon,
+                                       ServerPlayer player, WeaponSystem weapons) {
+        if (weapon == null) return;
+
+        String rate = String.format("%.1f", 20.0 / weapon.cooldownTicks());
+        lore.add(Component.literal("傷害 " + Math.round(weapon.damage())
+                        + "   每秒 " + rate + " 發"
+                        + (weapon.pellets() > 1 ? "   一次 " + weapon.pellets() + " 顆" : ""))
+                .withStyle(ChatFormatting.AQUA));
+
+        // 拿場上最常見的兩種牆當基準，比列一堆抽象數值好懂
+        String stone = shotsAgainst(weapon, Blocks.STONE, player, weapons);
+        String obsidian = shotsAgainst(weapon, Blocks.OBSIDIAN, player, weapons);
+        if (stone != null && obsidian != null) {
+            lore.add(Component.literal("石頭 " + stone + " 發   黑曜石 " + obsidian + " 發")
+                    .withStyle(ChatFormatting.DARK_AQUA));
+        }
+
+        if (weapon.splashRadius() > 0) {
+            lore.add(Component.literal("濺射半徑 " + weapon.splashRadius() + " 格")
+                    .withStyle(ChatFormatting.DARK_AQUA));
+        }
+    }
+
+    private static String shotsAgainst(WeaponDef weapon, Block block,
+                                       ServerPlayer player, WeaponSystem weapons) {
+        float hardness = block.defaultBlockState().getDestroySpeed(player.level(), BlockPos.ZERO);
+        int shots = weapons.shotsToBreak(weapon, hardness);
+        return shots < 0 ? null : String.valueOf(shots);
     }
 
     private static Item resolveIcon(ShopEntry entry, WeaponSystem weapons) {

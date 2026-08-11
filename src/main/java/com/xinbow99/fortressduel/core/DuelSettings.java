@@ -73,6 +73,13 @@ public record DuelSettings(
         int startingMoney,
         /** 每一輪建造階段開始時雙方各拿多少。 */
         int roundIncome,
+        /**
+         * 被對手打中時，每一點傷害扣多少錢。0 ＝ 關掉這個機制。
+         *
+         * <p>單次罰款以玩家的滿血量為上限：狙擊一發 52 傷害打在只有 20 血的人身上，
+         * 罰的是「一條命份量」的錢，不是 52 點的錢。
+         */
+        int damagePenalty,
 
         // ---- 武器 ----
         /** 方塊血量 ＝ 原版硬度 × 這個係數。調大 ＝ 牆更耐打，整場節奏變慢。 */
@@ -115,6 +122,7 @@ public record DuelSettings(
 
                 cfg.getInt("economy.starting_money", 600),
                 cfg.getInt("economy.round_income", 380),
+                cfg.getInt("economy.damage_penalty", 5),
 
                 cfg.getDouble("weapon.block_hp_per_hardness", 10.0));
     }
