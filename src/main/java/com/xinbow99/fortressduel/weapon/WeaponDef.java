@@ -55,7 +55,13 @@ public record WeaponDef(
         double gravity,
         /** 飛行幾 tick 之後自己消失，避免打歪的彈丸永遠留在世界上。 */
         int lifetimeTicks,
-        /** 按住不放是否持續擊發。 */
+        /**
+         * 按住右鍵是否持續擊發。
+         *
+         * <p>{@code true} ＝ 按住就一直打，射速完全由 {@link #cooldownTicks} 決定，蓄力不參與；
+         * {@code false} ＝ 拉弓、放開，發一發。連射武器（機槍 cooldown 3、雷射 2）只能設 true，
+         * 靠連點右鍵打到每秒 7~10 發手感差得有感。
+         */
         boolean auto,
         /** 命中的方塊是否會被打掉（只在競技場範圍內生效）。 */
         boolean breaksBlocks,

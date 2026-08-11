@@ -46,7 +46,10 @@
 #   projectile_speed  彈丸初速（格/tick）
 #   gravity           重力（格/tick²），0 = 直線飛行
 #   lifetime_ticks    飛多久之後自己消失
-#   auto              預留欄位：目前一次右鍵 = 一發，連發靠短 cooldown 達成
+#   auto              true  = 按住右鍵就一直打，射速完全由 cooldown_ticks 決定，蓄力不參與
+#                     false = 拉弓、放開，發一發（預設）
+#                     連射武器只能設 true：機槍 cooldown 3、雷射 2，也就是每秒 7~10 發，
+#                     靠連點右鍵打到那個速度手感差得有感
 #   breaks_blocks     命中的方塊會不會被打掉（只在競技場範圍內生效）
 #   trail_particle    飛行時拖的粒子
 #   fire_sound        開火音效
@@ -88,8 +91,8 @@ weapons:
     pierce: 0
     # 每秒近 7 發，單發推得多一點點就會把人黏在牆上動不了
     knockback: 0.08
-    # 連射武器：點一下就發射，射速完全由 cooldown 決定。
-    # 套上蓄力等於廢掉它「連續潑灑」的定位——滿弓 20 tick 比它的 cooldown 慢七倍
+    # 連射武器：auto: true ＝ 按住右鍵就一直打，射速完全由 cooldown 決定（每秒近 7 發）。
+    # 蓄力完全不參與——滿弓 20 tick 比它的 cooldown 慢七倍，套上去等於廢掉「連續潑灑」的定位
     charge:
       min_draw: 0
       affects: []
@@ -220,7 +223,7 @@ weapons:
     splash_radius: 0
     pierce: 0
     knockback: 0.03
-    # 同機槍：連射武器不蓄力
+    # 同機槍：auto: true，按住就一直打（每秒 10 發），蓄力不參與
     charge:
       min_draw: 0
       affects: []
