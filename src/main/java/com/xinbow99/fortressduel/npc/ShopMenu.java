@@ -3,6 +3,7 @@ package com.xinbow99.fortressduel.npc;
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
+import com.xinbow99.fortressduel.util.DuelItems;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponItems;
@@ -333,7 +334,11 @@ public final class ShopMenu extends ChestMenu {
             deny("這件商品設定錯誤（找不到物品 " + entry.item() + "）");
             return false;
         }
-        player.getInventory().placeItemBackInInventory(new ItemStack(item, entry.amount()));
+        // 打上「對戰發的」標記。弓與彈藥是由 WeaponItems 產生的、那裡已經標了，只有這條
+        // 直接發原版物品的路要自己標——不標的話買來的建材與工具會被帶回主世界，
+        // 而那正是回收機制要擋的事（見 DuelItems）
+        player.getInventory().placeItemBackInInventory(
+                DuelItems.issue(new ItemStack(item, entry.amount())));
         return true;
     }
 

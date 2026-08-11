@@ -3,6 +3,7 @@ package com.xinbow99.fortressduel.battle;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelSettings;
 import com.xinbow99.fortressduel.util.DuelItems;
+import com.xinbow99.fortressduel.util.InventoryStash;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -258,12 +259,15 @@ public final class DuelManager {
     }
 
     /**
-     * 上線時把身上殘留的對戰物資收掉。
+     * 上線時把上一場的帳結清：收掉身上殘留的對戰物資，還他開場寄放的背包。
      *
      * <p>對戰中途離線的人，{@link Duel#finish} 那一輪碰不到他——他已經不在線上了，而背包早就
-     * 隨著登出寫進存檔。所以「離線帶著一整套彈藥跑掉」這條路要在他回來的時候補收。
+     * 隨著登出寫進存檔。所以「離線帶著一整套彈藥跑掉」這條路要在他回來的時候補收，
+     * 而他寄放的家當也要在這裡還——那份東西只存在於我們的檔案裡，不還等於洗掉他的存檔。
      *
-     * <p>只在他**沒有**正在對戰時收：正常情況下上線本來就不會在對戰中（離線會判負），
+     * <p>兩件事的順序不能反：先收掉對戰發的，格子空出來，寄放的東西才回得去原本的位置。
+     *
+     * <p>只在他**沒有**正在對戰時做：正常情況下上線本來就不會在對戰中（離線會判負），
      * 這個判斷純粹是為了不去動一場真的還在進行的對戰。
      */
     private void onJoin(ServerPlayer player) {
@@ -272,6 +276,11 @@ public final class DuelManager {
         int removed = DuelItems.stripFrom(player);
         if (removed > 0) {
             player.sendSystemMessage(Msg.info("收回了上一場對戰發放與購買的 " + removed + " 疊物資。"));
+        }
+
+        int returned = InventoryStash.returnTo(player);
+        if (returned > 0) {
+            player.sendSystemMessage(Msg.good("上一場對戰寄放的 " + returned + " 疊物品還你了。"));
         }
     }
 

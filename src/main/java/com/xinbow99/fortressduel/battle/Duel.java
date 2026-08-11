@@ -5,6 +5,7 @@ import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.core.DuelSettings;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.util.DuelItems;
+import com.xinbow99.fortressduel.util.InventoryStash;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
@@ -207,6 +208,7 @@ public final class Duel {
         north.showTo(player);
         south.showTo(player);
         applyDuelGameMode(player);
+        stashInventory(player);
         giveStartingItems(player);
         services.weapons().giveStartingAmmo(player);
     }
@@ -237,6 +239,25 @@ public final class Duel {
             if (type.getName().equalsIgnoreCase(name)) return type;
         }
         return null;
+    }
+
+    /**
+     * 開場把玩家原本的背包整份寄放起來，打完再還他（見 {@link InventoryStash}）。
+     *
+     * <p>不清空的話，身上本來就有鑽石裝、一堆黑曜石、一把附魔弓的人跟剛上線的人打的不是同一場
+     * 遊戲——而這個遊戲的前提是雙方靠同一份開場物資與同一個經濟系統長出差距。
+     *
+     * <p>可以用 {@code battle.clear_inventory: false} 關掉。開發時常常需要帶著測試用的東西
+     * 直接開一場，每次都被收走很難做事。
+     */
+    private void stashInventory(ServerPlayer player) {
+        if (!settings.clearInventory()) return;
+
+        int stashed = InventoryStash.take(player);
+        if (stashed > 0) {
+            player.sendSystemMessage(Msg.info("你原本的 " + stashed
+                    + " 疊物品先寄放著，對戰結束會原封不動還你。"));
+        }
     }
 
     /**
@@ -745,6 +766,8 @@ public final class Duel {
         // 要在 arena.restore() 之前：還原只處理方塊，實體得自己收
         removeGuardians();
         reclaimIssuedItems();
+        // 一定排在收回之後：先把對戰發的清掉，原本的東西才回得去原本的格子
+        returnStashedInventories();
 
         announce(result);
 
@@ -780,6 +803,24 @@ public final class Duel {
             }
         }
         clearDroppedIssuedItems();
+    }
+
+    /**
+     * 把開場寄放的背包還回去。
+     *
+     * <p>離線的人這裡碰不到，但他的東西在檔案裡不會不見——下次上線就會還（見
+     * {@code DuelManager} 的 JOIN 處理）。這也是 {@link InventoryStash} 要寫進檔案的原因。
+     */
+    private void returnStashedInventories() {
+        for (Side side : new Side[]{north, south}) {
+            ServerPlayer player = playerOf(side);
+            if (player == null) continue;
+
+            int returned = InventoryStash.returnTo(player);
+            if (returned > 0) {
+                player.sendSystemMessage(Msg.good("你原本的 " + returned + " 疊物品還你了。"));
+            }
+        }
     }
 
     /**

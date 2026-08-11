@@ -70,6 +70,13 @@ public record DuelSettings(
         List<String> startingItems,
         /** 開場把玩家切成哪個模式，結束還原成他原本的。名稱同原版：survival／adventure／… */
         String gameMode,
+        /**
+         * 開場是否把玩家原本的背包整份寄放起來（結束原封不動還他）。
+         *
+         * <p>玩家是帶著自己的家當就地進場的，不清空的話身上本來就有整套裝備的人跟剛上線的人
+         * 打的不是同一場遊戲。關掉它是給開發用的——每次測試都被收走測試道具很難做事。
+         */
+        boolean clearInventory,
 
         // ---- 突發事件 ----
         int incidentIntervalSeconds,
@@ -125,6 +132,7 @@ public record DuelSettings(
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
                 startingItems(cfg),
                 cfg.getString("battle.gamemode", "survival"),
+                cfg.getBoolean("battle.clear_inventory", true),
 
                 cfg.getInt("incident.interval_seconds", 120),
 
