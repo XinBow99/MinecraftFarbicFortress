@@ -20,7 +20,6 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.BossEvent;
 import net.minecraft.world.damagesource.DamageSource;
-import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
@@ -94,6 +93,14 @@ public final class Duel {
     private int round;
     private long ticksElapsed;
     private Result result;
+    /**
+     * 正在對熊貓送窒息傷害。{@link #allowGuardianDamage} 靠它認出「這一發是我們自己打的」。
+     *
+     * <p>不能靠傷害型別辨識——那是一個沒有寫下來的約定：只要有人改了 {@link #tickSuffocation}
+     * 用的型別，或原版哪天讓熊貓也會餓，判斷就會靜默失效。旗標是明確的因果關係，而且所有狀態
+     * 變更都在伺服器主執行緒上發生（見類別註解），{@code hurtServer} 是同步的，不會有交錯。
+     */
+    private boolean applyingSuffocation;
 
     private Duel(MinecraftServer server, Arena arena, DuelSettings settings, DuelServices services,
                  Side north, Side south, BlockPos dummyPos) {
@@ -372,7 +379,7 @@ public final class Duel {
      * 建造階段也一律免疫，那時本來就不能攻擊。
      */
     public boolean allowGuardianDamage(Side owner, DamageSource source) {
-        if (source.is(DamageTypes.STARVE)) return true;  // 我們自己送的窒息傷害
+        if (applyingSuffocation) return true;  // 我們自己送的窒息傷害
         if (!state.canAttack()) return false;
 
         return source.getEntity() instanceof ServerPlayer attacker
@@ -420,7 +427,17 @@ public final class Duel {
 
                 // 不必自己叫 onGuardianChanged：hurtServer 會走 AFTER_DAMAGE，
                 // DuelManager 已經把那條路接回來了。自己再叫一次只會讓 CORE_DAMAGED 發兩遍
-                panda.hurtServer(level, level.damageSources().starve(), (float) settings.suffocationDamage());
+                //
+                // 旗標要在 finally 裡關掉：這一發可能打死熊貓，那條路會一路走到 finish()，
+                // 中途任何一個環節丟例外都不能讓旗標卡在開著的狀態——那等於之後所有打在
+                // 熊貓身上的傷害都被當成自家的窒息傷害放行
+                applyingSuffocation = true;
+                try {
+                    panda.hurtServer(level, level.damageSources().starve(),
+                            (float) settings.suffocationDamage());
+                } finally {
+                    applyingSuffocation = false;
+                }
                 level.sendParticles(ParticleTypes.ANGRY_VILLAGER,
                         panda.getX(), panda.getY() + 1.0, panda.getZ(), 1, 0.2, 0.2, 0.2, 0);
                 if (state == DuelState.ENDED) return;

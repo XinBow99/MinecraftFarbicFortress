@@ -401,6 +401,10 @@ public final class WeaponSystem {
     /**
      * 打中一個生物：扣血並推開。
      *
+     * <p>傷害沒吃到就不推。{@code ALLOW_DAMAGE} 會擋掉好幾種傷害——建造階段的互毆、
+     * 打在自己人熊貓上的濺射誤傷——那些情況下如果還推得動，等於留了一個「不扣血但能位移」
+     * 的後門：對著自己的熊貓開一發高爆彈就能把牠轟到想要的位置，牽繩那套慢慢牽的設計就被繞過了。
+     *
      * @param direction 推的方向，不必先正規化；長度為 0 時只扣血不推
      * @param scale     力道倍率，濺射用距離衰減、直擊給 1.0
      */
@@ -413,7 +417,8 @@ public final class WeaponSystem {
         var source = shooter != null
                 ? level.damageSources().playerAttack(shooter)
                 : level.damageSources().generic();
-        target.hurtServer(level, source, (float) damage);
+        if (!target.hurtServer(level, source, (float) damage)) return;
+
         knockBack(target, direction, projectile.weapon.knockback() * scale);
     }
 
