@@ -5,7 +5,10 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.xinbow99.fortressduel.battle.Duel;
 import com.xinbow99.fortressduel.battle.DuelManager;
+import com.xinbow99.fortressduel.incident.IncidentDef;
+import com.xinbow99.fortressduel.incident.IncidentScheduler;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
@@ -45,12 +48,16 @@ public final class DuelCommands {
     private final SkillEngine skills;
     /** /duel give 要一併發子彈，所以認得彈藥袋。 */
     private final WeaponSystem weapons;
+    /** /duel incident 要能立刻觸發一個事件。 */
+    private final IncidentScheduler incidents;
 
-    public DuelCommands(DuelManager duels, ConfigManager config, SkillEngine skills, WeaponSystem weapons) {
+    public DuelCommands(DuelManager duels, ConfigManager config, SkillEngine skills,
+                        WeaponSystem weapons, IncidentScheduler incidents) {
         this.duels = duels;
         this.config = config;
         this.skills = skills;
         this.weapons = weapons;
+        this.incidents = incidents;
     }
 
     public void register() {
@@ -95,7 +102,13 @@ public final class DuelCommands {
                         .then(Commands.argument("mob", StringArgumentType.word())
                                 .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
                                         config.mobs().all().stream().map(MobDef::id), builder))
-                                .executes(this::spawn)));
+                                .executes(this::spawn)))
+                .then(Commands.literal("incident")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .then(Commands.argument("incident", StringArgumentType.word())
+                                .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                        config.incidents().all().stream().map(IncidentDef::id), builder))
+                                .executes(this::incident)));
 
         dispatcher.register(root);
     }
@@ -129,6 +142,30 @@ public final class DuelCommands {
         ctx.getSource().sendSuccess(() -> Msg.good("給了你「" + weapon.displayName() + "」與 "
                 + ammo + " 發子彈"
                 + (weapon.bowLaunched() ? "，按住右鍵拉弓、放開發射。" : "，右鍵開火。")), false);
+        return 1;
+    }
+
+    /**
+     * 測試用：立刻在自己這場觸發指定的突發事件。
+     *
+     * <p>不加這個的話事件效果幾乎測不動——抽籤每 {@code interval_seconds} 才一次，而單一事件
+     * 的權重只佔全部的幾個百分點，想看隕石雨平均要等半小時以上。
+     */
+    private int incident(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        Duel duel = duels.duelOf(player);
+        if (duel == null) {
+            ctx.getSource().sendFailure(Msg.warn("你不在對戰中。突發事件是對某一場對戰觸發的，"
+                    + "先用 /duel solo 開一場。"));
+            return 0;
+        }
+
+        String id = StringArgumentType.getString(ctx, "incident");
+        String error = incidents.trigger(duel, id);
+        if (error != null) {
+            ctx.getSource().sendFailure(Msg.warn(error));
+            return 0;
+        }
         return 1;
     }
 
