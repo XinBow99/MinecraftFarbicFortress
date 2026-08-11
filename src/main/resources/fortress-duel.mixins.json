@@ -3,7 +3,9 @@
 	"package": "com.xinbow99.fortressduel.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
-		"ExampleMixin"
+		"BowItemMixin",
+		"ExampleMixin",
+		"InventoryDropMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

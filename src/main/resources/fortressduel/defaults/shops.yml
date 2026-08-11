@@ -5,71 +5,38 @@
 #
 # 商品欄位
 #   name    顯示名稱
-#   type    weapon = 給武器 + 附帶子彈
-#           ammo   = 只補子彈（買滿了不會收錢）
-#           item   = 給一般物品（建材之類）
+#   type    launcher = 給那把弓（全場通用的發射器）
+#           ammo     = 給彈藥實物（放副手就是用那把武器）
+#           item     = 給一般物品（建材之類），直接發原版物品
 #   price   價格
-#   weapon  type = weapon/ammo 時指向 weapons.yml 的武器 id
-#   item    type = item 時要給的物品；type = weapon 時可省略（用武器綁的物品當圖示）
+#   weapon  type = ammo 時指向 weapons.yml 的武器 id；圖示與給出的實物都是它的 item
+#   item    type = item 時要給的物品
 #   amount  買一次給幾發／幾個
-#   lore    說明文字
+#   lore    說明文字（**補充用**：血量、每元血量、幾發打得破、傷害、射速都由程式從實際數值
+#           算出來印在上面，不用也不該手寫進 lore——手寫的會跟設定漂移而且沒人會發現）
 #
 # 錢從哪來：打怪的賞金（mobs.yml 的 reward）＋ 每輪建造階段的固定收入（duel.yml 的 economy）
+#           錢會因為被對手打中而扣（duel.yml 的 economy.damage_penalty）
 
 shops:
   arms_dealer:
     title: 軍火商
     entries:
-      # ---- 武器（第一次買才需要，之後補子彈就好）----
-      buy_scrap:
-        name: 廢鐵彈發射器
-        type: weapon
+      # ---- 發射器 ----
+      # 商店不賣「武器」：全場只有一把弓，副手放什麼彈藥就射什麼，所以買的一直都是彈藥。
+      # 弓本身只是那個發射器，開場就發一把，這裡擺一把 $0 的備品是為了兩種情況：
+      # 弄丟了（掉進岩漿、手滑丟出去），以及設定檔沒更新到、開場沒拿到弓的舊伺服器
+      # type: launcher 而不是 item——item 是給建材用的、直接發原版物品，買到的會是一支
+      # 名字叫「弓」的普通弓。發射器要跟開場那把長得一模一樣，所以走武器系統那條路
+      buy_bow:
+        name: 發射器
+        type: launcher
         price: 0
-        weapon: scrap
-        amount: 60
-        lore: 最便宜的萬用彈，什麼都能打
+        item: minecraft:bow
+        lore: 弄丟了再來拿一把
 
-      buy_mg:
-        name: 機槍
-        type: weapon
-        price: 250
-        weapon: mg
-        amount: 120
-        lore: 按得快就打得快，單發弱、精度差
-
-      buy_ap:
-        name: 穿甲槍
-        type: weapon
-        price: 400
-        weapon: ap
-        amount: 40
-        lore: 無視方塊硬度，鋼鐵黑曜石也是一發一格
-
-      buy_sniper:
-        name: 狙擊槍
-        type: weapon
-        price: 500
-        weapon: sniper
-        amount: 20
-        lore: 彈道平直、一發帶走工人
-
-      buy_he:
-        name: 高爆炮
-        type: weapon
-        price: 700
-        weapon: he
-        amount: 15
-        lore: 炸開一片，裝填慢
-
-      buy_drone:
-        name: 無人機
-        type: weapon
-        price: 1500
-        weapon: drone
-        amount: 3
-        lore: 全遊戲最大的一發，慢但擋不太住
-
-      # ---- 補子彈 ----
+      # ---- 彈藥 ----
+      # 買到的就是櫃子上看到的那個物品，放進副手就是用那把武器
       ammo_scrap:
         name: 廢鐵彈 ×60
         type: ammo
@@ -112,6 +79,44 @@ shops:
         weapon: drone
         amount: 3
 
+      # ---- 工具 ----
+      # 開場只發一把石鎬，其餘要買。這是有意的：清空背包之後「先買工具還是先買彈藥」
+      # 變成第一輪的第一個決定，而兩邊的答案不見得一樣（想快點挖出地堡的人跟想早點
+      # 開火壓制的人會分岔）。
+      #
+      # 價格都壓在一輪收入（$380）以下，湊得出來——工具是門檻不是牆，貴到買不起的話
+      # 那個決定就不存在了，所有人都只剩同一條路可以走
+      tool_pickaxe:
+        name: 鐵鎬
+        type: item
+        price: 120
+        item: minecraft:iron_pickaxe
+        lore: 挖石頭快一截；建造階段就是跟時間賽跑
+
+      tool_axe:
+        name: 鐵斧
+        type: item
+        price: 100
+        item: minecraft:iron_axe
+        lore: 砍樹，也拆得動木造工事
+
+      tool_shovel:
+        name: 鐵鏟
+        type: item
+        price: 80
+        item: minecraft:iron_shovel
+        lore: 挖土、挖沙；地堡跟壕溝都靠它
+
+      # 熊貓栓不了（原版 Panda.canBeLeashed 寫死回 false），牠只吃竹子——
+      # 手上拿著竹子牠就跟著你走，這是搬動熊貓的唯一手段
+      tool_bamboo:
+        name: 竹子 ×16
+        type: item
+        price: 60
+        item: minecraft:bamboo
+        amount: 16
+        lore: 拿在手上熊貓就跟著走；開場那 16 根不夠用再來拿
+
       # ---- 建材 ----
       mat_stone:
         name: 石頭 ×64
@@ -119,12 +124,19 @@ shops:
         price: 100
         item: minecraft:stone
         amount: 64
-        lore: 硬度 1.5，一般牆體
+        lore: 便宜大碗的一般牆體
 
+      # 定價說明：黑曜石 500 血、石頭 15 血，差 33 倍。
+      # 舊價 $400/16（= $25/格）等於每塊錢買到 20 血量，石頭只有 9.6——性價比高一倍多，
+      # 石頭因此變成嚴格劣勢的選項，建材選擇整個塌縮成「有錢就全蓋黑曜石」。
+      #
+      # 改成 $800/16（= $50/格）之後兩者的每元血量都在 10 上下。黑曜石保留的優勢換成
+      # 「同樣的血量只要放 1/33 的格數」——在 60 秒的建造階段裡，少放方塊本身就是優勢。
+      # 穿甲彈的克制關係也更明確了：$5 一發拆掉 $50 一格。
       mat_obsidian:
         name: 黑曜石 ×16
         type: item
-        price: 400
+        price: 800
         item: minecraft:obsidian
         amount: 16
-        lore: 硬度 50，只有穿甲彈打得動
+        lore: 蓋得快、佔得少；但穿甲彈一發一格

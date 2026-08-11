@@ -2,11 +2,12 @@ package com.xinbow99.fortressduel.battle;
 
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelSettings;
+import com.xinbow99.fortressduel.util.DuelItems;
+import com.xinbow99.fortressduel.util.InventoryStash;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -19,6 +20,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -60,13 +62,19 @@ public final class DuelManager {
     public void register() {
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> onJoin(handler.player));
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) ->
-                allowBreak(player instanceof ServerPlayer sp ? sp : null, pos));
-        AttackBlockCallback.EVENT.register((player, level, hand, pos, direction) ->
-                player instanceof ServerPlayer sp ? onAttackBlock(sp, pos) : InteractionResult.PASS);
+                onBlockBreak(level, player instanceof ServerPlayer sp ? sp : null, pos));
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
-                player instanceof ServerPlayer sp ? onUseBlock(sp, hand) : InteractionResult.PASS);
+                player instanceof ServerPlayer sp
+                        ? onUseBlock(sp, hand, hit.getBlockPos().relative(hit.getDirection()))
+                        : InteractionResult.PASS);
         ServerLivingEntityEvents.ALLOW_DAMAGE.register(this::allowDamage);
+        ServerLivingEntityEvents.AFTER_DAMAGE.register(
+                (entity, source, dealt, taken, blocked) -> onGuardianDamaged(entity, source));
+        // 致命一擊不會走 AFTER_DAMAGE 的存活路徑，全滅判斷得靠這個。
+        // 兩條路徑都不傳傷害量——扣了多少由 Duel 從血量差自己算
+        ServerLivingEntityEvents.AFTER_DEATH.register(this::onGuardianDamaged);
     }
 
     // ---------- 挑戰 ----------
@@ -173,6 +181,14 @@ public final class DuelManager {
     }
 
     /** @return 給投降者看的結果訊息；null ＝ 已投降 */
+    /** {@code /duel ready}：建造階段蓋完了，雙方都按了就開戰。 */
+    public String ready(ServerPlayer player) {
+        Duel duel = duelsByPlayer.get(player.getUUID());
+        if (duel == null) return "你目前沒有在對戰。";
+
+        return duel.markReady(player);
+    }
+
     public String forfeit(ServerPlayer player) {
         Duel duel = duelsByPlayer.get(player.getUUID());
         if (duel == null) return "你目前沒有在對戰。";
@@ -251,6 +267,62 @@ public final class DuelManager {
         // 這樣「離線判負」只有一條路徑
     }
 
+    /**
+     * 上線時把上一場的帳結清：收掉身上殘留的對戰物資，還他開場寄放的背包。
+     *
+     * <p>對戰中途離線的人，{@link Duel#finish} 那一輪碰不到他——他已經不在線上了，而背包早就
+     * 隨著登出寫進存檔。所以「離線帶著一整套彈藥跑掉」這條路要在他回來的時候補收，
+     * 而他寄放的家當也要在這裡還——那份東西只存在於我們的檔案裡，不還等於洗掉他的存檔。
+     *
+     * <p>兩件事的順序不能反：先收掉對戰發的，格子空出來，寄放的東西才回得去原本的位置。
+     *
+     * <p>只在他**沒有**正在對戰時做：正常情況下上線本來就不會在對戰中（離線會判負），
+     * 這個判斷純粹是為了不去動一場真的還在進行的對戰。
+     */
+    private void onJoin(ServerPlayer player) {
+        if (player == null || isInDuel(player)) return;
+
+        int removed = DuelItems.stripFrom(player);
+        if (removed > 0) {
+            player.sendSystemMessage(Msg.info("收回了上一場對戰發放與購買的 " + removed + " 疊物資。"));
+        }
+
+        int returned = InventoryStash.returnTo(player);
+        if (returned > 0) {
+            player.sendSystemMessage(Msg.good("上一場對戰寄放的 " + returned + " 疊物品還你了。"));
+        }
+    }
+
+    /**
+     * 玩家挖方塊：先問准不准，再決定掉不掉東西。
+     *
+     * <p><b>對戰中場內挖到的方塊一律不掉落。</b>掉落的話建材就有了一個免費的來源——挖一片
+     * 山壁就有幾百塊石頭，商店的定價（石頭 $100/64、黑曜石 $800/16）與「每元買到多少血量」
+     * 那整套比較全部失去意義，錢也就不再是選擇的來源。買才是唯一的管道。
+     *
+     * <p>連自己剛放下的方塊也收不回來——「拆掉重蓋」因此是有成本的，那也是刻意的：
+     * 建造階段的決定應該要能後悔，但不能免費後悔。
+     *
+     * <p>做法是自己 {@code destroyBlock(pos, false, …)} 然後否決原版那條路——原版的
+     * {@code playerDestroy} 一定會掉東西，攔不住。副作用是工具不會耗耐久（挖掘動作沒有
+     * 真的走完原版流程），算是可以接受的偏差。
+     */
+    private boolean onBlockBreak(Level level, ServerPlayer player, BlockPos pos) {
+        if (!allowBreak(player, pos)) return false;
+        if (player == null || player.isCreative()) return true;
+
+        Duel duel = duelsByPlayer.get(player.getUUID());
+        if (duel == null || !duel.arena().region().contains(pos)) return true;
+
+        level.destroyBlock(pos, false, player);
+        // AFTER 事件被我們否決掉了，所以武器系統累積的方塊傷害要自己通知它清掉——
+        // 不清的話在原地補一塊新方塊會直接繼承舊的傷害，一面剛補好的牆一發就碎
+        if (services != null) {
+            services.weapons().forgetBlock(pos);
+        }
+        return false;
+    }
+
     /** 對戰中不准挖競技場外面的方塊，也不准挖核心與框線；場內其他地方隨便挖。 */
     private boolean allowBreak(ServerPlayer player, BlockPos pos) {
         if (player == null) return true;
@@ -266,10 +338,6 @@ public final class DuelManager {
             player.sendSystemMessage(Msg.warn("對戰期間不能挖競技場外面的方塊。"));
             return false;
         }
-        if (duel.arena().isCoreBlock(pos)) {
-            // 核心不是用挖的，是用打的（見 onAttackBlock）
-            return false;
-        }
         if (region.isHorizontalEdge(pos.getX(), pos.getZ())) {
             player.sendSystemMessage(Msg.warn("那是競技場的框線，拆不掉。"));
             return false;
@@ -278,19 +346,31 @@ public final class DuelManager {
     }
 
     /**
-     * 建造階段以外不能擺放方塊。
+     * 建造階段以外、或競技場範圍外，不能擺放方塊。
      *
      * <p>只擋「拿著方塊右鍵」——右鍵開箱子、按拉桿、用武器都還是通的，所以攻擊階段照樣能操作場地，
      * 只是不能再長出新的牆。
+     *
+     * <p>範圍檢查不能省，而且要跟 {@link #allowBreak} 對稱：{@link ArenaSnapshot} 只記錄
+     * 競技場範圍內的格子，蓋在外面的方塊打完不會被還原——那會在世界上留下永久痕跡。
+     * 玩家站在邊緣往外搆得到五格左右，所以這不是理論問題。
+     *
+     * @param target 方塊會被放到哪一格（命中面往外一格），不是被點到的那一格
      */
-    private InteractionResult onUseBlock(ServerPlayer player, InteractionHand hand) {
+    private InteractionResult onUseBlock(ServerPlayer player, InteractionHand hand, BlockPos target) {
         Duel duel = duelsByPlayer.get(player.getUUID());
         if (duel == null) return InteractionResult.PASS;
         if (!(player.getItemInHand(hand).getItem() instanceof BlockItem)) return InteractionResult.PASS;
-        if (duel.state().canPlaceBlocks()) return InteractionResult.PASS;
 
-        player.sendSystemMessage(Msg.warn("攻擊階段不能擺放方塊，等下一輪建造階段。"));
-        return InteractionResult.FAIL;
+        if (!duel.state().canPlaceBlocks()) {
+            player.sendSystemMessage(Msg.warn("攻擊階段不能擺放方塊，等下一輪建造階段。"));
+            return InteractionResult.FAIL;
+        }
+        if (!duel.arena().region().contains(target)) {
+            player.sendSystemMessage(Msg.warn("那已經在競技場外面了，蓋不了。"));
+            return InteractionResult.FAIL;
+        }
+        return InteractionResult.PASS;
     }
 
     /**
@@ -299,6 +379,9 @@ public final class DuelManager {
      * <p>只擋「對手打你」這一種來源——摔傷、溺水、怪物照樣算，否則建造階段會變成無敵時間。
      */
     private boolean allowDamage(LivingEntity entity, DamageSource source, float amount) {
+        Boolean guardian = filterGuardianDamage(entity, source);
+        if (guardian != null) return guardian;
+
         if (!(entity instanceof ServerPlayer victim)) return true;
 
         Duel duel = duelsByPlayer.get(victim.getUUID());
@@ -307,25 +390,49 @@ public final class DuelManager {
         return !(source.getEntity() instanceof ServerPlayer attacker) || !duel.involves(attacker.getUUID());
     }
 
-    /** 左鍵打敵方核心 → 扣核心血量。打自己的核心沒有效果。 */
-    private InteractionResult onAttackBlock(ServerPlayer player, BlockPos pos) {
+    /**
+     * 熊貓身上的傷害要不要放行。
+     *
+     * <p>目標從方塊改成實體之後，「打得到／打不到」不再是挖掘與左鍵的問題，而是傷害來源的問題：
+     * 只有對手的攻擊算數，摔落、怪物、自己人的濺射一律免疫（見 {@code Duel.allowGuardianDamage}）。
+     *
+     * @return null ＝ 這不是任何一場對戰的熊貓，交給其他規則處理
+     */
+    private Boolean filterGuardianDamage(LivingEntity entity, DamageSource source) {
+        for (Duel duel : activeDuels) {
+            Side owner = duel.sideOfGuardian(entity.getUUID());
+            if (owner != null) {
+                return duel.allowGuardianDamage(owner, source);
+            }
+        }
+        return null;
+    }
+
+    /** 熊貓掉血／死掉之後，把它接回對戰的血條與勝負判斷。 */
+    private void onGuardianDamaged(LivingEntity entity, DamageSource source) {
+        for (Duel duel : activeDuels) {
+            Side owner = duel.sideOfGuardian(entity.getUUID());
+            if (owner == null) continue;
+
+            ServerPlayer attacker = source.getEntity() instanceof ServerPlayer p ? p : null;
+            duel.onGuardianChanged(owner, attacker);
+            return;
+        }
+    }
+
+    /**
+     * 在玩家的動作列上顯示一則短訊。不在對戰中就退回原版的動作列訊息。
+     *
+     * <p>子系統一律走這裡，不要自己 {@code sendSystemMessage(..., true)}——對戰中的 HUD
+     * 每 tick 都會重寫動作列，自己送的訊息活不過 50 毫秒。
+     */
+    public void notify(ServerPlayer player, net.minecraft.network.chat.Component text) {
         Duel duel = duelsByPlayer.get(player.getUUID());
-        if (duel == null || !duel.arena().isCoreBlock(pos)) return InteractionResult.PASS;
-
-        Side owner = duel.sideOfCore(pos);
-        if (owner == null) return InteractionResult.PASS;
-
-        if (owner.playerId().equals(player.getUUID())) {
-            player.sendSystemMessage(Msg.warn("那是你自己的核心。"));
-            return InteractionResult.FAIL;
+        if (duel != null) {
+            duel.notify(player, text);
+        } else {
+            player.sendSystemMessage(text, true);
         }
-        if (!duel.state().canAttack()) {
-            player.sendSystemMessage(Msg.warn("建造階段打不動核心，等攻擊階段。"));
-            return InteractionResult.FAIL;
-        }
-
-        duel.damageCore(pos, player, duel.settings().coreHitDamage());
-        return InteractionResult.SUCCESS;
     }
 
     // ---------- 查詢 ----------

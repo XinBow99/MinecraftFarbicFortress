@@ -34,7 +34,7 @@ public final class DuelEvents {
                 for (Tick l : listeners) l.onDuelTick(duel);
             });
 
-    /** 核心（烽火台）掉血。damage 是實際扣掉的量，不是原始傷害。 */
+    /** 要守的熊貓掉血。damage 是實際扣掉的量，不是原始傷害。 */
     public static final Event<CoreDamaged> CORE_DAMAGED = EventFactory.createArrayBacked(CoreDamaged.class,
             listeners -> (duel, owner, attacker, damage) -> {
                 for (CoreDamaged l : listeners) l.onCoreDamaged(duel, owner, attacker, damage);

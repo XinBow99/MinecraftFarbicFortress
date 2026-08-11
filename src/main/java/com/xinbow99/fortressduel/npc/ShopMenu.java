@@ -3,11 +3,13 @@ package com.xinbow99.fortressduel.npc;
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
+import com.xinbow99.fortressduel.util.DuelItems;
 import com.xinbow99.fortressduel.util.Msg;
-import com.xinbow99.fortressduel.weapon.AmmoPouch;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
+import com.xinbow99.fortressduel.weapon.WeaponItems;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -23,9 +25,13 @@ import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -87,22 +93,24 @@ public final class ShopMenu extends ChestMenu {
         lore.add(Component.literal("價格 $" + entry.price()).withStyle(ChatFormatting.GOLD));
 
         switch (entry.type()) {
+            case "launcher" -> lore.add(Component.literal("主手拿它、副手放彈藥")
+                    .withStyle(ChatFormatting.GRAY));
             case "ammo" -> {
                 lore.add(Component.literal("補充 " + entry.amount() + " 發")
                         .withStyle(ChatFormatting.GRAY));
                 WeaponDef weapon = weapons.byId(entry.weapon());
                 if (weapon != null) {
-                    // 直接把「你現在有幾發」畫在商品上，玩家不用退出去看 HUD 再決定要不要買
-                    lore.add(Component.literal("目前 "
-                                    + weapons.pouchOf(player).get(weapon.id())
-                                    + "/" + weapon.ammoCapacity())
+                    // 直接把「你現在有幾發」畫在商品上，玩家不用關掉商店翻背包再決定要不要買
+                    lore.add(Component.literal("目前 " + weapons.ammoCount(player, weapon) + " 發")
                             .withStyle(ChatFormatting.GRAY));
+                    describeWeapon(lore, weapon, player, weapons);
                 }
             }
-            case "weapon" -> lore.add(Component.literal("附 " + entry.amount() + " 發子彈")
-                    .withStyle(ChatFormatting.GRAY));
-            default -> lore.add(Component.literal("數量 " + entry.amount())
-                    .withStyle(ChatFormatting.GRAY));
+            default -> {
+                lore.add(Component.literal("數量 " + entry.amount())
+                        .withStyle(ChatFormatting.GRAY));
+                describeBuildingBlock(lore, entry, player, weapons);
+            }
         }
 
         if (!entry.lore().isEmpty()) {
@@ -112,6 +120,80 @@ public final class ShopMenu extends ChestMenu {
 
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
+    }
+
+    /**
+     * 建材的說明：血量，以及哪幾把武器打得動。
+     *
+     * <p>**從實際數值算出來，不是手寫的。** 手寫有兩個問題：改了 {@code block_hp_per_hardness}
+     * 之後說明就對不上（而且沒有任何機制會提醒），新增一種建材忘了寫就完全沒有資訊。
+     *
+     * <p>顯示血量而不是原版硬度——硬度是「挖多久」的單位，在這個 mod 裡沒有直接意義；
+     * 玩家真正要拿來比價的是「這格能挨幾發」。
+     */
+    private static void describeBuildingBlock(List<Component> lore, ShopEntry entry,
+                                              ServerPlayer player, WeaponSystem weapons) {
+        Item item = BuiltInRegistries.ITEM.getOptional(Identifier.parse(entry.item())).orElse(null);
+        if (!(item instanceof BlockItem block)) return;
+
+        BlockState state = block.getBlock().defaultBlockState();
+        float hardness = state.getDestroySpeed(player.level(), BlockPos.ZERO);
+        if (hardness < 0) return; // 基岩之類，本來就打不掉
+
+        float hp = weapons.blockHpOf(hardness);
+        lore.add(Component.literal("血量 " + Math.round(hp) + " / 格")
+                .withStyle(ChatFormatting.AQUA));
+
+        // 每塊錢買到多少血量——「黑曜石貴 16 倍但硬 33 倍」這種比較，玩家自己在腦中算不出來
+        if (entry.price() > 0 && entry.amount() > 0) {
+            double perMoney = hp * entry.amount() / (double) entry.price();
+            lore.add(Component.literal(String.format("每 $1 買到 %.1f 血量", perMoney))
+                    .withStyle(ChatFormatting.AQUA));
+        }
+
+        String shots = weapons.allWeapons().stream()
+                .map(weapon -> {
+                    int n = weapons.shotsToBreak(weapon, hardness);
+                    return n < 0 ? null : weapon.displayName() + " " + n + " 發";
+                })
+                .filter(java.util.Objects::nonNull)
+                .limit(4)
+                .collect(java.util.stream.Collectors.joining("、"));
+        if (!shots.isEmpty()) {
+            lore.add(Component.literal(shots).withStyle(ChatFormatting.DARK_AQUA));
+        }
+    }
+
+    /** 武器的說明：傷害、射速，以及打石頭與黑曜石各要幾發。 */
+    private static void describeWeapon(List<Component> lore, WeaponDef weapon,
+                                       ServerPlayer player, WeaponSystem weapons) {
+        if (weapon == null) return;
+
+        String rate = String.format("%.1f", 20.0 / weapon.cooldownTicks());
+        lore.add(Component.literal("傷害 " + Math.round(weapon.damage())
+                        + "   每秒 " + rate + " 發"
+                        + (weapon.pellets() > 1 ? "   一次 " + weapon.pellets() + " 顆" : ""))
+                .withStyle(ChatFormatting.AQUA));
+
+        // 拿場上最常見的兩種牆當基準，比列一堆抽象數值好懂
+        String stone = shotsAgainst(weapon, Blocks.STONE, player, weapons);
+        String obsidian = shotsAgainst(weapon, Blocks.OBSIDIAN, player, weapons);
+        if (stone != null && obsidian != null) {
+            lore.add(Component.literal("石頭 " + stone + " 發   黑曜石 " + obsidian + " 發")
+                    .withStyle(ChatFormatting.DARK_AQUA));
+        }
+
+        if (weapon.splashRadius() > 0) {
+            lore.add(Component.literal("濺射半徑 " + weapon.splashRadius() + " 格")
+                    .withStyle(ChatFormatting.DARK_AQUA));
+        }
+    }
+
+    private static String shotsAgainst(WeaponDef weapon, Block block,
+                                       ServerPlayer player, WeaponSystem weapons) {
+        float hardness = block.defaultBlockState().getDestroySpeed(player.level(), BlockPos.ZERO);
+        int shots = weapons.shotsToBreak(weapon, hardness);
+        return shots < 0 ? null : String.valueOf(shots);
     }
 
     private static Item resolveIcon(ShopEntry entry, WeaponSystem weapons) {
@@ -197,7 +279,7 @@ public final class ShopMenu extends ChestMenu {
         }
 
         boolean delivered = switch (entry.type()) {
-            case "weapon" -> giveWeapon(entry);
+            case "launcher" -> giveLauncher();
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
             default -> {
@@ -215,27 +297,25 @@ public final class ShopMenu extends ChestMenu {
         refresh();
     }
 
-    private boolean giveWeapon(ShopEntry entry) {
-        WeaponDef weapon = weapons.byId(entry.weapon());
-        if (weapon == null) {
-            deny("這件商品設定錯誤（找不到武器 " + entry.weapon() + "）");
-            return false;
-        }
-
-        Item item = BuiltInRegistries.ITEM.getOptional(weapon.item()).orElse(null);
-        if (item == null) {
-            deny("這件商品設定錯誤（找不到物品 " + weapon.item() + "）");
-            return false;
-        }
-
-        ItemStack stack = new ItemStack(item);
-        stack.set(DataComponents.CUSTOM_NAME,
-                Component.literal(weapon.displayName()).withStyle(ChatFormatting.AQUA));
-        player.getInventory().placeItemBackInInventory(stack);
-        weapons.pouchOf(player).refill(weapon.id(), entry.amount(), weapon.ammoCapacity());
+    /**
+     * 給那把弓。
+     *
+     * <p>不能走 {@code type: item}：那條路是給建材用的，直接發原版物品，所以買到的會是一支
+     * 名字叫「弓」的普通弓——櫃子上寫「發射器」、拿到手變成「弓」。發射器是武器系統的東西，
+     * 要跟開場那把、{@code /duel give} 那把長得一模一樣，所以統一由 {@link WeaponItems#createBow}
+     * 產生（它也順手打上「對戰發的」標記，結束時收得回來）。
+     */
+    private boolean giveLauncher() {
+        player.getInventory().placeItemBackInInventory(WeaponItems.createBow());
         return true;
     }
 
+    /**
+     * 給彈藥。
+     *
+     * <p>彈藥是真的背包物品，所以沒有「彈藥袋滿了」這種狀態——上限由堆疊上限與背包空間決定。
+     * 背包滿了的話 {@code placeItemBackInInventory} 會把剩下的丟在腳邊，跟原版一致。
+     */
     private boolean giveAmmo(ShopEntry entry) {
         WeaponDef weapon = weapons.byId(entry.weapon());
         if (weapon == null) {
@@ -243,13 +323,8 @@ public final class ShopMenu extends ChestMenu {
             return false;
         }
 
-        AmmoPouch pouch = weapons.pouchOf(player);
-        int added = pouch.refill(weapon.id(), entry.amount(), weapon.ammoCapacity());
-        if (added <= 0) {
-            // 買滿了就不收錢——不然玩家會在沒有任何提示的情況下把錢丟進水裡
-            deny(weapon.displayName() + " 的子彈已經滿了（" + weapon.ammoCapacity() + " 發）");
-            return false;
-        }
+        player.getInventory().placeItemBackInInventory(
+                WeaponItems.createAmmo(weapon, entry.amount()));
         return true;
     }
 
@@ -259,7 +334,11 @@ public final class ShopMenu extends ChestMenu {
             deny("這件商品設定錯誤（找不到物品 " + entry.item() + "）");
             return false;
         }
-        player.getInventory().placeItemBackInInventory(new ItemStack(item, entry.amount()));
+        // 打上「對戰發的」標記。弓與彈藥是由 WeaponItems 產生的、那裡已經標了，只有這條
+        // 直接發原版物品的路要自己標——不標的話買來的建材與工具會被帶回主世界，
+        // 而那正是回收機制要擋的事（見 DuelItems）
+        player.getInventory().placeItemBackInInventory(
+                DuelItems.issue(new ItemStack(item, entry.amount())));
         return true;
     }
 

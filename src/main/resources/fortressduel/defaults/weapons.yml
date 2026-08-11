@@ -1,31 +1,66 @@
 # 要塞對戰 — 武器
 #
-# 數值移植自網頁版的 AMMO 表，但拿掉了價格：MC 版不買彈藥，武器就是手上的物品，
-# 建材也不用買（自己挖、自己蓋）。
+# 數值移植自網頁版的 AMMO 表。建材不用買（自己挖、自己蓋），彈藥要去軍火商買。
 #
-# 拿著 item 指定的物品「右鍵」開火，只在對戰的攻擊階段有效。
+# **全場只有一把弓，副手放什麼彈藥就射什麼。**
+# 主手拿弓、副手放 item 指定的物品，按住右鍵拉弓、放開發射，只在攻擊階段有效。
+# 這就是原版弓的運作方式（原版找箭也是優先看副手），所以玩家不用學新規則；而且彈藥是真的
+# 背包物品，剩幾發由原版自己畫在那一格上，HUD 不用再擠一段數字。
+#
 # 方塊血量 = 原版硬度 × duel.yml 的 weapon.block_hp_per_hardness（預設 10），
 # 所以 damage 是「打幾發破一格」而不是絕對值：石頭硬度 1.5 → 血量 15 → 廢鐵彈(20) 一發破。
 #
 # 欄位
 #   name              顯示名稱
-#   item              綁定的物品；拿著它右鍵就是用這把武器
+#   item              這種武器的**彈藥物品**。放進副手就是用這把武器
+#                     9 種彈藥剛好是 9 個一眼分得出來的原版物品，這是熱鍵欄的辨識依據
+#                     ※ 不要用箭類物品（arrow / spectral_arrow / tipped_arrow）：那是原版弓的
+#                       原生彈藥，副手放著它等於跟原版搶同一個東西——客戶端會把箭畫上弦，
+#                       而一旦哪條路徑沒被 mixin 接住，射出去的會是一支真的原版箭
 #   damage            單發傷害（同時作用在方塊與生物上）
 #   splash_radius     濺射半徑（格），0 = 單點命中
 #   pierce            穿甲 0~1。折減目標方塊的血量，1.0 = 血量壓到 1（一發破，但仍要打中）
+#   knockback         命中生物時推開的力道（格/tick）。0 = 不推
+#                     不寫的話 = damage × 0.008，所以舊設定檔不改也會有力道感
+#                     濺射武器照爆心距離衰減，跟傷害用同一條曲線
+#   charge            蓄力設定
+#     curve           力道曲線。vanilla（前快後緩）/ linear，或直接畫折線：
+#                     [[0, 0.2], [0.7, 0.45], [1.0, 1.0]] = 後段暴衝，逼你拉滿
+#     min_draw        低於這個力道就不發射也不耗彈（放空弓只是手滑，不該被罰）
+#                     設 0 = 點一下右鍵就發射，射速完全由 cooldown_ticks 決定。
+#                     連射武器（機槍 cooldown 3、雷射 2）只能這樣設：滿弓要 20 tick，
+#                     套上蓄力等於廢掉它們「連續潑灑」的定位
+#     affects         力道影響什麼：speed / damage / spread 可複選，預設只有 speed
+#                     連射武器給空的 []，蓄力不影響任何數值
+#
+#   ※ 滿弓固定 20 tick，這是客戶端寫死的。曲線只改 0→1 之間的形狀，兩端永遠對齊動畫——
+#     設成「40 tick 才滿力道」的話，玩家看到的弓在第 20 tick 就拉滿了，視覺會說謊
 #   pellets           一次擊發幾顆（散彈）
-#   spread_degrees    角度散佈（±度）
+#   spread_degrees    以視線為軸的圓錐半頂角（度）。彈著點在圓盤上均勻分布
+#   recoil            後座力：每擊發一次散佈額外增加幾度
+#                     不寫的話 = spread_degrees × 0.5，所以舊設定檔不改也會有後座力
+#   recoil_max        後座力累積的上限（度）。不寫 = max(3, spread_degrees × 3)
+#   recoil_recovery   後座力每秒回復幾度。固定速率，不是按比例衰減——
+#                     「停火多久才會恢復準度」要能被背下來
 #   cooldown_ticks    裝填間隔（20 tick = 1 秒）
 #   projectile_speed  彈丸初速（格/tick）
 #   gravity           重力（格/tick²），0 = 直線飛行
 #   lifetime_ticks    飛多久之後自己消失
-#   auto              預留欄位：目前一次右鍵 = 一發，連發靠短 cooldown 達成
+#   auto              true  = 按住右鍵就一直打，射速完全由 cooldown_ticks 決定，蓄力不參與
+#                     false = 拉弓、放開，發一發（預設）
+#                     連射武器只能設 true：機槍 cooldown 3、雷射 2，也就是每秒 7~10 發，
+#                     靠連點右鍵打到那個速度手感差得有感
 #   breaks_blocks     命中的方塊會不會被打掉（只在競技場範圍內生效）
-#   trail_particle    飛行時拖的粒子
+#   trail_particle    飛行時拖的粒子（沒指定 trail_color 時才用它）
+#   trail_color       彈道的顏色，"#RRGGBB"。指定之後就改走 dust 粒子——那是原版唯一能
+#                     任意上色的粒子，所以「紫色的光束」這種需求只能從這裡來。
+#                     trail_particle 只吃得下一個 id，塞不進顏色，所以是兩個欄位
+#                     寫法三種都吃：#A020F0 / A020F0 / 0xA020F0
+#   trail_scale       粒子大小倍率，預設 1.4。只有指定 trail_color 時有意義（dust 才吃得到）
 #   fire_sound        開火音效
-#   ammo_capacity     最多帶幾發，也就是 HUD 上 100/120 的分母
 #   ammo_per_shot     一次擊發消耗幾發（散彈打 5 顆但只算 1 發，跟 pellets 是兩回事）
-#   starting_ammo     開場就配給的量
+#                     只從**副手那一疊**扣，不會去背包裡湊——副手就是上膛的彈匣
+#   starting_ammo     開場就配給的量。上限由堆疊上限與背包空間決定，沒有另外的彈藥上限
 
 weapons:
   scrap:
@@ -34,14 +69,23 @@ weapons:
     damage: 20
     splash_radius: 0
     pierce: 0
+    knockback: 0.16
+    # 萬用彈：門檻低、蓄力只影響射程，隨手打也打得出去
+    charge:
+      curve: vanilla
+      min_draw: 0.1
+      affects: [speed]
     spread_degrees: 1.0
+    recoil: 0.6
+    recoil_max: 4.0
+    recoil_recovery: 6.0
     cooldown_ticks: 18
     projectile_speed: 3.0
     gravity: 0.04
     lifetime_ticks: 120
     breaks_blocks: true
-    ammo_capacity: 120
     trail_particle: minecraft:crit
+    trail_color: "#C8C8C8"
     fire_sound: minecraft:entity.arrow.shoot
     starting_ammo: 60
 
@@ -51,15 +95,26 @@ weapons:
     damage: 12
     splash_radius: 0
     pierce: 0
+    # 每秒近 7 發，單發推得多一點點就會把人黏在牆上動不了
+    knockback: 0.08
+    # 連射武器：auto: true ＝ 按住右鍵就一直打，射速完全由 cooldown 決定（每秒近 7 發）。
+    # 蓄力完全不參與——滿弓 20 tick 比它的 cooldown 慢七倍，套上去等於廢掉「連續潑灑」的定位
+    charge:
+      min_draw: 0
+      affects: []
     spread_degrees: 3.0
+    # 連射的代價全在這裡：打滿一梭最後幾發已經散到 9 度
+    recoil: 0.9
+    recoil_max: 9.0
+    recoil_recovery: 7.0
     cooldown_ticks: 3
     projectile_speed: 3.8
     gravity: 0.03
     lifetime_ticks: 80
     auto: true
     breaks_blocks: true
-    ammo_capacity: 300
     trail_particle: minecraft:smoke
+    trail_color: "#FFB03A"
     fire_sound: minecraft:entity.arrow.shoot
     starting_ammo: 60
 
@@ -70,14 +125,23 @@ weapons:
     splash_radius: 0
     # 完全無視硬度：鋼鐵、黑曜石也是一發一格
     pierce: 1.0
+    knockback: 0.16
+    # 力道決定傷害：半弓打不穿黑曜石，逼你把整發拉滿再放
+    charge:
+      curve: linear
+      min_draw: 0.25
+      affects: [damage]
     spread_degrees: 1.6
+    recoil: 0.8
+    recoil_max: 4.0
+    recoil_recovery: 5.0
     cooldown_ticks: 20
     projectile_speed: 3.4
     gravity: 0.03
     lifetime_ticks: 120
     breaks_blocks: true
-    ammo_capacity: 60
     trail_particle: minecraft:enchanted_hit
+    trail_color: "#5AC8FF"
     fire_sound: minecraft:item.crossbow.shoot
 
   buck:
@@ -86,32 +150,57 @@ weapons:
     damage: 11
     splash_radius: 0
     pierce: 0
+    # 逐顆結算，貼臉全中等於推 5 次
+    knockback: 0.09
+    # 力道收攏彈著：速射噴一片，拉滿才是一束
+    charge:
+      curve: linear
+      min_draw: 0.15
+      affects: [spread]
     pellets: 5
     spread_degrees: 1.5
+    recoil: 0.7
+    recoil_max: 4.5
+    recoil_recovery: 6.0
     cooldown_ticks: 24
     projectile_speed: 2.6
     gravity: 0.05
     lifetime_ticks: 40
     breaks_blocks: true
-    ammo_capacity: 120
     trail_particle: minecraft:crit
+    trail_color: "#FFE9A8"
     fire_sound: minecraft:entity.firework_rocket.blast
 
   sniper:
     name: 狙擊彈
-    item: minecraft:spectral_arrow
+    # 不能用箭類物品（原本是 spectral_arrow）：箭是原版弓的**原生彈藥**，副手放著它的話
+    # 我們的機制會跟原版搶同一個東西——客戶端會把箭畫上弦、而一旦哪條路徑沒被 mixin 接住
+    # （沒在對戰中、或判斷失效），射出去的就是一支真的原版箭。長條狀的火焰棒一眼分得出來，
+    # 而且沒有任何原版右鍵行為
+    item: minecraft:blaze_rod
     damage: 52
     splash_radius: 0
     pierce: 0.25
+    knockback: 0.45
+    # 逼你站定：門檻最高，而且力道直接換成準度
+    charge:
+      curve: linear
+      min_draw: 0.3
+      affects: [spread]
     spread_degrees: 0
+    # 單發極準，但連著開就完全失去狙擊的意義
+    recoil: 2.5
+    recoil_max: 8.0
+    recoil_recovery: 10.0
     cooldown_ticks: 30
     projectile_speed: 5.0
     # 彈道平直：重力極低，背下來的落點不會隨距離大幅改變
     gravity: 0.01
     lifetime_ticks: 160
     breaks_blocks: true
-    ammo_capacity: 40
     trail_particle: minecraft:end_rod
+    trail_color: "#FFFFFF"
+    trail_scale: 0.9
     fire_sound: minecraft:item.crossbow.shoot
 
   he:
@@ -120,14 +209,23 @@ weapons:
     damage: 38
     splash_radius: 2.5
     pierce: 0
+    knockback: 0.7
+    # 慢速拋物線本來就該蓄力：力道決定射程，拉弓變成測距的動作
+    charge:
+      curve: linear      # 線性最好抓落點
+      min_draw: 0.2
+      affects: [speed]   # 只影響射程，傷害維持固定，平衡不位移
     spread_degrees: 1.6
+    recoil: 1.2
+    recoil_max: 5.0
+    recoil_recovery: 6.0
     cooldown_ticks: 40
     projectile_speed: 2.4
     gravity: 0.06
     lifetime_ticks: 120
     breaks_blocks: true
-    ammo_capacity: 30
     trail_particle: minecraft:flame
+    trail_color: "#FF5A2A"
     fire_sound: minecraft:entity.generic.explode
 
   laser:
@@ -136,7 +234,16 @@ weapons:
     damage: 5
     splash_radius: 0
     pierce: 0
+    knockback: 0.03
+    # 同機槍：auto: true，按住就一直打（每秒 10 發），蓄力不參與
+    charge:
+      min_draw: 0
+      affects: []
     spread_degrees: 0.3
+    # 每秒 10 發，單發加一點點就會在持續射擊時明顯散開
+    recoil: 0.25
+    recoil_max: 5.0
+    recoil_recovery: 5.0
     cooldown_ticks: 2
     # 一 tick 飛 20 格 + 零重力 ＝ 幾乎是即時命中的直線光束
     projectile_speed: 20.0
@@ -144,8 +251,9 @@ weapons:
     lifetime_ticks: 6
     auto: true
     breaks_blocks: true
-    ammo_capacity: 40
     trail_particle: minecraft:end_rod
+    trail_color: "#A020F0"
+    trail_scale: 1.8
     fire_sound: minecraft:block.beacon.power_select
 
   missile:
@@ -154,14 +262,24 @@ weapons:
     damage: 180
     splash_radius: 1.5
     pierce: 0.5
+    knockback: 1.5
+    charge:
+      curve: linear
+      min_draw: 0.2
+      affects: [speed]
     spread_degrees: 0
+    # 一次一發、80 tick 裝填，後座力沒有意義
+    recoil: 0.0
+    recoil_max: 0.0
+    recoil_recovery: 6.0
     cooldown_ticks: 80
     projectile_speed: 2.0
     gravity: 0
     lifetime_ticks: 200
     breaks_blocks: true
-    ammo_capacity: 30
     trail_particle: minecraft:flame
+    trail_color: "#FF2E2E"
+    trail_scale: 1.8
     fire_sound: minecraft:entity.firework_rocket.launch
 
   drone:
@@ -170,12 +288,21 @@ weapons:
     damage: 70
     splash_radius: 3.5
     pierce: 0
+    knockback: 1.0
+    charge:
+      curve: linear
+      min_draw: 0.2
+      affects: [speed]
     spread_degrees: 0
+    recoil: 0.0
+    recoil_max: 0.0
+    recoil_recovery: 6.0
     cooldown_ticks: 120
     projectile_speed: 1.4
     gravity: 0
     lifetime_ticks: 300
     breaks_blocks: true
-    ammo_capacity: 6
     trail_particle: minecraft:portal
+    trail_color: "#00E5A0"
+    trail_scale: 1.6
     fire_sound: minecraft:entity.generic.explode

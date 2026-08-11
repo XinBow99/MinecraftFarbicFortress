@@ -24,25 +24,80 @@ public record DuelSettings(
         boolean restoreTerrain,
         /** 競技場邊界離最外側玩家至少留幾格。 */
         int arenaMargin,
-        /** 水晶生成在玩家往「遠離對手」方向退幾格的位置。 */
+        /** 熊貓圈生成在玩家往「遠離對手」方向退幾格的位置。 */
         int coreOffset,
         /** 開場時兩側各蓋哪幾棟建築（對應 buildings.yml）。 */
         List<String> arenaBuildings,
+        /**
+         * 中場佔兩座熊貓圈距離的比例。0.3 ＝ 中間 30%，兩邊各 35%。
+         *
+         * <p>用比例而不是固定格數：玩家可能站得很近，固定寬度的中場在那種局面會把整個場地吃掉。
+         */
+        double neutralFraction,
 
-        // ---- 核心（烽火台）----
-        int coreHp,
-        int coreHitDamage,
-        String coreBaseBlock,
+        // ---- 目標（要保護的熊貓）----
+        /** 目標生物的實體 id。換成別種生物只要改這裡，不用寫 Java。 */
+        String pandaEntity,
+        /** 每一方要守幾隻熊貓。全部死光那一方就輸。 */
+        int pandaCount,
+        /** 每隻熊貓的血量。原版熊貓只有 20，不上調的話狙擊一發一隻。 */
+        int pandaHp,
+        /**
+         * 每隻熊貓的個性，照順序對到第 1、2、3… 隻（不夠就從頭循環）。
+         *
+         * <p>原版是隨機抽的，而個性直接決定牠好不好牽：worried 會主動躲開玩家、lazy 會躺著
+         * 不動、aggressive 會反過來打你。抽籤決定的話，一方拿到三隻膽小、另一方三隻正常，
+         * 就是純運氣造成的優劣勢——所以這裡寫死。
+         */
+        List<String> pandaPersonalities,
+        /** 開場柵欄圈的半徑（格）。2 ＝ 5×5 的圈。 */
+        int penRadius,
+        String penBlock,
+        /** 熊貓圈外再往外幾格的木製平台。0 ＝ 不鋪，沿用原本的地形。 */
+        int platformRadius,
+        String platformBlock,
+        /** 開場放在平台上的商人 NPC（對應 npcs.yml）。留空 ＝ 不放。 */
+        String dealerNpc,
+        /**
+         * 熊貓周圍至少要有幾格可站的空間（3×3×3 共 27 格裡算）。低於這個值就持續掉血。
+         *
+         * <p>沒有這條規則的話，最優解固定是「把熊貓封進 1×1 黑曜石棺材」，佈局的博弈就不存在了。
+         */
+        int suffocationMinSpace,
+        /** 空間不足時每秒扣多少血。 */
+        double suffocationDamage,
 
         // ---- 對戰中 ----
         int countdownSeconds,
-        /** 建造階段長度（秒）。這段時間可以擺方塊、不能攻擊。 */
+        /** 建造階段長度（秒）。只在 {@link #buildUntilReady()} 關掉時當長度用。 */
         int buildSeconds,
+        /**
+         * 建造階段等雙方 {@code /duel ready} 才開戰，而不是倒數固定秒數。
+         *
+         * <p>蓋一座能守的房子要多久，取決於你想蓋什麼——固定秒數逼所有人蓋同一種規模的東西，
+         * 而那正是這個遊戲想讓玩家自己決定的部分。攻擊階段仍然計時：那是節奏的來源。
+         */
+        boolean buildUntilReady,
+        /**
+         * ready 模式下最多等幾秒，時間到就強制開戰。0 ＝ 不限。
+         *
+         * <p>純粹是掛機的保險。離線會直接判負，但掛在原地不按 ready 的話這一場會永遠停住。
+         */
+        int buildTimeoutSeconds,
         /** 攻擊階段長度（秒）。這段時間不能擺方塊、可以攻擊。 */
         int combatSeconds,
         int outOfBoundsGraceTicks,
         /** 開場發給雙方的物資，每一項寫成 {@code "minecraft:dirt 20"}。 */
         List<String> startingItems,
+        /** 開場把玩家切成哪個模式，結束還原成他原本的。名稱同原版：survival／adventure／… */
+        String gameMode,
+        /**
+         * 開場是否把玩家原本的背包整份寄放起來（結束原封不動還他）。
+         *
+         * <p>玩家是帶著自己的家當就地進場的，不清空的話身上本來就有整套裝備的人跟剛上線的人
+         * 打的不是同一場遊戲。關掉它是給開發用的——每次測試都被收走測試道具很難做事。
+         */
+        boolean clearInventory,
 
         // ---- 突發事件 ----
         int incidentIntervalSeconds,
@@ -51,6 +106,13 @@ public record DuelSettings(
         int startingMoney,
         /** 每一輪建造階段開始時雙方各拿多少。 */
         int roundIncome,
+        /**
+         * 被對手打中時，每一點傷害扣多少錢。0 ＝ 關掉這個機制。
+         *
+         * <p>單次罰款以玩家的滿血量為上限：狙擊一發 52 傷害打在只有 20 血的人身上，
+         * 罰的是「一條命份量」的錢，不是 52 點的錢。
+         */
+        int damagePenalty,
 
         // ---- 武器 ----
         /** 方塊血量 ＝ 原版硬度 × 這個係數。調大 ＝ 牆更耐打，整場節奏變慢。 */
@@ -72,21 +134,35 @@ public record DuelSettings(
                 cfg.getInt("arena.margin", 16),
                 cfg.getInt("arena.core_offset", 3),
                 cfg.getStringList("arena.buildings"),
+                cfg.getDouble("arena.neutral_fraction", 0.3),
 
-                cfg.getInt("core.hp", 400),
-                cfg.getInt("core.hit_damage", 10),
-                cfg.getString("core.base_block", "minecraft:iron_block"),
+                cfg.getString("objective.entity", "minecraft:panda"),
+                Math.max(1, cfg.getInt("objective.panda_count", 4)),
+                Math.max(1, cfg.getInt("objective.panda_hp", 100)),
+                pandaPersonalities(cfg),
+                Math.max(1, cfg.getInt("objective.pen_radius", 2)),
+                cfg.getString("objective.pen_block", "minecraft:oak_fence"),
+                Math.max(0, cfg.getInt("arena.platform_radius", 5)),
+                cfg.getString("arena.platform_block", "minecraft:oak_planks"),
+                cfg.getString("arena.dealer_npc", "arms_dealer"),
+                cfg.getInt("objective.suffocation_min_space", 6),
+                cfg.getDouble("objective.suffocation_damage", 2.0),
 
                 cfg.getInt("battle.countdown_seconds", 10),
                 cfg.getInt("battle.build_seconds", 60),
+                cfg.getBoolean("battle.build_until_ready", true),
+                Math.max(0, cfg.getInt("battle.build_timeout_seconds", 300)),
                 cfg.getInt("battle.combat_seconds", 60),
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
                 startingItems(cfg),
+                cfg.getString("battle.gamemode", "survival"),
+                cfg.getBoolean("battle.clear_inventory", true),
 
                 cfg.getInt("incident.interval_seconds", 120),
 
                 cfg.getInt("economy.starting_money", 600),
                 cfg.getInt("economy.round_income", 380),
+                cfg.getInt("economy.damage_penalty", 5),
 
                 cfg.getDouble("weapon.block_hp_per_hardness", 10.0));
     }
@@ -97,7 +173,19 @@ public record DuelSettings(
      */
     private static List<String> startingItems(YamlConfig cfg) {
         List<String> configured = cfg.getStringList("battle.starting_items");
-        return configured.isEmpty() ? List.of("minecraft:dirt 20") : configured;
+        return configured.isEmpty() ? List.of("minecraft:dirt 20", "minecraft:bamboo 16") : configured;
+    }
+
+    /**
+     * 設定檔沒寫 personalities 時的預設：三隻正常、一隻懶惰。
+     *
+     * <p>不是全部正常——四隻一模一樣的話牠們會擠成一團動作一致，看起來像四個複製品。
+     * 一隻懶惰的躺在旁邊剛好給這一圈一點差異，而且懶惰只是不太走動，不會像 worried
+     * 那樣主動躲開你，牽起來仍然是可預期的。
+     */
+    private static List<String> pandaPersonalities(YamlConfig cfg) {
+        List<String> configured = cfg.getStringList("objective.personalities");
+        return configured.isEmpty() ? List.of("normal", "normal", "normal", "lazy") : configured;
     }
 
     /** 全部用預設值，設定檔還沒讀進來時的退路。 */

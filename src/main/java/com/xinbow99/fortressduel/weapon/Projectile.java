@@ -26,15 +26,34 @@ final class Projectile {
     Vec3 velocity;
     int ticksLeft;
     boolean dead;
+    /**
+     * 傷害倍率，由蓄力程度決定；即發武器恆為 1。
+     *
+     * <p>記在彈丸上而不是開火時就把數字算進去——傷害還要經過濺射衰減與穿甲折減，
+     * 留著倍率才能讓那些計算照原本的順序疊上去。
+     */
+    final double damageScale;
 
-    Projectile(WeaponDef weapon, Duel duel, ServerPlayer shooter, Vec3 pos, Vec3 velocity) {
+    Projectile(WeaponDef weapon, Duel duel, ServerPlayer shooter, Vec3 pos, Vec3 velocity,
+               double damageScale) {
         this.weapon = weapon;
         this.duel = duel;
         this.shooterId = shooter.getUUID();
         this.shooterName = shooter.getGameProfile().name();
         this.pos = pos;
         this.velocity = velocity;
+        this.damageScale = damageScale;
         this.ticksLeft = weapon.lifetimeTicks();
+    }
+
+    /** 這一發的實際傷害（已含蓄力倍率）。 */
+    double damage() {
+        return weapon.damage() * damageScale;
+    }
+
+    /** 這一發對方塊的實際傷害（已含蓄力倍率）。 */
+    double damageVsBlock() {
+        return weapon.damageVsBlock() * damageScale;
     }
 
     /** 這一 tick 的終點（還沒考慮碰撞）。 */

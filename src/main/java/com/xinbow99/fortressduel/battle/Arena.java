@@ -4,6 +4,7 @@ import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.building.BuildingDef;
 import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.core.DuelSettings;
+import com.xinbow99.fortressduel.npc.NpcDef;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -16,10 +17,10 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 一場對戰的場地：框出來的 n×n 範圍、兩座核心（烽火台）、兩個出生點，以及還原用的快照。
+ * 一場對戰的場地：框出來的 n×n 範圍、兩座熊貓圈、兩個出生點，以及還原用的快照。
  *
- * <p>不生成地形——沿用世界原本長什麼樣子，只做三件事：沿著水平邊界砌一圈牆把範圍框出來、
- * 在雙方各自那半場的正中央放一座烽火台、把核心上方清空。
+ * <p>不生成地形——沿用世界原本長什麼樣子，只做兩件事：沿著水平邊界砌一圈牆把範圍框出來、
+ * 在雙方各自那半場圍一圈柵欄當熊貓的起始位置。
  */
 public final class Arena {
 
@@ -27,9 +28,18 @@ public final class Arena {
     private final Region region;
     private final ArenaSnapshot snapshot;
 
-    /** 兩座核心的位置。開場時還沒有——準備階段結束才會在雙方腳邊長出來。 */
-    private BlockPos coreA;
-    private BlockPos coreB;
+    /** 兩座熊貓圈的中心。開場時還沒有——準備階段結束才會在雙方腳邊圍起來。 */
+    private BlockPos penA;
+    private BlockPos penB;
+    /** 圈內可以用來散開熊貓的半徑（柵欄往內縮一格）。 */
+    private int penRadiusInner;
+
+    /** A 的圈 → B 的圈的水平單位向量。圈放好才有。 */
+    private Vec3 axisDir;
+    /** 兩圈的水平中點，也就是中場的正中央。 */
+    private Vec3 axisMid;
+    /** 中場的半寬（格）。 */
+    private double neutralHalf;
 
     private Arena(ServerLevel level, Region region, ArenaSnapshot snapshot) {
         this.level = level;
@@ -65,26 +75,127 @@ public final class Arena {
     }
 
     /**
-     * 準備階段結束：在雙方腳邊長出核心，並蓋起各自的建築。
+     * 準備階段結束：在雙方腳邊圍起熊貓圈，並蓋起各自的建築。
      *
-     * <p>核心不是放在玩家站的那一格，而是往**遠離對手**的方向退幾格——放在腳下會把人頂起來，
-     * 而且核心貼著自己的臉也不好守。退開的方向由「對手在哪邊」決定，所以兩座核心天生就是
+     * <p>圈不是圍在玩家站的那一格，而是往**遠離對手**的方向退幾格——圍在腳下會把人卡住，
+     * 而且熊貓貼著自己的臉也不好守。退開的方向由「對手在哪邊」決定，所以兩座圈天生就是
      * 一個背對背的佈局。
+     *
+     * <p>柵欄只是**起始**位置：熊貓可以拿竹子引走，藏到哪裡是玩家的決定。
      */
-    public void placeCores(BlockPos playerA, BlockPos playerB, DuelSettings settings,
-                           BuildingPlacer buildings) {
+    public void placePens(BlockPos playerA, BlockPos playerB, DuelSettings settings,
+                          BuildingPlacer buildings) {
         int offset = settings.coreOffset();
-        coreA = coreSpot(playerA, playerB, offset);
-        coreB = coreSpot(playerB, playerA, offset);
+        penRadiusInner = Math.max(0, settings.penRadius() - 1);
+        penA = penSpot(playerA, playerB, offset);
+        penB = penSpot(playerB, playerA, offset);
 
-        placeCore(coreA, settings);
-        placeCore(coreB, settings);
-        placeBuildings(settings, buildings, coreA, coreB);
-        placeBuildings(settings, buildings, coreB, coreA);
+        // 平台要先鋪：placePen 與軍火商都靠 surfaceY 找地面，鋪完之後那個地面才是平台
+        placePlatform(penA, settings);
+        placePlatform(penB, settings);
+
+        placePen(penA, settings);
+        placePen(penB, settings);
+
+        placeDealer(penA, penB, settings, buildings);
+        placeDealer(penB, penA, settings, buildings);
+
+        placeBuildings(settings, buildings, penA, penB);
+        placeBuildings(settings, buildings, penB, penA);
+
+        setUpZones(settings);
+    }
+
+    /**
+     * 在熊貓圈周圍鋪一片平的木製平台。
+     *
+     * <p>開場刻意極簡：一片平台、上面站著玩家、軍火商、和柵欄圍住的熊貓，沒有別的。理由是
+     * 這個遊戲的內容應該由玩家在建造階段長出來，開場先擺一棟蓋好的房子只會佔掉那個空間，
+     * 而且地形起伏會讓「誰站得比較高」變成開場就決定的隨機優勢。
+     *
+     * <p>{@code platform_radius: 0} 就完全不鋪，沿用原本的地形。
+     */
+    private void placePlatform(BlockPos center, DuelSettings settings) {
+        int r = settings.platformRadius();
+        if (r <= 0) return;
+
+        BlockState planks = blockState(settings.platformBlock(), Blocks.OAK_PLANKS);
+        // 站的那一格的下面一格 ＝ 玩家腳下踩著的方塊。木板是**取代**它（草地變木板），
+        // 不是鋪在它上面——鋪上面的話所有人都會被墊高一格
+        int surface = center.getY() - 1;
+
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                BlockPos floor = new BlockPos(center.getX() + dx, surface, center.getZ() + dz);
+                snapshot.record(level, floor);
+                level.setBlock(floor, planks, 2);
+
+                // 平台上方淨空：地形可能是山坡，不清的話玩家會被埋在土裡
+                for (int y = surface + 1; y <= Math.min(region.maxY(), surface + 4); y++) {
+                    BlockPos pos = new BlockPos(floor.getX(), y, floor.getZ());
+                    if (level.getBlockState(pos).isAir()) continue;
+                    snapshot.record(level, pos);
+                    level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
+                }
+            }
+        }
+    }
+
+    /**
+     * 把商人放在平台上、熊貓圈的後方（遠離對手那一側）。
+     *
+     * <p>不再包在一棟建築裡——極簡開場沒有建築，但商人仍然是這一側的資產：他被打死那一方
+     * 就補不到子彈，所以「先做掉對方的商人」還是一條有效的戰術（見 npcs.yml）。
+     */
+    private void placeDealer(BlockPos pen, BlockPos enemyPen, DuelSettings settings,
+                             BuildingPlacer buildings) {
+        if (settings.dealerNpc().isBlank()) return;
+
+        NpcDef def = buildings.npcs().npc(settings.dealerNpc());
+        if (def == null) {
+            FortressDuel.LOGGER.warn("arena.dealer_npc '{}' is not defined in npcs.yml, no shop this duel",
+                    settings.dealerNpc());
+            return;
+        }
+
+        // 站在圈後方一格半徑處，臉朝中場——玩家從自己這側走過來就直接面對他
+        int back = settings.penRadius() + 2;
+        int dx = pen.getX() - enemyPen.getX();
+        int dz = pen.getZ() - enemyPen.getZ();
+        boolean alongX = Math.abs(dx) >= Math.abs(dz);
+        int x = pen.getX() + (alongX ? Integer.signum(dx) * back : 0);
+        int z = pen.getZ() + (alongX ? 0 : Integer.signum(dz) * back);
+
+        int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3);
+        float yaw = alongX
+                ? (dx > 0 ? 90f : 270f)
+                : (dz > 0 ? 0f : 180f);
+        buildings.npcs().spawn(level, def, new BlockPos(x, y, z), yaw);
+    }
+
+    /**
+     * 算出三個區塊的分界。
+     *
+     * <p>切法是沿著「A 的圈 → B 的圈」這條軸，不是沿著世界的 X 或 Z——場地是就地框在雙方
+     * 之間的，兩個人站成東西向、南北向、或任何斜角都可能，照座標軸切一定會有一邊是錯的。
+     *
+     * <p>中場寬度取兩圈距離的一個比例而不是固定格數：玩家可能站得很近（場地有最小邊長，
+     * 但兩座圈不會因此被推開），固定 16 格的中場在那種局面會把整個場地吃掉，兩邊都無處可站。
+     */
+    private void setUpZones(DuelSettings settings) {
+        Vec3 a = new Vec3(penA.getX() + 0.5, 0, penA.getZ() + 0.5);
+        Vec3 b = new Vec3(penB.getX() + 0.5, 0, penB.getZ() + 0.5);
+
+        Vec3 axis = b.subtract(a);
+        double length = axis.length();
+        axisMid = a.add(axis.scale(0.5));
+        // 兩座圈幾乎重疊（理論上不會，但不想留一個會 NaN 的除法）就退化成「沒有分界」
+        axisDir = length < 1.0E-3 ? null : axis.scale(1.0 / length);
+        neutralHalf = length * Math.clamp(settings.neutralFraction(), 0.0, 0.9) / 2.0;
     }
 
     /** 從 self 往「遠離 enemy」的方向退 offset 格，再貼回地面。 */
-    private BlockPos coreSpot(BlockPos self, BlockPos enemy, int offset) {
+    private BlockPos penSpot(BlockPos self, BlockPos enemy, int offset) {
         int dx = self.getX() - enemy.getX();
         int dz = self.getZ() - enemy.getZ();
 
@@ -93,12 +204,12 @@ public final class Arena {
         int z = self.getZ() + (Math.abs(dz) > Math.abs(dx) ? Integer.signum(dz) * offset : 0);
 
         // 退開之後可能踩空或撞進山壁，夾回競技場的垂直範圍內
+        //
+        // 回傳的是**站的那一格**（腳下的地面在它下面一格）。surfaceY 走的是 getHeight，
+        // 它回的已經是地表上方第一格空氣——再 +1 的話整座圈連同平台都會浮高一層，
+        // 玩家原本站的草地不會被木板取代，而是被木板頂到頭上
         int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 4);
-        return new BlockPos(x, y + 1, z);
-    }
-
-    public boolean coresPlaced() {
-        return coreA != null && coreB != null;
+        return new BlockPos(x, y, z);
     }
 
     private static int surfaceY(ServerLevel level, int x, int z) {
@@ -127,27 +238,39 @@ public final class Arena {
         }
     }
 
-    /** 放一座核心：3×3 底座 + 上面一顆烽火台，並把上方淨空好讓光柱看得見。 */
-    private void placeCore(BlockPos core, DuelSettings settings) {
-        BlockState base = blockState(settings.coreBaseBlock(), Blocks.IRON_BLOCK);
+    /**
+     * 圍一圈柵欄當熊貓的起始圈，並把圈內清空到站得下熊貓。
+     *
+     * <p>柵欄逐欄貼著地表放，不是拉一條水平線——場地是就地框在世界原本的地形上的，
+     * 地面本來就會起伏，拉水平線的話一半浮空、一半埋在土裡。
+     */
+    private void placePen(BlockPos center, DuelSettings settings) {
+        BlockState fence = blockState(settings.penBlock(), Blocks.OAK_FENCE);
+        int r = settings.penRadius();
 
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                BlockPos pos = core.offset(dx, -1, dz);
-                snapshot.record(level, pos);
-                level.setBlock(pos, base, 2);
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                int x = center.getX() + dx, z = center.getZ() + dz;
+                boolean edge = Math.abs(dx) == r || Math.abs(dz) == r;
+                int ground = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3);
+
+                if (edge) {
+                    // 柵欄疊兩格：一格高的話熊貓被推一下就跳出去了
+                    for (int y = ground; y <= ground + 1; y++) {
+                        BlockPos pos = new BlockPos(x, y, z);
+                        snapshot.record(level, pos);
+                        level.setBlock(pos, fence, 2);
+                    }
+                } else {
+                    // 圈內淨空兩格：熊貓一生出來就卡在方塊裡的話會直接吃到窒息傷害
+                    for (int y = ground; y <= ground + 1; y++) {
+                        BlockPos pos = new BlockPos(x, y, z);
+                        if (level.getBlockState(pos).isAir()) continue;
+                        snapshot.record(level, pos);
+                        level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
+                    }
+                }
             }
-        }
-
-        snapshot.record(level, core);
-        level.setBlock(core, Blocks.BEACON.defaultBlockState(), 2);
-
-        // 烽火台上面擋著就不會發光；順手清出一個看得到的目標
-        for (int y = core.getY() + 1; y <= Math.min(region.maxY(), core.getY() + 6); y++) {
-            BlockPos pos = new BlockPos(core.getX(), y, core.getZ());
-            if (level.getBlockState(pos).isAir()) continue;
-            snapshot.record(level, pos);
-            level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
         }
     }
 
@@ -196,27 +319,94 @@ public final class Arena {
         return region;
     }
 
-    public BlockPos coreA() {
-        return coreA;
+    // ---------- 區塊 ----------
+
+    /** 場上的三個區塊，沿著兩座熊貓圈的連線切開。 */
+    public enum Zone {
+        /** A 的半場（penA 那一側）。 */
+        A,
+        /** 中場：突發事件的怪待的地方，雙方都進不去。 */
+        NEUTRAL,
+        /** B 的半場（penB 那一側）。 */
+        B
     }
 
-    public BlockPos coreB() {
-        return coreB;
+    /** 圈放好了沒。沒放好之前沒有分界，也就不做任何範圍限制。 */
+    public boolean zonesReady() {
+        return axisDir != null;
+    }
+
+    /** 沿著軸的有號距離：0 在中場正中央，負的靠 A、正的靠 B。 */
+    private double offsetAlongAxis(double x, double z) {
+        return new Vec3(x, 0, z).subtract(axisMid).dot(axisDir);
     }
 
     /**
-     * 被拉回場內時要站的位置：自己的核心旁邊。
+     * 把一個位置夾回指定的區塊，同時夾進競技場的垂直範圍。
      *
-     * <p>核心還沒生成（準備階段）就退回場地中央——那時本來也還沒有「自己這一側」。
+     * <p>水平方向只沿著軸推——保留橫向位置，體感上是撞到一道看不見的牆，而不是被抓走。
+     * 已經在範圍內就回傳 null，呼叫端據此決定要不要動它（每 tick 硬夾會讓站在邊界上的東西抖個不停）。
+     *
+     * @param buffer 推回去之後要離邊界多遠，避免下一 tick 又剛好壓在線上
      */
-    public Vec3 spawnFor(BlockPos core) {
-        if (core == null) {
+    public Vec3 confine(Vec3 pos, Zone zone, double buffer) {
+        if (!zonesReady()) return null;
+
+        double s = offsetAlongAxis(pos.x, pos.z);
+        double target = s;
+        switch (zone) {
+            case A -> { if (s >= -neutralHalf) target = -neutralHalf - buffer; }
+            case B -> { if (s <= neutralHalf) target = neutralHalf + buffer; }
+            case NEUTRAL -> {
+                if (s < -neutralHalf) target = -neutralHalf + buffer;
+                else if (s > neutralHalf) target = neutralHalf - buffer;
+            }
+        }
+
+        // 天空給得比地底寬，是 arena.height 與 arena.depth 兩個設定拉開的，這裡只負責執行
+        double y = Math.clamp(pos.y, region.minY() + 1, region.maxY() - 1);
+
+        if (target == s && y == pos.y) return null;
+
+        Vec3 shifted = pos.add(axisDir.scale(target - s));
+        return new Vec3(shifted.x, y, shifted.z);
+    }
+
+    public BlockPos penA() {
+        return penA;
+    }
+
+    public BlockPos penB() {
+        return penB;
+    }
+
+    /**
+     * 熊貓的生成點：圈內散開，但不貼著柵欄。
+     *
+     * @param index 第幾隻，用來把牠們錯開；超過圈內格數就繞回去疊在一起
+     */
+    public BlockPos guardianSpot(BlockPos center, int index) {
+        int inner = Math.max(0, penRadiusInner);
+        int span = inner * 2 + 1;
+        int dx = index % span - inner;
+        int dz = (index / span) % span - inner;
+        int x = center.getX() + dx, z = center.getZ() + dz;
+        return new BlockPos(x, Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3), z);
+    }
+
+    /**
+     * 被拉回場內時要站的位置：自己的熊貓圈旁邊。
+     *
+     * <p>圈還沒圍起來（準備階段）就退回場地中央——那時本來也還沒有「自己這一側」。
+     */
+    public Vec3 spawnFor(BlockPos pen) {
+        if (pen == null) {
             BlockPos center = region.center();
             return new Vec3(center.getX() + 0.5,
                     safeSpawnY(center.getX(), center.getZ(), center.getY()), center.getZ() + 0.5);
         }
-        int x = core.getX(), z = core.getZ() + 2;
-        return new Vec3(x + 0.5, safeSpawnY(x, z, core.getY()), z + 0.5);
+        int x = pen.getX(), z = pen.getZ() + 3;
+        return new Vec3(x + 0.5, safeSpawnY(x, z, pen.getY()), z + 0.5);
     }
 
     /**
@@ -241,13 +431,8 @@ public final class Arena {
     }
 
     /** 站在出生點時要朝哪邊看（yaw）：面向場地中央。 */
-    public float spawnYawFor(BlockPos core) {
-        if (core == null) return 0f;
-        return core.getZ() < region.center().getZ() ? 0f : 180f;
-    }
-
-    /** 這一格是不是某一座核心的烽火台本體。 */
-    public boolean isCoreBlock(BlockPos pos) {
-        return pos.equals(coreA) || pos.equals(coreB);
+    public float spawnYawFor(BlockPos pen) {
+        if (pen == null) return 0f;
+        return pen.getZ() < region.center().getZ() ? 0f : 180f;
     }
 }
