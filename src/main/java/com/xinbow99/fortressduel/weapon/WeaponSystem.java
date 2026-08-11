@@ -147,7 +147,7 @@ public final class WeaponSystem {
      *
      * <p>不忘的話，補一塊新方塊上去會直接繼承舊的傷害——一面剛補好的牆一發就碎。
      */
-    private void forgetBlock(BlockPos pos) {
+    public void forgetBlock(BlockPos pos) {
         for (Map<BlockPos, Float> damaged : blockDamage.values()) {
             damaged.remove(pos);
         }
@@ -205,7 +205,7 @@ public final class WeaponSystem {
     /**
      * 開場配給：把每種武器的 {@code starting_ammo} 當實物發下去。
      *
-     * <p>弓不在這裡發——它跟泥土、牽繩一樣是 {@code battle.starting_items} 的一項，
+     * <p>弓不在這裡發——它跟泥土、竹子一樣是 {@code battle.starting_items} 的一項，
      * 開場物資該由設定檔決定，程式不另外偷塞。
      */
     public void giveStartingAmmo(ServerPlayer player) {
@@ -633,7 +633,7 @@ public final class WeaponSystem {
      *
      * <p>傷害沒吃到就不推。{@code ALLOW_DAMAGE} 會擋掉好幾種傷害——建造階段的互毆、
      * 打在自己人熊貓上的濺射誤傷——那些情況下如果還推得動，等於留了一個「不扣血但能位移」
-     * 的後門：對著自己的熊貓開一發高爆彈就能把牠轟到想要的位置，牽繩那套慢慢牽的設計就被繞過了。
+     * 的後門：對著自己的熊貓開一發高爆彈就能把牠轟到想要的位置，拿竹子慢慢引的設計就被繞過了。
      *
      * @param direction 推的方向，不必先正規化；長度為 0 時只扣血不推
      * @param scale     力道倍率，濺射用距離衰減、直擊給 1.0

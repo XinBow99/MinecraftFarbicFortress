@@ -5,6 +5,7 @@ import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.core.DuelSettings;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.util.DuelItems;
+import com.xinbow99.fortressduel.util.InventoryStash;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
@@ -27,6 +28,7 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.animal.panda.Panda;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -36,6 +38,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,7 +50,7 @@ import java.util.UUID;
  * <p>開場不傳送玩家：競技場就地框在雙方站的位置之間，準備倒數結束才在各自腳邊圍出熊貓圈。
  * 之後建造與攻擊階段輪替，勝負條件只有一條：把對方的熊貓全部打死。
  *
- * <p>目標是**實體**而不是方塊，這是刻意的——熊貓可以被牽繩帶走、藏進地下室或假房間，
+ * <p>目標是**實體**而不是方塊，這是刻意的——熊貓可以拿竹子引走、藏進地下室或假房間，
  * 所以「打哪裡」本身變成攻方要解的問題，蓋房子的 3D 結構也才有意義。代價是要自己處理
  * 一堆實體才有的問題：意外死亡、被推走、對戰結束要清乾淨。
  *
@@ -123,6 +126,12 @@ public final class Duel {
      * 「中彈 −$100」在對戰中全部等於隱形。要顯示在動作列上的東西必須交給 HUD 自己排版。
      */
     private final Map<UUID, Notice> notices = new HashMap<>();
+    /**
+     * 這一輪建造階段已經按過 {@code /duel ready} 的人。每次進建造階段清空。
+     *
+     * <p>只在 {@code battle.build_until_ready} 開著時有意義。
+     */
+    private final Set<UUID> ready = new HashSet<>();
 
     /** 一則短訊與它的到期時間。 */
     private record Notice(Component text, long until) {
@@ -207,6 +216,7 @@ public final class Duel {
         north.showTo(player);
         south.showTo(player);
         applyDuelGameMode(player);
+        stashInventory(player);
         giveStartingItems(player);
         services.weapons().giveStartingAmmo(player);
     }
@@ -237,6 +247,25 @@ public final class Duel {
             if (type.getName().equalsIgnoreCase(name)) return type;
         }
         return null;
+    }
+
+    /**
+     * 開場把玩家原本的背包整份寄放起來，打完再還他（見 {@link InventoryStash}）。
+     *
+     * <p>不清空的話，身上本來就有鑽石裝、一堆黑曜石、一把附魔弓的人跟剛上線的人打的不是同一場
+     * 遊戲——而這個遊戲的前提是雙方靠同一份開場物資與同一個經濟系統長出差距。
+     *
+     * <p>可以用 {@code battle.clear_inventory: false} 關掉。開發時常常需要帶著測試用的東西
+     * 直接開一場，每次都被收走很難做事。
+     */
+    private void stashInventory(ServerPlayer player) {
+        if (!settings.clearInventory()) return;
+
+        int stashed = InventoryStash.take(player);
+        if (stashed > 0) {
+            player.sendSystemMessage(Msg.info("你原本的 " + stashed
+                    + " 疊物品先寄放著，對戰結束會原封不動還你。"));
+        }
     }
 
     /**
@@ -370,7 +399,7 @@ public final class Duel {
 
         for (ServerPlayer player : players) {
             player.sendSystemMessage(Msg.good("熊貓已生成！把對方的 " + settings.pandaCount()
-                    + " 隻熊貓全部打死就獲勝。牠們可以用**牽繩**拉走藏起來——但別把牠們封死，"
+                    + " 隻熊貓全部打死就獲勝。牠們可以拿**竹子**引走藏起來——但別把牠們封死，"
                     + "空間太小會讓牠們持續掉血。"));
             beep(player, SoundEvents.PANDA_AMBIENT, 1f);
         }
@@ -379,7 +408,7 @@ public final class Duel {
     /**
      * 生成一方的熊貓。
      *
-     * <p>刻意**不關 AI**：關掉的話牽繩拉不動，「自己安排佈局」這件事就沒了。代價是牠們會亂晃，
+     * <p>刻意**不關 AI**：關掉的話竹子引不動，「自己安排佈局」這件事就沒了。代價是牠們會亂晃，
      * 所以柵欄圈疊了兩格高（見 {@code Arena.placePen}）。
      */
     private List<UUID> spawnPandas(Side side, BlockPos pen) {
@@ -411,11 +440,49 @@ public final class Duel {
             if (panda instanceof Mob mob) {
                 mob.setPersistenceRequired();
             }
+            applyPersonality(panda, i);
             MobSpawner.setMaxHealth(panda, settings.pandaHp());
             panda.setHealth(panda.getMaxHealth());
             ids.add(panda.getUUID());
         }
         return ids;
+    }
+
+    /**
+     * 指定第 {@code index} 隻熊貓的個性（設定檔的 {@code objective.personalities}）。
+     *
+     * <p>原版是隨機抽的，而個性直接決定牠好不好牽——worried 會**主動躲開玩家**、lazy 會躺著
+     * 不動、aggressive 會反過來打你。抽籤的話，一方三隻正常、另一方三隻膽小是有可能的，
+     * 而那是純運氣造成的優劣勢，跟這個遊戲想比的東西無關。
+     *
+     * <p>顯性與隱性兩個基因都設成同一個值。只設顯性的話，隱性基因仍然是隨機的，遇到
+     * 隱性性狀（brown／weak）的判定或是繁殖出下一代時還是會跑出沒指定的個性。
+     *
+     * <p>目標生物不是熊貓（{@code objective.entity} 換過）就跳過——那時本來就沒有個性可言。
+     */
+    private void applyPersonality(LivingEntity entity, int index) {
+        if (!(entity instanceof Panda panda)) return;
+
+        List<String> wanted = settings.pandaPersonalities();
+        if (wanted.isEmpty()) return;
+
+        String name = wanted.get(index % wanted.size());
+        Panda.Gene gene = geneByName(name);
+        if (gene == null) {
+            FortressDuel.LOGGER.warn("objective.personalities has unknown personality '{}', "
+                    + "leaving panda #{} as vanilla rolled it", name, index);
+            return;
+        }
+        panda.setMainGene(gene);
+        panda.setHiddenGene(gene);
+    }
+
+    /** 設定檔寫的個性名（normal／lazy／…）對到原版的基因；認不得回 null。 */
+    private static Panda.Gene geneByName(String name) {
+        for (Panda.Gene gene : Panda.Gene.values()) {
+            if (gene.getSerializedName().equalsIgnoreCase(name.trim())) return gene;
+        }
+        return null;
     }
 
     /**
@@ -549,10 +616,16 @@ public final class Duel {
     private void enterBuild(ServerPlayer[] players) {
         state = DuelState.BUILD;
         round++;
-        phaseTicks = settings.buildSeconds() * 20;
+        ready.clear();
+        phaseTicks = buildPhaseTicks();
+
+        String howItEnds = settings.buildUntilReady()
+                ? "蓋完打 /duel ready，雙方都按了就開戰。"
+                : "（" + settings.buildSeconds() + " 秒）";
+
         for (ServerPlayer player : players) {
-            player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 建造階段開始（"
-                    + settings.buildSeconds() + " 秒）：可以蓋，不能攻擊。"));
+            player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 建造階段開始"
+                    + howItEnds + "：可以蓋，不能攻擊。"));
             // 建造階段才發收入：這時你才有機會把錢花掉（蓋牆、去商店補彈藥）。
             // 第一輪不發——開局資金是 starting_money，第一輪就加一份收入的話，
             // 那個設定值講的就不是玩家實際開局拿到的錢了
@@ -561,6 +634,68 @@ public final class Duel {
             }
             beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 0.8f);
         }
+    }
+
+    /**
+     * 建造階段的計時器要設多久。
+     *
+     * <p>ready 模式下這個數字不是「階段長度」而是**掛機的保險上限**，時間到就強制開戰。
+     * {@code build_timeout_seconds: 0} ＝ 不限，那就給一個大到不會在一場對戰內走完的值——
+     * 用同一個計時器而不是額外加一個「無限」的狀態，換來 {@link #tickPhase} 只有一條路徑。
+     */
+    private int buildPhaseTicks() {
+        if (!settings.buildUntilReady()) return settings.buildSeconds() * 20;
+        return settings.buildTimeoutSeconds() > 0
+                ? settings.buildTimeoutSeconds() * 20
+                : Integer.MAX_VALUE;
+    }
+
+    /**
+     * {@code /duel ready}：這一方蓋完了。
+     *
+     * <p>雙方都按了就立刻進攻擊階段——不用等計時器，那個計時器在 ready 模式下只是掛機保險。
+     *
+     * <p>單人練習模式下靶子那一方永遠算就緒，所以一個人按就開戰。
+     *
+     * @return 給玩家看的錯誤訊息；null ＝ 成功
+     */
+    public String markReady(ServerPlayer player) {
+        if (state != DuelState.BUILD) {
+            return "現在不是建造階段。";
+        }
+        if (!settings.buildUntilReady()) {
+            return "這場對戰的建造階段是計時的，不用按就緒。";
+        }
+        if (!ready.add(player.getUUID())) {
+            return "你已經按過就緒了，正在等對手。";
+        }
+
+        ServerPlayer[] players = onlinePlayers();
+        for (ServerPlayer other : players) {
+            other.sendSystemMessage(Msg.info(player.getGameProfile().name() + " 蓋完了。"
+                    + (isEveryoneReady() ? "" : "等另一方 /duel ready。")));
+        }
+        if (isEveryoneReady()) {
+            enterCombat(players);
+        }
+        return null;
+    }
+
+    /** 目前線上的參戰玩家。單人練習模式下只有一個。 */
+    private ServerPlayer[] onlinePlayers() {
+        ServerPlayer a = playerOf(north);
+        ServerPlayer b = solo ? null : playerOf(south);
+
+        if (a != null && b != null) return new ServerPlayer[]{a, b};
+        if (a != null) return new ServerPlayer[]{a};
+        if (b != null) return new ServerPlayer[]{b};
+        return new ServerPlayer[0];
+    }
+
+    /** 靶子沒有真人可以按就緒，所以它永遠算就緒——不然單人練習會卡在建造階段。 */
+    private boolean isEveryoneReady() {
+        if (!ready.contains(north.playerId())) return false;
+        return south.isDummy() || ready.contains(south.playerId());
     }
 
     private void enterCombat(ServerPlayer[] players) {
@@ -603,7 +738,7 @@ public final class Duel {
         int seconds = (phaseTicks + 19) / 20;
         MutableComponent line = switch (state) {
             case PREPARE -> Msg.plain("熊貓生成倒數 " + seconds + "s  站好別亂跑", ChatFormatting.YELLOW);
-            case BUILD -> Msg.plain("建造 " + seconds + "s", ChatFormatting.GREEN);
+            case BUILD -> buildHud(player, seconds);
             case COMBAT -> Msg.plain("攻擊 " + seconds + "s", ChatFormatting.RED);
             case ENDED -> Component.literal("");
         };
@@ -626,6 +761,21 @@ public final class Duel {
 
         // 彈藥數不用畫：它現在是副手的實物，原版自己會在那一格畫數量
         return line;
+    }
+
+    /**
+     * 建造階段那一行。
+     *
+     * <p>ready 模式下不畫秒數：那個計時器是掛機保險，把它當成「剩餘時間」會讓人以為要趕工，
+     * 而不趕工正是這個模式的重點。玩家真正要知道的是「還在等誰」。
+     */
+    private MutableComponent buildHud(ServerPlayer player, int seconds) {
+        if (!settings.buildUntilReady()) {
+            return Msg.plain("建造 " + seconds + "s", ChatFormatting.GREEN);
+        }
+        return ready.contains(player.getUUID())
+                ? Msg.plain("建造 — 已就緒，等對手", ChatFormatting.GRAY)
+                : Msg.plain("建造 — 蓋完打 /duel ready", ChatFormatting.GREEN);
     }
 
     /** 在玩家腳下放一個提示音。用世界的 playSound 而不是只送給他一個人——兩邊聽到的節奏會一致。 */
@@ -745,6 +895,8 @@ public final class Duel {
         // 要在 arena.restore() 之前：還原只處理方塊，實體得自己收
         removeGuardians();
         reclaimIssuedItems();
+        // 一定排在收回之後：先把對戰發的清掉，原本的東西才回得去原本的格子
+        returnStashedInventories();
 
         announce(result);
 
@@ -780,6 +932,24 @@ public final class Duel {
             }
         }
         clearDroppedIssuedItems();
+    }
+
+    /**
+     * 把開場寄放的背包還回去。
+     *
+     * <p>離線的人這裡碰不到，但他的東西在檔案裡不會不見——下次上線就會還（見
+     * {@code DuelManager} 的 JOIN 處理）。這也是 {@link InventoryStash} 要寫進檔案的原因。
+     */
+    private void returnStashedInventories() {
+        for (Side side : new Side[]{north, south}) {
+            ServerPlayer player = playerOf(side);
+            if (player == null) continue;
+
+            int returned = InventoryStash.returnTo(player);
+            if (returned > 0) {
+                player.sendSystemMessage(Msg.good("你原本的 " + returned + " 疊物品還你了。"));
+            }
+        }
     }
 
     /**

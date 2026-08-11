@@ -79,6 +79,44 @@ shops:
         weapon: drone
         amount: 3
 
+      # ---- 工具 ----
+      # 開場只發一把石鎬，其餘要買。這是有意的：清空背包之後「先買工具還是先買彈藥」
+      # 變成第一輪的第一個決定，而兩邊的答案不見得一樣（想快點挖出地堡的人跟想早點
+      # 開火壓制的人會分岔）。
+      #
+      # 價格都壓在一輪收入（$380）以下，湊得出來——工具是門檻不是牆，貴到買不起的話
+      # 那個決定就不存在了，所有人都只剩同一條路可以走
+      tool_pickaxe:
+        name: 鐵鎬
+        type: item
+        price: 120
+        item: minecraft:iron_pickaxe
+        lore: 挖石頭快一截；建造階段就是跟時間賽跑
+
+      tool_axe:
+        name: 鐵斧
+        type: item
+        price: 100
+        item: minecraft:iron_axe
+        lore: 砍樹，也拆得動木造工事
+
+      tool_shovel:
+        name: 鐵鏟
+        type: item
+        price: 80
+        item: minecraft:iron_shovel
+        lore: 挖土、挖沙；地堡跟壕溝都靠它
+
+      # 熊貓栓不了（原版 Panda.canBeLeashed 寫死回 false），牠只吃竹子——
+      # 手上拿著竹子牠就跟著你走，這是搬動熊貓的唯一手段
+      tool_bamboo:
+        name: 竹子 ×16
+        type: item
+        price: 60
+        item: minecraft:bamboo
+        amount: 16
+        lore: 拿在手上熊貓就跟著走；開場那 16 根不夠用再來拿
+
       # ---- 建材 ----
       mat_stone:
         name: 石頭 ×64
