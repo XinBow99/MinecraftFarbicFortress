@@ -30,7 +30,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -86,8 +88,6 @@ public final class WeaponSystem {
      * 再切回來時它應該已經回穩了——這由 {@link #tickRecoil} 的固定衰減自然達成。
      */
     private final Map<UUID, Map<String, Double>> recoil = new HashMap<>();
-    /** 玩家 → 他的彈藥袋。 */
-    private final Map<UUID, AmmoPouch> pouches = new HashMap<>();
     /** 每一場對戰裡、每一格已經累積的傷害。 */
     private final Map<Duel, Map<BlockPos, Float>> blockDamage = new HashMap<>();
 
@@ -116,7 +116,7 @@ public final class WeaponSystem {
      *       而快照已經用掉了，那個洞永遠不會被補回來。</li>
      *   <li><b>清掉挖掘裂痕</b>——裂痕是送給客戶端的獨立狀態，不會因為方塊被還原就消失，
      *       要明確送一次 −1 才會不見。</li>
-     *   <li>清掉累積傷害與彈藥。</li>
+     *   <li>清掉累積傷害與後座力。彈藥不用清——它現在是玩家背包裡的實物。</li>
      * </ul>
      */
     private void cleanUp(Duel duel) {
@@ -136,11 +136,7 @@ public final class WeaponSystem {
             }
         }
 
-        // 彈藥跟錢一樣不跨場：下一場從開場配給重新算起
-        pouches.remove(duel.north().playerId());
-        pouches.remove(duel.south().playerId());
-
-        // 後座力也不跨場，否則上一場最後那串連射會讓下一場的第一發歪掉
+        // 後座力不跨場，否則上一場最後那串連射會讓下一場的第一發歪掉
         recoil.remove(duel.north().playerId());
         recoil.remove(duel.south().playerId());
     }
@@ -158,75 +154,78 @@ public final class WeaponSystem {
 
     // ---------- 開火 ----------
 
+    /**
+     * 擋掉副手彈藥的原版右鍵行為。
+     *
+     * <p>幾種彈藥本身有原版行為：終界之眼會飛走、煙火會射出去、TNT 會被放下。主手拿弓時原版
+     * 是「主手用掉了就不再試副手」，所以正常情況不會觸發；但主手**不是**弓的時候（切去拿建材、
+     * 或弓掉了）右鍵仍然會走到副手，一個手滑就把彈藥丟掉了。對戰中一律擋下來。
+     */
     private InteractionResult onUseItem(ServerPlayer player, InteractionHand hand) {
-        ItemStack stack = player.getItemInHand(hand);
-        if (stack.isEmpty()) return InteractionResult.PASS;
-
-        WeaponDef weapon = byStack(stack);
-        if (weapon == null) return InteractionResult.PASS;
-        // 蓄力武器不在這裡開火：右鍵只是開始拉弓，發射在放開的時候（BowItemMixin）
-        if (weapon.bowLaunched()) return InteractionResult.PASS;
+        if (hand != InteractionHand.OFF_HAND) return InteractionResult.PASS;
 
         Duel duel = duels.duelOf(player);
-        if (duel == null) {
-            // 沒在對戰就完全不插手。武器綁的是鐵錠、燧石、TNT、煙火這類原版常見物品，
-            // 攔下來的話等於把整個伺服器的普通物品弄壞（煙火放不出去、終界之眼丟不了），
-            // 還會對每個右鍵的人洗一則訊息
-            return InteractionResult.PASS;
-        }
-        if (!duel.state().canAttack()) {
-            player.sendSystemMessage(Msg.warn("建造階段不能開火。"));
-            return InteractionResult.FAIL;
-        }
+        // 沒在對戰就完全不插手：彈藥綁的是鐵錠、燧石、TNT、煙火這類原版常見物品，
+        // 攔下來的話等於把整個伺服器的普通物品弄壞
+        if (duel == null) return InteractionResult.PASS;
+        if (byAmmoStack(player.getOffhandItem()) == null) return InteractionResult.PASS;
 
-        Map<String, Integer> playerCooldowns = cooldowns.computeIfAbsent(player.getUUID(), k -> new HashMap<>());
-        if (playerCooldowns.containsKey(weapon.id())) {
-            return InteractionResult.FAIL;
-        }
-
-        AmmoPouch pouch = pouchOf(player);
-        if (!pouch.consume(weapon.id(), weapon.ammoPerShot())) {
-            outOfAmmo(player, weapon, playerCooldowns);
-            return InteractionResult.FAIL;
-        }
-        playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
-
-        fire(player, duel, weapon, 1.0);
-        return InteractionResult.SUCCESS;
+        return InteractionResult.FAIL;
     }
 
-    /** 沒子彈的回饋。空槍也要進冷卻，不然按住不放會每 tick 洗一次「沒有子彈」。 */
-    private void outOfAmmo(ServerPlayer player, WeaponDef weapon, Map<String, Integer> playerCooldowns) {
-        duels.notify(player, Msg.plain("沒有子彈了！去武器商店補充", ChatFormatting.RED));
-        player.level().playSound(null, player.blockPosition(),
-                SoundEvents.LEVER_CLICK, SoundSource.PLAYERS, 0.7f, 2.0f);
-        playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
+    /**
+     * 這個人現在「上膛」的是哪把武器：主手是弓，副手是某種彈藥，而且他在對戰的攻擊階段。
+     *
+     * <p>這是全系統唯一一處決定「射出去的是什麼」的地方。副手優先正是原版弓找箭的順序，
+     * 所以玩家不用學新規則。
+     *
+     * @return 沒在對戰、沒拿弓、副手不是彈藥時回傳 null
+     */
+    public WeaponDef armedWeaponOf(ServerPlayer player) {
+        if (!player.getMainHandItem().is(Items.BOW)) return null;
+
+        Duel duel = duels.duelOf(player);
+        if (duel == null) return null;
+
+        return byAmmoStack(player.getOffhandItem());
     }
 
-    /** 這名玩家的彈藥袋，沒有就開一個。 */
-    public AmmoPouch pouchOf(ServerPlayer player) {
-        return pouches.computeIfAbsent(player.getUUID(), k -> new AmmoPouch());
+    /** 這個人在不在對戰中。{@code InventoryDropMixin} 靠它決定死亡要不要掉落背包。 */
+    public boolean isInDuel(ServerPlayer player) {
+        return duels.duelOf(player) != null;
     }
 
-    /** 開場配給：把每把武器的 starting_ammo 發下去。 */
+    /** 這疊物品是哪一種彈藥；不是彈藥回傳 null。 */
+    public WeaponDef byAmmoStack(ItemStack stack) {
+        if (stack.isEmpty()) return null;
+        return config.weapons().byItem(BuiltInRegistries.ITEM.getKey(stack.getItem()));
+    }
+
+    /**
+     * 開場配給：把每種武器的 {@code starting_ammo} 當實物發下去。
+     *
+     * <p>弓不在這裡發——它跟泥土、牽繩一樣是 {@code battle.starting_items} 的一項，
+     * 開場物資該由設定檔決定，程式不另外偷塞。
+     */
     public void giveStartingAmmo(ServerPlayer player) {
-        AmmoPouch pouch = pouchOf(player);
         for (WeaponDef weapon : config.weapons().all()) {
             if (weapon.startingAmmo() > 0) {
-                pouch.set(weapon.id(), Math.min(weapon.startingAmmo(), weapon.ammoCapacity()));
+                player.getInventory().placeItemBackInInventory(
+                        WeaponItems.createAmmo(weapon, weapon.startingAmmo()));
             }
         }
     }
 
-    /**
-     * HUD 用的「現有/上限」，例如 {@code 100/120}。
-     *
-     * @return 手上沒拿武器時回傳 null
-     */
-    public String ammoDisplay(ServerPlayer player) {
-        WeaponDef weapon = weaponInHand(player);
-        if (weapon == null) return null;
-        return pouchOf(player).get(weapon.id()) + "/" + weapon.ammoCapacity();
+    /** 這名玩家背包裡有幾發這種彈藥。商店要靠它顯示「目前 N 發」。 */
+    public int ammoCount(ServerPlayer player, WeaponDef weapon) {
+        Item item = BuiltInRegistries.ITEM.getOptional(weapon.item()).orElse(null);
+        if (item == null) return 0;
+
+        int total = 0;
+        for (ItemStack stack : player.getInventory()) {
+            if (stack.is(item)) total += stack.getCount();
+        }
+        return total;
     }
 
     /** 依 id 查武器。商店要靠它把商品接到武器定義上。 */
@@ -261,39 +260,6 @@ public final class WeaponSystem {
     }
 
     /**
-     * 玩家手上拿的武器，主手優先；兩手都不是武器就回 null。
-     *
-     * <p>要看兩隻手：開火走的是 {@code getItemInHand(hand)}（兩手都能觸發），HUD 只看主手的話，
-     * 武器放副手就會變成「打得出去但看不到剩幾發」。
-     */
-    public WeaponDef weaponInHand(ServerPlayer player) {
-        WeaponDef main = weaponOf(player.getMainHandItem());
-        return main != null ? main : weaponOf(player.getOffhandItem());
-    }
-
-    /**
-     * 這個物品堆疊是哪把武器。
-     *
-     * <p>先看自訂標記再退回物品型別：蓄力武器全都是 {@code minecraft:bow}，光看型別分不出來
-     * （見 {@link WeaponItems}）。舊的即發武器沒有標記也仍然認得，所以已經在玩家背包裡的東西
-     * 不會因為這個改動失效。
-     */
-    public WeaponDef byStack(ItemStack stack) {
-        if (stack.isEmpty()) return null;
-
-        String tagged = WeaponItems.weaponIdOf(stack);
-        if (tagged != null) {
-            WeaponDef weapon = config.weapons().byId(tagged);
-            if (weapon != null) return weapon;
-        }
-        return config.weapons().byItem(BuiltInRegistries.ITEM.getKey(stack.getItem()));
-    }
-
-    private WeaponDef weaponOf(ItemStack stack) {
-        return byStack(stack);
-    }
-
-    /**
      * 放開弓 → 依蓄力程度開一發。
      *
      * <p>由 {@code BowItemMixin} 經 {@link BowHooks} 呼叫。這裡是唯一決定「拉多久 ＝ 多少力道」
@@ -302,9 +268,9 @@ public final class WeaponSystem {
      * @param usedTicks 拉了幾 tick
      * @return true ＝ 這一發由我們處理掉了
      */
-    public boolean releaseCharged(ServerPlayer player, ItemStack stack, int usedTicks) {
-        WeaponDef weapon = byStack(stack);
-        if (weapon == null || !weapon.bowLaunched()) return false;
+    public boolean releaseCharged(ServerPlayer player, int usedTicks) {
+        WeaponDef weapon = armedWeaponOf(player);
+        if (weapon == null) return false;
 
         Duel duel = duels.duelOf(player);
         if (duel == null) return true;   // 沒在對戰：吃掉這一發，但什麼都不做
@@ -324,13 +290,33 @@ public final class WeaponSystem {
         Map<String, Integer> playerCooldowns = cooldowns.computeIfAbsent(player.getUUID(), k -> new HashMap<>());
         if (playerCooldowns.containsKey(weapon.id())) return true;
 
-        if (!pouchOf(player).consume(weapon.id(), weapon.ammoPerShot())) {
-            outOfAmmo(player, weapon, playerCooldowns);
+        if (!consumeAmmo(player, weapon)) {
+            duels.notify(player, Msg.plain(weapon.displayName() + " 用完了！去軍火商補貨", ChatFormatting.RED));
+            player.level().playSound(null, player.blockPosition(),
+                    SoundEvents.LEVER_CLICK, SoundSource.PLAYERS, 0.7f, 2.0f);
+            // 空槍也要進冷卻，不然連點會每一下洗一次訊息
+            playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
             return true;
         }
         playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
 
         fire(player, duel, weapon, power);
+        return true;
+    }
+
+    /**
+     * 扣掉這一發要用的彈藥。
+     *
+     * <p>只從**副手那一疊**扣，不會去背包裡湊：副手就是「上膛的彈匣」，打空了要自己補上去。
+     * 散彈這種 {@code ammo_per_shot > 1} 的武器，副手剩的不夠就是打不出來。
+     *
+     * @return false ＝ 副手的量不夠
+     */
+    private boolean consumeAmmo(ServerPlayer player, WeaponDef weapon) {
+        ItemStack ammo = player.getOffhandItem();
+        if (ammo.getCount() < weapon.ammoPerShot()) return false;
+
+        ammo.shrink(weapon.ammoPerShot());
         return true;
     }
 
@@ -343,8 +329,8 @@ public final class WeaponSystem {
     public String chargeDisplay(ServerPlayer player) {
         if (!player.isUsingItem()) return null;
 
-        WeaponDef weapon = byStack(player.getUseItem());
-        if (weapon == null || !weapon.bowLaunched()) return null;
+        WeaponDef weapon = armedWeaponOf(player);
+        if (weapon == null) return null;
 
         double power = weapon.chargeCurve().power(player.getTicksUsingItem() / (double) FULL_DRAW_TICKS);
         int filled = (int) Math.round(power * CHARGE_BAR_SEGMENTS);

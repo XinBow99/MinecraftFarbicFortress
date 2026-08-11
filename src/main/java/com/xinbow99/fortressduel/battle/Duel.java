@@ -612,18 +612,15 @@ public final class Duel {
             return line.append(Component.literal("   ")).append(notice);
         }
 
-        // 拉弓時把彈藥換成蓄力條——那一刻玩家要看的是力道，而且這條反映的是**我們算的**
-        // 力道而不是客戶端的動畫進度，曲線非線性時兩者不一樣
+        // 拉弓時顯示蓄力條。這條反映的是**我們算的**力道而不是客戶端的動畫進度，
+        // 曲線非線性時兩者不一樣
         String charge = services.weapons().chargeDisplay(player);
         if (charge != null) {
             line.append(Msg.plain("   " + charge, ChatFormatting.YELLOW));
             return line;
         }
 
-        String ammo = services.weapons().ammoDisplay(player);
-        if (ammo != null) {
-            line.append(Msg.plain("   " + ammo, ChatFormatting.AQUA));
-        }
+        // 彈藥數不用畫：它現在是副手的實物，原版自己會在那一格畫數量
         return line;
     }
 

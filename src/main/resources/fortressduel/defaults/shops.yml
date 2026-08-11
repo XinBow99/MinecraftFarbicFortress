@@ -5,12 +5,11 @@
 #
 # 商品欄位
 #   name    顯示名稱
-#   type    weapon = 給武器 + 附帶子彈
-#           ammo   = 只補子彈（買滿了不會收錢）
-#           item   = 給一般物品（建材之類）
+#   type    ammo = 給彈藥實物（放副手就是用那把武器）
+#           item = 給一般物品（建材之類）
 #   price   價格
-#   weapon  type = weapon/ammo 時指向 weapons.yml 的武器 id
-#   item    type = item 時要給的物品；type = weapon 時可省略（用武器綁的物品當圖示）
+#   weapon  type = ammo 時指向 weapons.yml 的武器 id；圖示與給出的實物都是它的 item
+#   item    type = item 時要給的物品
 #   amount  買一次給幾發／幾個
 #   lore    說明文字（**補充用**：血量、每元血量、幾發打得破、傷害、射速都由程式從實際數值
 #           算出來印在上面，不用也不該手寫進 lore——手寫的會跟設定漂移而且沒人會發現）
@@ -22,56 +21,20 @@ shops:
   arms_dealer:
     title: 軍火商
     entries:
-      # ---- 武器（第一次買才需要，之後補子彈就好）----
-      buy_scrap:
-        name: 廢鐵彈發射器
-        type: weapon
+      # ---- 發射器 ----
+      # 商店不賣「武器」：全場只有一把弓，副手放什麼彈藥就射什麼，所以買的一直都是彈藥。
+      # 弓本身只是那個發射器，開場就發一把，這裡擺一把 $0 的備品是為了兩種情況：
+      # 弄丟了（掉進岩漿、手滑丟出去），以及設定檔沒更新到、開場沒拿到弓的舊伺服器
+      buy_bow:
+        name: 發射器
+        type: item
         price: 0
-        weapon: scrap
-        amount: 60
-        lore: 最便宜的萬用彈，什麼都能打
+        item: minecraft:bow
+        amount: 1
+        lore: 主手拿它、副手放彈藥，按住右鍵拉弓
 
-      buy_mg:
-        name: 機槍
-        type: weapon
-        price: 250
-        weapon: mg
-        amount: 120
-        lore: 按得快就打得快，單發弱、精度差
-
-      buy_ap:
-        name: 穿甲槍
-        type: weapon
-        price: 400
-        weapon: ap
-        amount: 40
-        lore: 無視方塊硬度，鋼鐵黑曜石也是一發一格
-
-      buy_sniper:
-        name: 狙擊槍
-        type: weapon
-        price: 500
-        weapon: sniper
-        amount: 20
-        lore: 彈道平直、一發帶走工人
-
-      buy_he:
-        name: 高爆炮
-        type: weapon
-        price: 700
-        weapon: he
-        amount: 15
-        lore: 炸開一片，裝填慢
-
-      buy_drone:
-        name: 無人機
-        type: weapon
-        price: 1500
-        weapon: drone
-        amount: 3
-        lore: 全遊戲最大的一發，慢但擋不太住
-
-      # ---- 補子彈 ----
+      # ---- 彈藥 ----
+      # 買到的就是櫃子上看到的那個物品，放進副手就是用那把武器
       ammo_scrap:
         name: 廢鐵彈 ×60
         type: ammo

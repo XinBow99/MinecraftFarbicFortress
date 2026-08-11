@@ -40,10 +40,13 @@ import net.minecraft.world.item.ItemStack;
  */
 public final class DuelCommands {
 
+    /** {@code /duel give} 一次發幾發。一整疊，反正這個指令只是拿來試手感的。 */
+    private static final int GIVE_AMMO_COUNT = 64;
+
     private final DuelManager duels;
     private final ConfigManager config;
     private final SkillEngine skills;
-    /** /duel give 要一併發子彈，所以認得彈藥袋。 */
+    /** /duel give 要查武器定義才知道發哪個彈藥物品。 */
     private final WeaponSystem weapons;
 
     public DuelCommands(DuelManager duels, ConfigManager config, SkillEngine skills, WeaponSystem weapons) {
@@ -110,7 +113,7 @@ public final class DuelCommands {
         return 0;
     }
 
-    /** 測試用：直接發一把武器，省得自己去查它綁哪個物品。 */
+    /** 測試用：直接發一疊彈藥（外加一把弓），省得自己去查它綁哪個物品。 */
     private int give(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         String id = StringArgumentType.getString(ctx, "weapon");
         WeaponDef weapon = config.weapons().byId(id);
@@ -120,15 +123,12 @@ public final class DuelCommands {
         }
 
         ServerPlayer player = ctx.getSource().getPlayerOrException();
-        player.getInventory().placeItemBackInInventory(WeaponItems.create(weapon));
+        // 弓也一併發：這個指令的全部意義是「拿來試一下」，只給彈藥的話還要自己去找一把弓
+        player.getInventory().placeItemBackInInventory(WeaponItems.createBow());
+        player.getInventory().placeItemBackInInventory(WeaponItems.createAmmo(weapon, GIVE_AMMO_COUNT));
 
-        // 一併把彈藥補滿。多數武器的 starting_ammo 是 0（設計上要去商店買），所以只發武器
-        // 等於發一把打不出東西的槍——而這個指令的全部意義就是「拿來試一下」
-        int ammo = weapons.pouchOf(player).refill(weapon.id(), weapon.ammoCapacity(), weapon.ammoCapacity());
-
-        ctx.getSource().sendSuccess(() -> Msg.good("給了你「" + weapon.displayName() + "」與 "
-                + ammo + " 發子彈"
-                + (weapon.bowLaunched() ? "，按住右鍵拉弓、放開發射。" : "，右鍵開火。")), false);
+        ctx.getSource().sendSuccess(() -> Msg.good("給了你一把弓與 " + GIVE_AMMO_COUNT + " 發「"
+                + weapon.displayName() + "」。把彈藥放到**副手**，按住右鍵拉弓、放開發射。"), false);
         return 1;
     }
 
