@@ -24,15 +24,29 @@ public record DuelSettings(
         boolean restoreTerrain,
         /** 競技場邊界離最外側玩家至少留幾格。 */
         int arenaMargin,
-        /** 水晶生成在玩家往「遠離對手」方向退幾格的位置。 */
+        /** 熊貓圈生成在玩家往「遠離對手」方向退幾格的位置。 */
         int coreOffset,
         /** 開場時兩側各蓋哪幾棟建築（對應 buildings.yml）。 */
         List<String> arenaBuildings,
 
-        // ---- 核心（烽火台）----
-        int coreHp,
-        int coreHitDamage,
-        String coreBaseBlock,
+        // ---- 目標（要保護的熊貓）----
+        /** 目標生物的實體 id。換成別種生物只要改這裡，不用寫 Java。 */
+        String pandaEntity,
+        /** 每一方要守幾隻熊貓。全部死光那一方就輸。 */
+        int pandaCount,
+        /** 每隻熊貓的血量。原版熊貓只有 20，不上調的話狙擊一發一隻。 */
+        int pandaHp,
+        /** 開場柵欄圈的半徑（格）。2 ＝ 5×5 的圈。 */
+        int penRadius,
+        String penBlock,
+        /**
+         * 熊貓周圍至少要有幾格可站的空間（3×3×3 共 27 格裡算）。低於這個值就持續掉血。
+         *
+         * <p>沒有這條規則的話，最優解固定是「把熊貓封進 1×1 黑曜石棺材」，佈局的博弈就不存在了。
+         */
+        int suffocationMinSpace,
+        /** 空間不足時每秒扣多少血。 */
+        double suffocationDamage,
 
         // ---- 對戰中 ----
         int countdownSeconds,
@@ -73,9 +87,13 @@ public record DuelSettings(
                 cfg.getInt("arena.core_offset", 3),
                 cfg.getStringList("arena.buildings"),
 
-                cfg.getInt("core.hp", 400),
-                cfg.getInt("core.hit_damage", 10),
-                cfg.getString("core.base_block", "minecraft:iron_block"),
+                cfg.getString("objective.entity", "minecraft:panda"),
+                Math.max(1, cfg.getInt("objective.panda_count", 4)),
+                Math.max(1, cfg.getInt("objective.panda_hp", 100)),
+                Math.max(1, cfg.getInt("objective.pen_radius", 2)),
+                cfg.getString("objective.pen_block", "minecraft:oak_fence"),
+                cfg.getInt("objective.suffocation_min_space", 6),
+                cfg.getDouble("objective.suffocation_damage", 2.0),
 
                 cfg.getInt("battle.countdown_seconds", 10),
                 cfg.getInt("battle.build_seconds", 60),
@@ -97,7 +115,7 @@ public record DuelSettings(
      */
     private static List<String> startingItems(YamlConfig cfg) {
         List<String> configured = cfg.getStringList("battle.starting_items");
-        return configured.isEmpty() ? List.of("minecraft:dirt 20") : configured;
+        return configured.isEmpty() ? List.of("minecraft:dirt 20", "minecraft:lead 4") : configured;
     }
 
     /** 全部用預設值，設定檔還沒讀進來時的退路。 */

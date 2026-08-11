@@ -455,12 +455,6 @@ public final class WeaponSystem {
         Region region = duel.arena().region();
         if (!region.contains(pos)) return false;
 
-        // 核心不是普通方塊：打到它是扣核心血量，不是拆方塊
-        if (duel.arena().isCoreBlock(pos)) {
-            ServerPlayer shooter = level.getServer().getPlayerList().getPlayer(projectile.shooterId);
-            duel.damageCore(pos, shooter, (float) damage);
-            return false;
-        }
         // 框線是場地的一部分，任何武器都拆不掉
         if (region.isHorizontalEdge(pos.getX(), pos.getZ())) return false;
 

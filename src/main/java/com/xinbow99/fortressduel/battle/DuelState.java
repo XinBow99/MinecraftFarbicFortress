@@ -7,7 +7,7 @@ package com.xinbow99.fortressduel.battle;
  * 開戰階段」的即時制版本，差別是網頁版等雙方都按下完成，這裡是計時的。
  */
 public enum DuelState {
-    /** 準備階段：雙方站定位置等水晶生成。不能蓋、不能打。 */
+    /** 準備階段：雙方站定位置等熊貓生成。不能蓋、不能打。 */
     PREPARE,
     /** 建造階段：可以擺放方塊，不能攻擊。 */
     BUILD,
