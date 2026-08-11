@@ -45,6 +45,11 @@ public record DuelSettings(
         /** 開場柵欄圈的半徑（格）。2 ＝ 5×5 的圈。 */
         int penRadius,
         String penBlock,
+        /** 熊貓圈外再往外幾格的木製平台。0 ＝ 不鋪，沿用原本的地形。 */
+        int platformRadius,
+        String platformBlock,
+        /** 開場放在平台上的商人 NPC（對應 npcs.yml）。留空 ＝ 不放。 */
+        String dealerNpc,
         /**
          * 熊貓周圍至少要有幾格可站的空間（3×3×3 共 27 格裡算）。低於這個值就持續掉血。
          *
@@ -108,6 +113,9 @@ public record DuelSettings(
                 Math.max(1, cfg.getInt("objective.panda_hp", 100)),
                 Math.max(1, cfg.getInt("objective.pen_radius", 2)),
                 cfg.getString("objective.pen_block", "minecraft:oak_fence"),
+                Math.max(0, cfg.getInt("arena.platform_radius", 5)),
+                cfg.getString("arena.platform_block", "minecraft:oak_planks"),
+                cfg.getString("arena.dealer_npc", "arms_dealer"),
                 cfg.getInt("objective.suffocation_min_space", 6),
                 cfg.getDouble("objective.suffocation_damage", 2.0),
 

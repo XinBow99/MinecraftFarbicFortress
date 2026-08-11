@@ -33,7 +33,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -77,6 +79,8 @@ public final class Duel {
     private static final double CONFINE_BUFFER = 1.0;
     /** 越界提示的最短間隔（tick）。 */
     private static final long BOUNDARY_WARN_INTERVAL = 40;
+    /** 動作列上的短訊顯示多久（tick）。 */
+    private static final long NOTICE_TICKS = 40;
 
     private final MinecraftServer server;
     private final Arena arena;
@@ -109,6 +113,18 @@ public final class Duel {
      * 變更都在伺服器主執行緒上發生（見類別註解），{@code hurtServer} 是同步的，不會有交錯。
      */
     private boolean applyingSuffocation;
+    /**
+     * 玩家 → 動作列上要蓋過常規 HUD 的短訊。
+     *
+     * <p>存在的理由：{@link #hud} **每一 tick** 都往動作列寫一次階段與餘額，所以子系統自己送
+     * 動作列訊息的話，活不過 50 毫秒就被蓋掉——「沒有子彈了」「拉得不夠」「+$25 賞金」
+     * 「中彈 −$100」在對戰中全部等於隱形。要顯示在動作列上的東西必須交給 HUD 自己排版。
+     */
+    private final Map<UUID, Notice> notices = new HashMap<>();
+
+    /** 一則短訊與它的到期時間。 */
+    private record Notice(Component text, long until) {
+    }
 
     private Duel(MinecraftServer server, Arena arena, DuelSettings settings, DuelServices services,
                  Side north, Side south, BlockPos dummyPos) {
@@ -554,6 +570,26 @@ public final class Duel {
     }
 
     /**
+     * 在動作列上顯示一則短訊，蓋過常規 HUD 兩秒。
+     *
+     * <p>子系統要在動作列上說話一律走這裡，不要自己 {@code sendSystemMessage(..., true)}——
+     * 那會在下一 tick 被 {@link #hud} 蓋掉。
+     */
+    public void notify(ServerPlayer player, Component text) {
+        notices.put(player.getUUID(), new Notice(text, ticksElapsed + NOTICE_TICKS));
+    }
+
+    private Component noticeFor(ServerPlayer player) {
+        Notice notice = notices.get(player.getUUID());
+        if (notice == null) return null;
+        if (ticksElapsed > notice.until()) {
+            notices.remove(player.getUUID());
+            return null;
+        }
+        return notice.text();
+    }
+
+    /**
      * 動作列那一行：階段與剩餘秒數 ＋ 餘額 ＋ 手上武器的彈藥。
      *
      * <p>三樣資訊擠在同一行，因為 boss 血條已經被兩座核心佔滿了，而這三個都是每一秒都要看的東西。
@@ -569,6 +605,12 @@ public final class Duel {
         };
 
         line.append(Msg.plain("   $" + services.economy().balanceOf(player), ChatFormatting.GOLD));
+
+        // 短訊優先：它是「剛剛發生了什麼」，比恆常顯示的彈藥數重要，而且只活兩秒
+        Component notice = noticeFor(player);
+        if (notice != null) {
+            return line.append(Component.literal("   ")).append(notice);
+        }
 
         // 拉弓時把彈藥換成蓄力條——那一刻玩家要看的是力道，而且這條反映的是**我們算的**
         // 力道而不是客戶端的動畫進度，曲線非線性時兩者不一樣

@@ -12,6 +12,7 @@ import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponItems;
+import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
@@ -42,11 +43,14 @@ public final class DuelCommands {
     private final DuelManager duels;
     private final ConfigManager config;
     private final SkillEngine skills;
+    /** /duel give 要一併發子彈，所以認得彈藥袋。 */
+    private final WeaponSystem weapons;
 
-    public DuelCommands(DuelManager duels, ConfigManager config, SkillEngine skills) {
+    public DuelCommands(DuelManager duels, ConfigManager config, SkillEngine skills, WeaponSystem weapons) {
         this.duels = duels;
         this.config = config;
         this.skills = skills;
+        this.weapons = weapons;
     }
 
     public void register() {
@@ -118,7 +122,12 @@ public final class DuelCommands {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
         player.getInventory().placeItemBackInInventory(WeaponItems.create(weapon));
 
-        ctx.getSource().sendSuccess(() -> Msg.good("給了你「" + weapon.displayName() + "」"
+        // 一併把彈藥補滿。多數武器的 starting_ammo 是 0（設計上要去商店買），所以只發武器
+        // 等於發一把打不出東西的槍——而這個指令的全部意義就是「拿來試一下」
+        int ammo = weapons.pouchOf(player).refill(weapon.id(), weapon.ammoCapacity(), weapon.ammoCapacity());
+
+        ctx.getSource().sendSuccess(() -> Msg.good("給了你「" + weapon.displayName() + "」與 "
+                + ammo + " 發子彈"
                 + (weapon.bowLaunched() ? "，按住右鍵拉弓、放開發射。" : "，右鍵開火。")), false);
         return 1;
     }

@@ -8,20 +8,30 @@
 #   name           顯示名稱（會掛成實體的自訂名字）
 #   entity         拿哪個原版實體當底
 #   health         血量上限
-#   attack_damage  攻擊力
+#   attack_damage  攻擊力。**目前全部是被動生物，所以這一欄實際上沒有作用**，留著是因為
+#                  換回會攻擊的實體時它立刻就有意義（見下面「為什麼全是被動生物」）
 #   movement_speed 移動速度（原版殭屍約 0.23）
 #   scale          體型倍率
 #   pack_min/max   一次降臨幾隻
 #   weight         抽籤權重，0 = 只能被突發事件指名叫出來
 #   skills         掛在牠身上的技能 id（定義在 skills.yml）
 #
+# 為什麼全是被動生物：
+#   怪物生在中場，賞金是唯一的競爭性收入。用會追人的敵對生物的話，牠們會走向其中一名玩家，
+#   那一側就變得比較好打——誰拿到賞金變成「怪剛好往誰那邊走」決定的，而不是誰瞄得準。
+#   換成被動生物之後牠們只會在中場遊蕩，雙方都得隔著中場遠程射，這才是公平的競爭。
+#   （玩家本來就進不去中場，見 duel.yml 的 arena.neutral_fraction）
+#
+#   選的都是**完全被動**、連被打都不會反擊的實體。蜜蜂、鐵傀儡、羊駝那類「中立」生物
+#   被攻擊之後會轉為敵對並開始追人，等於把問題繞一圈又帶回來。
+#
 # 尚未實作：怪物還沒有「主動去打核心」的 AI，牠們走的是原版的目標選擇。
 # 等那個做出來才會有對應的設定欄位——現在沒有欄位，就是真的沒有這個行為。
 
 mobs:
   swarm:
-    name: 蟲群
-    entity: minecraft:silverfish
+    name: 鼠群
+    entity: minecraft:rabbit
     health: 20
     attack_damage: 2
     movement_speed: 0.3
@@ -33,8 +43,8 @@ mobs:
     skills: [分身]
 
   ground:
-    name: 土偶
-    entity: minecraft:zombie
+    name: 野牛群
+    entity: minecraft:cow
     health: 130
     attack_damage: 4
     movement_speed: 0.18
@@ -46,8 +56,8 @@ mobs:
     skills: [垂死分裂]
 
   sky:
-    name: 浮空獸
-    entity: minecraft:phantom
+    name: 蝙蝠群
+    entity: minecraft:bat
     health: 70
     attack_damage: 3
     movement_speed: 0.4
@@ -58,8 +68,8 @@ mobs:
     reward: 100
 
   drift:
-    name: 漂鳥
-    entity: minecraft:bee
+    name: 流浪商隊
+    entity: minecraft:wandering_trader
     health: 130
     attack_damage: 3
     movement_speed: 0.45
@@ -72,7 +82,7 @@ mobs:
 
   refugee:
     name: 難民
-    entity: minecraft:pillager
+    entity: minecraft:villager
     health: 55
     attack_damage: 5
     movement_speed: 0.35
@@ -83,8 +93,8 @@ mobs:
     reward: 75
 
   eclipse:
-    name: 蝕世之影
-    entity: minecraft:vex
+    name: 悅靈
+    entity: minecraft:allay
     health: 160
     attack_damage: 6
     movement_speed: 0.5
@@ -96,8 +106,8 @@ mobs:
     skills: [閃現, 再生]
 
   boss:
-    name: 終界怪物
-    entity: minecraft:enderman
+    name: 巨獸
+    entity: minecraft:sniffer
     health: 450
     attack_damage: 8
     movement_speed: 0.3

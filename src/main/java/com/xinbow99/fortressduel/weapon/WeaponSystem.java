@@ -197,7 +197,7 @@ public final class WeaponSystem {
 
     /** 沒子彈的回饋。空槍也要進冷卻，不然按住不放會每 tick 洗一次「沒有子彈」。 */
     private void outOfAmmo(ServerPlayer player, WeaponDef weapon, Map<String, Integer> playerCooldowns) {
-        player.sendSystemMessage(Msg.plain("沒有子彈了！去武器商店補充", ChatFormatting.RED), true);
+        duels.notify(player, Msg.plain("沒有子彈了！去武器商店補充", ChatFormatting.RED));
         player.level().playSound(null, player.blockPosition(),
                 SoundEvents.LEVER_CLICK, SoundSource.PLAYERS, 0.7f, 2.0f);
         playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
@@ -317,7 +317,7 @@ public final class WeaponSystem {
         double power = weapon.chargeCurve().power(usedTicks / (double) FULL_DRAW_TICKS);
         if (power < weapon.chargeMinDraw()) {
             // 放空弓不耗彈也不進冷卻——那只是手滑，不該被罰
-            player.sendSystemMessage(Msg.plain("拉得不夠，這一發沒射出去", ChatFormatting.GRAY), true);
+            duels.notify(player, Msg.plain("拉得不夠，這一發沒射出去", ChatFormatting.GRAY));
             return true;
         }
 

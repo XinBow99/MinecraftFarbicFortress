@@ -32,6 +32,14 @@ public final class BuildingPlacer {
         this.npcs = npcs;
     }
 
+    /**
+     * 極簡開場不蓋任何建築，但軍火商還是要有人放——那條路徑直接走 {@link NpcManager}，
+     * 不必為了一個 NPC 生一棟房子出來。
+     */
+    public NpcManager npcs() {
+        return npcs;
+    }
+
     public void load(YamlConfig cfg) {
         Map<String, BuildingDef> loaded = new LinkedHashMap<>();
         for (Map.Entry<String, Map<String, Object>> e : cfg.getSections("buildings").entrySet()) {

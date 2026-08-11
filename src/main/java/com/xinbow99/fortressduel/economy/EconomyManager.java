@@ -84,10 +84,10 @@ public final class EconomyManager {
         int lost = wallet.lose(Math.round(effective * rate));
         if (lost <= 0) return;
 
-        victim.sendSystemMessage(Msg.plain("中彈 −$" + lost + "  （$" + wallet.balance() + "）",
-                ChatFormatting.RED), true);
-        attacker.sendSystemMessage(Msg.plain("命中 " + victim.getGameProfile().name()
-                + "  對手 −$" + lost, ChatFormatting.GOLD), true);
+        duels.notify(victim, Msg.plain("中彈 −$" + lost + "  （$" + wallet.balance() + "）",
+                ChatFormatting.RED));
+        duels.notify(attacker, Msg.plain("命中 " + victim.getGameProfile().name()
+                + "  對手 −$" + lost, ChatFormatting.GOLD));
     }
 
     private void onDuelStart(Duel duel) {
@@ -136,13 +136,13 @@ public final class EconomyManager {
         }
 
         if (!duel.state().canAttack()) {
-            killer.sendSystemMessage(Msg.plain("建造階段不發賞金", ChatFormatting.GRAY), true);
+            duels.notify(killer, Msg.plain("建造階段不發賞金", ChatFormatting.GRAY));
             return;
         }
 
         wallet.earn(def.reward());
-        killer.sendSystemMessage(Msg.plain("+$" + def.reward() + "  " + def.displayName()
-                + "  （$" + wallet.balance() + "）", ChatFormatting.GOLD), true);
+        duels.notify(killer, Msg.plain("+$" + def.reward() + "  " + def.displayName()
+                + "  （$" + wallet.balance() + "）", ChatFormatting.GOLD));
         killer.level().playSound(null, killer.blockPosition(),
                 SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.6f, 1.4f);
     }

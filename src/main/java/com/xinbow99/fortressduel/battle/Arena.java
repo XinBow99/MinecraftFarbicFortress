@@ -4,6 +4,7 @@ import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.building.BuildingDef;
 import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.core.DuelSettings;
+import com.xinbow99.fortressduel.npc.NpcDef;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -89,12 +90,85 @@ public final class Arena {
         penA = penSpot(playerA, playerB, offset);
         penB = penSpot(playerB, playerA, offset);
 
+        // 平台要先鋪：placePen 與軍火商都靠 surfaceY 找地面，鋪完之後那個地面才是平台
+        placePlatform(penA, settings);
+        placePlatform(penB, settings);
+
         placePen(penA, settings);
         placePen(penB, settings);
+
+        placeDealer(penA, penB, settings, buildings);
+        placeDealer(penB, penA, settings, buildings);
+
         placeBuildings(settings, buildings, penA, penB);
         placeBuildings(settings, buildings, penB, penA);
 
         setUpZones(settings);
+    }
+
+    /**
+     * 在熊貓圈周圍鋪一片平的木製平台。
+     *
+     * <p>開場刻意極簡：一片平台、上面站著玩家、軍火商、和柵欄圍住的熊貓，沒有別的。理由是
+     * 這個遊戲的內容應該由玩家在建造階段長出來，開場先擺一棟蓋好的房子只會佔掉那個空間，
+     * 而且地形起伏會讓「誰站得比較高」變成開場就決定的隨機優勢。
+     *
+     * <p>{@code platform_radius: 0} 就完全不鋪，沿用原本的地形。
+     */
+    private void placePlatform(BlockPos center, DuelSettings settings) {
+        int r = settings.platformRadius();
+        if (r <= 0) return;
+
+        BlockState planks = blockState(settings.platformBlock(), Blocks.OAK_PLANKS);
+        int surface = center.getY() - 1;   // 圈的腳下那一層
+
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                BlockPos floor = new BlockPos(center.getX() + dx, surface, center.getZ() + dz);
+                snapshot.record(level, floor);
+                level.setBlock(floor, planks, 2);
+
+                // 平台上方淨空：地形可能是山坡，不清的話玩家會被埋在土裡
+                for (int y = surface + 1; y <= Math.min(region.maxY(), surface + 4); y++) {
+                    BlockPos pos = new BlockPos(floor.getX(), y, floor.getZ());
+                    if (level.getBlockState(pos).isAir()) continue;
+                    snapshot.record(level, pos);
+                    level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
+                }
+            }
+        }
+    }
+
+    /**
+     * 把商人放在平台上、熊貓圈的後方（遠離對手那一側）。
+     *
+     * <p>不再包在一棟建築裡——極簡開場沒有建築，但商人仍然是這一側的資產：他被打死那一方
+     * 就補不到子彈，所以「先做掉對方的商人」還是一條有效的戰術（見 npcs.yml）。
+     */
+    private void placeDealer(BlockPos pen, BlockPos enemyPen, DuelSettings settings,
+                             BuildingPlacer buildings) {
+        if (settings.dealerNpc().isBlank()) return;
+
+        NpcDef def = buildings.npcs().npc(settings.dealerNpc());
+        if (def == null) {
+            FortressDuel.LOGGER.warn("arena.dealer_npc '{}' is not defined in npcs.yml, no shop this duel",
+                    settings.dealerNpc());
+            return;
+        }
+
+        // 站在圈後方一格半徑處，臉朝中場——玩家從自己這側走過來就直接面對他
+        int back = settings.penRadius() + 2;
+        int dx = pen.getX() - enemyPen.getX();
+        int dz = pen.getZ() - enemyPen.getZ();
+        boolean alongX = Math.abs(dx) >= Math.abs(dz);
+        int x = pen.getX() + (alongX ? Integer.signum(dx) * back : 0);
+        int z = pen.getZ() + (alongX ? 0 : Integer.signum(dz) * back);
+
+        int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3);
+        float yaw = alongX
+                ? (dx > 0 ? 90f : 270f)
+                : (dz > 0 ? 0f : 180f);
+        buildings.npcs().spawn(level, def, new BlockPos(x, y, z), yaw);
     }
 
     /**

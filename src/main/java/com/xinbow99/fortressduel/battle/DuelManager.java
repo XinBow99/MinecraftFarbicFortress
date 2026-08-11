@@ -352,6 +352,21 @@ public final class DuelManager {
         }
     }
 
+    /**
+     * 在玩家的動作列上顯示一則短訊。不在對戰中就退回原版的動作列訊息。
+     *
+     * <p>子系統一律走這裡，不要自己 {@code sendSystemMessage(..., true)}——對戰中的 HUD
+     * 每 tick 都會重寫動作列，自己送的訊息活不過 50 毫秒。
+     */
+    public void notify(ServerPlayer player, net.minecraft.network.chat.Component text) {
+        Duel duel = duelsByPlayer.get(player.getUUID());
+        if (duel != null) {
+            duel.notify(player, text);
+        } else {
+            player.sendSystemMessage(text, true);
+        }
+    }
+
     // ---------- 查詢 ----------
 
     public boolean isInDuel(ServerPlayer player) {
