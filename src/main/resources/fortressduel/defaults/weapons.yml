@@ -48,7 +48,13 @@
 #   cooldown_ticks    裝填間隔（20 tick = 1 秒）
 #   projectile_speed  彈丸初速（格/tick）
 #   gravity           重力（格/tick²），0 = 直線飛行
-#   lifetime_ticks    飛多久之後自己消失
+#   lifetime_ticks    飛多久之後自己消失。**這是安全網，不是射程**——彈丸一飛出框線就會被
+#                     清掉（3D 判斷，見 WeaponSystem.step），所以正常情況根本用不到它。
+#                     設太小的話它會變成一道看不見的牆：拋高一點的那一發在半空中憑空消失，
+#                     而玩家不會知道為什麼。預設值都給到「最大的場地也飛得完一整條拋物線」
+#
+#                     射程的真正來源是 gravity：平射時彈丸多快落地。那條是可以靠抬高瞄準
+#                     補償的，也就是玩家的操作空間——所以限制射程要調 gravity，不要調壽命
 #   auto              true  = 按住右鍵就一直打，射速完全由 cooldown_ticks 決定，蓄力不參與
 #                     false = 拉弓、放開，發一發（預設）
 #                     連射武器只能設 true：機槍 cooldown 3、雷射 2，也就是每秒 7~10 發，
@@ -85,7 +91,7 @@ weapons:
     cooldown_ticks: 18
     projectile_speed: 3.0
     gravity: 0.04
-    lifetime_ticks: 120
+    lifetime_ticks: 200
     breaks_blocks: true
     trail_particle: minecraft:crit
     trail_color: "#C8C8C8"
@@ -113,7 +119,7 @@ weapons:
     cooldown_ticks: 3
     projectile_speed: 3.8
     gravity: 0.03
-    lifetime_ticks: 80
+    lifetime_ticks: 200
     auto: true
     breaks_blocks: true
     trail_particle: minecraft:smoke
@@ -151,7 +157,7 @@ weapons:
     cooldown_ticks: 20
     projectile_speed: 3.4
     gravity: 0.03
-    lifetime_ticks: 120
+    lifetime_ticks: 200
     breaks_blocks: true
     trail_particle: minecraft:enchanted_hit
     trail_color: "#5AC8FF"
@@ -191,7 +197,7 @@ weapons:
     cooldown_ticks: 24
     projectile_speed: 2.6
     gravity: 0.05
-    lifetime_ticks: 40
+    lifetime_ticks: 200
     breaks_blocks: true
     trail_particle: minecraft:crit
     trail_color: "#FFE9A8"
@@ -220,9 +226,10 @@ weapons:
     recoil_recovery: 10.0
     cooldown_ticks: 30
     projectile_speed: 5.0
-    # 彈道平直：重力極低，背下來的落點不會隨距離大幅改變
+    # 彈道平直：重力極低（平射約 93 格才落地），背下來的落點不會隨距離大幅改變。
+    # 射程由這條決定，不是由壽命——想讓它更短就調大這個數字
     gravity: 0.01
-    lifetime_ticks: 160
+    lifetime_ticks: 200
     breaks_blocks: true
     trail_particle: minecraft:end_rod
     trail_color: "#FFFFFF"
@@ -248,7 +255,7 @@ weapons:
     cooldown_ticks: 40
     projectile_speed: 2.4
     gravity: 0.06
-    lifetime_ticks: 120
+    lifetime_ticks: 200
     breaks_blocks: true
     trail_particle: minecraft:flame
     trail_color: "#FF5A2A"
@@ -271,10 +278,12 @@ weapons:
     recoil_max: 5.0
     recoil_recovery: 5.0
     cooldown_ticks: 2
-    # 一 tick 飛 20 格 + 零重力 ＝ 幾乎是即時命中的直線光束
+    # 一 tick 飛 20 格 + 零重力 ＝ 幾乎是即時命中的直線光束。
+    # 壽命曾經是 6，那等於一道 120 格的硬牆——雙方站得遠一點時它連場地都跨不過去，
+    # 而畫面上只會看到光束在半空中斷掉
     projectile_speed: 20.0
     gravity: 0
-    lifetime_ticks: 6
+    lifetime_ticks: 20
     auto: true
     breaks_blocks: true
     trail_particle: minecraft:end_rod
@@ -301,7 +310,7 @@ weapons:
     cooldown_ticks: 80
     projectile_speed: 2.0
     gravity: 0
-    lifetime_ticks: 200
+    lifetime_ticks: 250
     breaks_blocks: true
     trail_particle: minecraft:flame
     trail_color: "#FF2E2E"
