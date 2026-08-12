@@ -9,6 +9,11 @@
 #   entity         拿哪個原版實體當底
 #   entities       多寫幾種的話，**每一隻各自隨機抽一種**（混合族群）。跟 entity 二擇一，
 #                  兩個都寫時 entities 優先。數值仍然整群共用——混的是外觀與原版行為，不是強度
+#                  兩種寫法：
+#                    entities: [minecraft:rabbit, minecraft:fox]   等機率
+#                    entities:                                     指定權重（數字越大越常出現）
+#                      minecraft:rabbit: 6
+#                      minecraft:fox: 1
 #   health         血量上限
 #   attack_damage  攻擊力。只有真的會攻擊的實體吃得到——中場那些被動與中立生物碰不到玩家
 #                  （見下面），所以實際上只有 vermin（蠹蟲）在用這一欄
@@ -50,23 +55,29 @@
 # 等那個做出來才會有對應的設定欄位——現在沒有欄位，就是真的沒有這個行為。
 
 mobs:
-  # 混合族群：每一隻各自從 entities 抽一種原版實體當底，所以一群裡兔子、穿山甲、狐狸、
-  # 駱駝、北極熊都有。數值（血量、攻擊、體型）仍然整群共用——這裡混的是外觀與原版行為，
-  # 不是強度。
+  # 混合族群：每一隻各自從 entities 依權重抽一種原版實體當底，所以一群裡兔子、穿山甲、
+  # 狐狸、駱駝、北極熊都有。數值（血量、攻擊、體型）仍然整群共用——這裡混的是外觀與
+  # 原版行為，不是強度。
   #
-  # 兩個原版行為要知道：
-  #   狐狸會獵捕兔子（Fox 的 NearestAttackableTargetGoal 吃 Animal），所以這一群會自己
-  #   少幾隻，賞金總額因此有浮動。這是活的生態，不是 bug。
-  #   北極熊被打會還手、身邊有幼熊時會主動攻擊玩家。三區塊限制把牠鎖在中場所以牠碰不到
-  #   玩家，但牠會撞邊界。
+  # 權重不是等的，因為混進來的原版行為不對等：
+  #
+  #   狐狸會獵捕兔子（Fox 的 NearestAttackableTargetGoal 吃 Animal）。等權重時一群裡
+  #   會有兩三隻狐狸，兔子被吃到剩不下幾隻——玩家還沒瞄準賞金就自己蒸發了。壓到 1/14
+  #   之後牠變成偶爾出現的點綴：看得到牠追兔子，但那是風景不是損失。
+  #
+  #   北極熊被打會還手、身邊有幼熊時會主動攻擊玩家。三區塊限制把牠鎖在中場所以碰不到
+  #   玩家，但牠會撞邊界，所以也不要太多。
+  #
+  # 兔子 6 / 穿山甲 3 / 駱駝 2 / 北極熊 2 / 狐狸 1，總和 14——
+  # 一群 8~12 隻裡大約 4~5 隻兔子、0~1 隻狐狸
   swarm:
     name: 野獸群
     entities:
-      - minecraft:rabbit
-      - minecraft:armadillo
-      - minecraft:fox
-      - minecraft:camel
-      - minecraft:polar_bear
+      minecraft:rabbit: 6
+      minecraft:armadillo: 3
+      minecraft:camel: 2
+      minecraft:polar_bear: 2
+      minecraft:fox: 1
     health: 20
     attack_damage: 2
     movement_speed: 0.3

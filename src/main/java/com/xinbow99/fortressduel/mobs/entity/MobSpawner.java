@@ -41,17 +41,21 @@ public final class MobSpawner {
      */
     public static List<Entity> spawnPack(ServerLevel level, MobDef def, BlockPos center, int spread,
                                          SkillEngine engine) {
-        // 逐隻抽型別，所以「混合族群」（一群裡有兔子、狐狸、駱駝…）不用開好幾個 MobDef。
-        // 只寫一種 entity 的怪，這裡就是一個只有一個元素的清單，行為跟以前完全一樣
+        // 逐隻依權重抽型別，所以「混合族群」（一群裡有兔子、狐狸、駱駝…）不用開好幾個
+        // MobDef。只寫一種 entity 的怪，這裡就是一個只有一個元素的清單，行為跟以前完全一樣
         List<EntityType<?>> types = new ArrayList<>(def.entities().size());
-        for (Identifier id : def.entities()) {
-            EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null);
+        List<Double> weights = new ArrayList<>(def.entities().size());
+        double totalWeight = 0;
+        for (MobDef.EntityChoice choice : def.entities()) {
+            EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(choice.entity()).orElse(null);
             if (type == null) {
                 FortressDuel.LOGGER.warn("Mob {} references entity '{}' which does not exist, skipping that one",
-                        def.id(), id);
+                        def.id(), choice.entity());
                 continue;
             }
             types.add(type);
+            weights.add(choice.weight());
+            totalWeight += choice.weight();
         }
         if (types.isEmpty()) {
             FortressDuel.LOGGER.warn("Mob {} has no valid entity types, skipping this spawn", def.id());
@@ -63,7 +67,7 @@ public final class MobSpawner {
 
         for (int i = 0; i < count; i++) {
             BlockPos pos = scatter(level, center, spread);
-            EntityType<?> type = types.get(level.getRandom().nextInt(types.size()));
+            EntityType<?> type = pick(types, weights, totalWeight, level);
             Entity entity = type.spawn(level, pos, EntitySpawnReason.EVENT);
             if (entity == null) continue;
 
@@ -79,6 +83,19 @@ public final class MobSpawner {
         return spawned;
     }
 
+
+    /** 依權重抽一種實體型別。跟 MobRegistry／IncidentRegistry 的抽籤是同一個做法。 */
+    private static EntityType<?> pick(List<EntityType<?>> types, List<Double> weights,
+                                      double totalWeight, ServerLevel level) {
+        if (types.size() == 1 || totalWeight <= 0) return types.getFirst();
+
+        double roll = level.getRandom().nextDouble() * totalWeight;
+        for (int i = 0; i < types.size(); i++) {
+            roll -= weights.get(i);
+            if (roll <= 0) return types.get(i);
+        }
+        return types.getLast();
+    }
 
     private static BlockPos scatter(ServerLevel level, BlockPos center, int spread) {
         int x = center.getX() + level.getRandom().nextInt(spread * 2 + 1) - spread;
