@@ -37,7 +37,8 @@
 #
 #   ※ 滿弓固定 20 tick，這是客戶端寫死的。曲線只改 0→1 之間的形狀，兩端永遠對齊動畫——
 #     設成「40 tick 才滿力道」的話，玩家看到的弓在第 20 tick 就拉滿了，視覺會說謊
-#   pellets           一次擊發幾顆（散彈）
+#   pellets           一次擊發幾顆（散彈）。寫 pellets_max 的話每一發在兩者之間重抽
+#   pellets_max       一次最多幾顆。不寫 = 跟 pellets 相同 = 固定顆數
 #   spread_degrees    以視線為軸的圓錐半頂角（度）。彈著點在圓盤上均勻分布
 #   recoil            後座力：每擊發一次散佈額外增加幾度
 #                     不寫的話 = spread_degrees × 0.5，所以舊設定檔不改也會有後座力
@@ -60,7 +61,7 @@
 #                     寫法三種都吃：#A020F0 / A020F0 / 0xA020F0
 #   trail_scale       粒子大小倍率，預設 1.4。只有指定 trail_color 時有意義（dust 才吃得到）
 #   fire_sound        開火音效
-#   ammo_per_shot     一次擊發消耗幾發（散彈打 5 顆但只算 1 發，跟 pellets 是兩回事）
+#   ammo_per_shot     一次擊發消耗幾發（散彈打六七顆但只算 1 發，跟 pellets 是兩回事）
 #                     只從**副手那一疊**扣，不會去背包裡湊——副手就是上膛的彈匣
 #   starting_ammo     開場就配給的量。上限由堆疊上限與背包空間決定，沒有另外的彈藥上限
 
@@ -156,24 +157,37 @@ weapons:
     trail_color: "#5AC8FF"
     fire_sound: minecraft:item.crossbow.shoot
 
+  # 真正的霰彈：一次 6~7 顆散在一個 6 度的圓錐裡。
+  #
+  # 每一發重抽顆數（pellets ~ pellets_max），因為散彈的手感有一半來自「這一發到底
+  # 打出去多少」不是固定的——固定顆數時彈著雖然隨機，但總火力恆定，打起來像一把
+  # 數值穩定的槍而不是霰彈。
+  #
+  # 單顆傷害從 11 降到 8：6.5 顆 × 8 ≈ 52，跟舊的 5 × 11 = 55 幾乎一樣，所以
+  # 商店那個 $140/40 的定價不用跟著動。
+  #
+  # 散佈從 1.5 度拉到 6 度：1.5 度在 15 格外只散開一格多，那是獨頭彈不是霰彈。
+  # 6 度大約是 15 格外散開三格，貼臉幾乎全中、拉開就只中一兩顆——這才是它該有的距離曲線
   buck:
     name: 散彈
     item: minecraft:flint
-    damage: 11
+    damage: 8
     splash_radius: 0
     pierce: 0
-    # 逐顆結算，貼臉全中等於推 5 次
+    # 逐顆結算，貼臉全中等於推六七次
     knockback: 0.09
     # 力道收攏彈著：速射噴一片，拉滿才是一束
     charge:
       curve: linear
       min_draw: 0.15
       affects: [spread]
-    pellets: 5
-    spread_degrees: 1.5
-    recoil: 0.7
-    recoil_max: 4.5
-    recoil_recovery: 6.0
+    pellets: 6
+    pellets_max: 7
+    spread_degrees: 6.0
+    # 散佈本來就大，後座力再疊上去很快就完全失準——這是逼你控制節奏，不是連射武器
+    recoil: 2.0
+    recoil_max: 12.0
+    recoil_recovery: 8.0
     cooldown_ticks: 24
     projectile_speed: 2.6
     gravity: 0.05

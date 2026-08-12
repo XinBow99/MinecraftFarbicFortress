@@ -48,8 +48,15 @@ public record WeaponDef(
         boolean chargeAffectsDamage,
         /** 力道要不要影響散佈（滿弓最準）。 */
         boolean chargeAffectsSpread,
-        /** 一次擊發幾顆（散彈用）。 */
+        /** 一次擊發至少幾顆（散彈用）。 */
         int pellets,
+        /**
+         * 一次擊發最多幾顆。跟 {@link #pellets} 相同 ＝ 固定顆數。
+         *
+         * <p>有範圍是為了散彈那種「每一發的彈著都不一樣」的手感：固定顆數時彈著雖然隨機，
+         * 但「這一發有多少火力」是恆定的，打起來比較像一把數值穩定的槍而不是霰彈。
+         */
+        int pelletsMax,
         /** 散佈：以視線為軸的圓錐半頂角（度）。0 ＝ 完全不散。 */
         double spreadDegrees,
         /** 後座力：每擊發一次，散佈額外增加幾度。 */
@@ -108,6 +115,7 @@ public record WeaponDef(
     public static WeaponDef from(String id, Map<String, Object> section) {
         double damage = YamlConfig.d(section, "damage", 1.0);
         double spread = YamlConfig.d(section, "spread_degrees", 0.0);
+        int pellets = Math.max(1, YamlConfig.i(section, "pellets", 1));
 
         Map<String, Object> charge = section.get("charge") instanceof Map<?, ?> map
                 ? castCharge(map) : Map.of();
@@ -133,7 +141,8 @@ public record WeaponDef(
                 affects.contains("speed"),
                 affects.contains("damage"),
                 affects.contains("spread"),
-                Math.max(1, YamlConfig.i(section, "pellets", 1)),
+                pellets,
+                Math.max(pellets, YamlConfig.i(section, "pellets_max", pellets)),
                 spread,
                 // 跟 knockback 同樣的理由：既有的設定檔沒有這些鍵，預設 0 等於要玩家刪檔
                 // 才吃得到後座力。用基礎散佈推一個——本來就不準的槍，連射時散得更快

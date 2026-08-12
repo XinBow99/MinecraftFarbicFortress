@@ -431,7 +431,12 @@ public final class WeaponSystem {
         double gravityScale = duel.modifierFactor(Duel.MOD_GRAVITY);
         double damageBoost = duel.modifierFactor(Duel.MOD_WEAPON_DAMAGE);
 
-        for (int i = 0; i < weapon.pellets(); i++) {
+        // 顆數每一發重抽：散彈的手感有一半來自「這一發到底打出去多少」不是固定的
+        int pellets = weapon.pellets() + (weapon.pelletsMax() > weapon.pellets()
+                ? level.getRandom().nextInt(weapon.pelletsMax() - weapon.pellets() + 1)
+                : 0);
+
+        for (int i = 0; i < pellets; i++) {
             Vec3 direction = applySpread(level, look, spread);
             projectiles.add(new Projectile(weapon, duel, player, origin,
                     direction.scale(speed), damageScale, gravityScale, damageBoost));

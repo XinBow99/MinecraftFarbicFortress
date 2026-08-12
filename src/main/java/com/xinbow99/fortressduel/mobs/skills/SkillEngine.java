@@ -161,10 +161,14 @@ public final class SkillEngine {
             if (skill.trigger() != trigger) continue;
             if (state.cooldowns.containsKey(skill.id())) continue;
 
-            if (trigger == SkillTrigger.ON_LOW_HEALTH) {
-                // 殘血技能整個生命週期只發動一次，否則殘血狀態下每挨一下就會再觸發
-                if (state.firedOnce.contains(skill.id())) continue;
-                if (entity.getHealth() > entity.getMaxHealth() * skill.healthThreshold()) continue;
+            // 一輩子只一次。殘血技能永遠算在內——殘血是持續狀態，不鎖的話每挨一下就再觸發
+            if ((skill.once() || trigger == SkillTrigger.ON_LOW_HEALTH)
+                    && state.firedOnce.contains(skill.id())) {
+                continue;
+            }
+            if (trigger == SkillTrigger.ON_LOW_HEALTH
+                    && entity.getHealth() > entity.getMaxHealth() * skill.healthThreshold()) {
+                continue;
             }
 
             if (skill.chance() < 1.0 && level.getRandom().nextDouble() > skill.chance()) continue;
