@@ -15,7 +15,17 @@ import java.util.Map;
 public record MobDef(
         String id,
         String displayName,
-        Identifier entity,
+        /**
+         * 這一群可以用哪幾種原版實體當底，**每一隻各自隨機抽一種**。
+         *
+         * <p>寫成清單而不是單一個值，是為了「混合族群」這種事件：一群裡有兔子、狐狸、
+         * 駱駝、北極熊，每隻長得不一樣。只寫一種的話（{@code entity: minecraft:rabbit}）
+         * 這裡就是只有一個元素的清單，行為跟以前完全一樣。
+         *
+         * <p>數值（血量、攻擊、體型）仍然是整群共用的——這裡混的是**外觀與原版行為**，
+         * 不是強度。要不同強度就開兩個 MobDef。
+         */
+        List<Identifier> entities,
 
         double health,
         double attackDamage,
@@ -45,7 +55,7 @@ public record MobDef(
         return new MobDef(
                 id,
                 YamlConfig.str(section, "name", id),
-                Identifier.parse(YamlConfig.str(section, "entity", "minecraft:zombie")),
+                entities(section),
                 YamlConfig.d(section, "health", 20.0),
                 YamlConfig.d(section, "attack_damage", 3.0),
                 YamlConfig.d(section, "movement_speed", 0.25),
@@ -55,5 +65,23 @@ public record MobDef(
                 YamlConfig.d(section, "weight", 1.0),
                 YamlConfig.i(section, "reward", 0),
                 skills);
+    }
+
+    /**
+     * 讀 {@code entities:}（清單）或 {@code entity:}（單一個）。兩個都寫的話清單優先。
+     *
+     * <p>兩種寫法並存而不是只留清單：絕大多數的怪就是一種實體，逼它們寫成單元素清單
+     * 只會讓 mobs.yml 變吵。
+     */
+    private static List<Identifier> entities(Map<String, Object> section) {
+        if (section.get("entities") instanceof List<?> list && !list.isEmpty()) {
+            return list.stream().map(raw -> Identifier.parse(String.valueOf(raw))).toList();
+        }
+        return List.of(Identifier.parse(YamlConfig.str(section, "entity", "minecraft:zombie")));
+    }
+
+    /** 這一群的代表實體，只有在需要「單一個型別」的地方用（例如錯誤訊息）。 */
+    public Identifier entity() {
+        return entities.getFirst();
     }
 }

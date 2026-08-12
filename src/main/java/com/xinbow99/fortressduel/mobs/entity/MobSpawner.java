@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
@@ -40,9 +41,20 @@ public final class MobSpawner {
      */
     public static List<Entity> spawnPack(ServerLevel level, MobDef def, BlockPos center, int spread,
                                          SkillEngine engine) {
-        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(def.entity()).orElse(null);
-        if (type == null) {
-            FortressDuel.LOGGER.warn("Mob {} references entity '{}' which does not exist, skipping this spawn", def.id(), def.entity());
+        // 逐隻抽型別，所以「混合族群」（一群裡有兔子、狐狸、駱駝…）不用開好幾個 MobDef。
+        // 只寫一種 entity 的怪，這裡就是一個只有一個元素的清單，行為跟以前完全一樣
+        List<EntityType<?>> types = new ArrayList<>(def.entities().size());
+        for (Identifier id : def.entities()) {
+            EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null);
+            if (type == null) {
+                FortressDuel.LOGGER.warn("Mob {} references entity '{}' which does not exist, skipping that one",
+                        def.id(), id);
+                continue;
+            }
+            types.add(type);
+        }
+        if (types.isEmpty()) {
+            FortressDuel.LOGGER.warn("Mob {} has no valid entity types, skipping this spawn", def.id());
             return List.of();
         }
 
@@ -51,6 +63,7 @@ public final class MobSpawner {
 
         for (int i = 0; i < count; i++) {
             BlockPos pos = scatter(level, center, spread);
+            EntityType<?> type = types.get(level.getRandom().nextInt(types.size()));
             Entity entity = type.spawn(level, pos, EntitySpawnReason.EVENT);
             if (entity == null) continue;
 

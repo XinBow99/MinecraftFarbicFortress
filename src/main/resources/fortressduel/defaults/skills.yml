@@ -58,13 +58,13 @@ skills:
       inherit_skills: false
 
   召喚蟲群:
-    name: 召喚蟲群
+    name: 召喚野獸
     type: summon
     trigger: INTERVAL
     interval_seconds: 20
     chance: 0.5
     cooldown_seconds: 20
-    message: "§d它召來了一批蟲群。"
+    message: "§d它召來了一批野獸。"
     params:
       mob: swarm
       radius: 5

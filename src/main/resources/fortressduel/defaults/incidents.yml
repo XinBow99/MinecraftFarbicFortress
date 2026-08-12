@@ -41,11 +41,11 @@
 incidents:
   dungeon:
     name: 隱藏副本
-    description: 中場湧出一大群蟲群，先搶先贏。
+    description: 中場湧出一群雜七雜八的野獸，先搶先贏。
     weight: 15
     action: spawn_mobs
     mobs: [swarm]
-    music: minecraft:entity.silverfish.ambient
+    music: minecraft:entity.polar_bear.ambient
 
   ground_horde:
     name: 土偶大軍
