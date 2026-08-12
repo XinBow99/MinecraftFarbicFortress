@@ -978,14 +978,26 @@ public final class Duel {
         entity.hurtMarked = true;
     }
 
-    /** 走出框線就拉回自己的出生點。只看水平方向——跳起來、挖到腳下都不算離場。 */
+    /**
+     * 跑出盒子就拉回自己的出生點。
+     *
+     * <p>水平與垂直都看。垂直那條是後來補的：盒子封頂之後，玩家死掉可能在**天花板上面**
+     * 重生（原版的重生點會找那一欄最高的方塊，而那就是天花板）。只看水平的話他站在頂上
+     * 不算離場，接著 confinePlayer 把他的 y 夾回 maxY − 1——那是半空中，掉下來摔死、
+     * 重生、再站上去，無限循環。
+     *
+     * <p>封頂之前垂直不能算：那時往上跳、往下挖都會超出範圍，但那些都不是離場。
+     * 現在上下都有實體的殼，超出去就真的是異常。
+     */
     private void keepInside(ServerPlayer player, Side side) {
         // 死亡畫面期間不要動他：那時原版正要把他移到重生點，兩邊搶著傳送會把人丟到奇怪的位置。
         // 等他按下重生、變回活著的狀態，下一 tick 自然會被拉回場內
         if (player.isDeadOrDying()) return;
 
+        Region region = arena.region();
         if (player.level() == arena.level()
-                && arena.region().containsHorizontally(player.getX(), player.getZ())) {
+                && region.containsHorizontally(player.getX(), player.getZ())
+                && player.getY() >= region.minY() && player.getY() <= region.maxY()) {
             return;
         }
         Vec3 spawn = arena.spawnFor(side.pen());

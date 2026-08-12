@@ -5,6 +5,7 @@ import com.xinbow99.fortressduel.building.BuildingDef;
 import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.core.DuelSettings;
 import com.xinbow99.fortressduel.npc.NpcDef;
+import com.xinbow99.fortressduel.util.Ground;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -13,7 +14,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -212,30 +212,61 @@ public final class Arena {
         return new BlockPos(x, y, z);
     }
 
-    private static int surfaceY(ServerLevel level, int x, int z) {
-        return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+    /**
+     * 這一欄站得上去的那一格。
+     *
+     * <p>轉給 {@link Ground}——「封頂之後 heightmap 會回報天花板」這件事全專案只該有一個
+     * 答案，而競技場不是唯一會問這個問題的地方（怪物生成、分身、召喚也都要）。
+     */
+    private int surfaceY(ServerLevel level, int x, int z) {
+        return Ground.surfaceY(level, x, z);
     }
 
     // ---------- 建造 ----------
 
-    /** 沿著水平邊界砌一圈牆，把 n×n 的範圍框出來。 */
+    /**
+     * 沿著水平邊界砌一圈牆，把 n×n 的範圍框出來。
+     *
+     * <p><b>這圈牆是標示，不是圍欄。</b>真正把人跟東西關在場內的全部在程式裡：
+     * {@link Duel#keepInside}（玩家）、{@link #confineToArena}（生物）、
+     * {@code WeaponSystem.step}（彈丸飛出範圍就消失），以及三個否決「挖／打／在場外放方塊」
+     * 的事件處理。所以牆破了一個洞也沒有人跑得出去——它唯一的工作是讓玩家看得到邊界在哪。
+     *
+     * <p>正因為如此，材質該選看得見的（預設紅色玻璃）而不是屏障。屏障看不見，那個唯一的
+     * 工作它做不到，反而製造出「這裡有一道打不穿的空氣牆」這種無法理解的體驗。
+     */
     private void placeBorder(DuelSettings settings) {
         BlockState wall = blockState(settings.borderBlock(), Blocks.BARRIER);
+        boolean sealed = !settings.borderCapBlock().isBlank();
+        BlockState cap = sealed ? blockState(settings.borderCapBlock(), Blocks.GLASS) : null;
 
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int x = region.minX(); x <= region.maxX(); x++) {
             for (int z = region.minZ(); z <= region.maxZ(); z++) {
-                if (!region.isHorizontalEdge(x, z)) continue;
-
-                // 牆從該欄地表往下扎一格（免得地形起伏時牆底浮空）、往上長 borderHeight
-                int base = Math.clamp(surfaceY(level, x, z) - 1, region.minY(), region.maxY());
-                int top = Math.min(region.maxY(), base + settings.borderHeight());
-                for (int y = base; y <= top; y++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    snapshot.record(level, pos);
-                    level.setBlock(pos, wall, 2);
+                if (region.isHorizontalEdge(x, z)) {
+                    // 封起來的話牆從盒底長到盒頂，玩家往上爬或往下挖都看得到同一面牆。
+                    // 沒封的話沿用舊行為：從該欄地表往下扎一格（免得地形起伏時牆底浮空）、
+                    // 往上長 border_height
+                    int base = sealed ? region.minY()
+                            : Math.clamp(surfaceY(level, x, z) - 1, region.minY(), region.maxY());
+                    int top = sealed ? region.maxY()
+                            : Math.min(region.maxY(), base + settings.borderHeight());
+                    for (int y = base; y <= top; y++) {
+                        place(cursor.set(x, y, z), wall);
+                    }
+                } else if (sealed) {
+                    // 內部的欄位只鋪頂和底兩層——四面牆上面那圈已經在前一個分支蓋掉了
+                    place(cursor.set(x, region.maxY(), z), cap);
+                    place(cursor.set(x, region.minY(), z), cap);
                 }
             }
         }
+    }
+
+    private void place(BlockPos pos, BlockState state) {
+        snapshot.record(level, pos);
+        // 旗標 2 ＝ 通知客戶端但不觸發鄰居更新：一次放幾萬格，讓沙子掉下來、水流開來會爆掉
+        level.setBlock(pos, state, 2);
     }
 
     /**
@@ -327,7 +358,7 @@ public final class Arena {
      */
     public boolean isBuilt(BlockPos pos) {
         if (!region.contains(pos)) return false;
-        if (region.isHorizontalEdge(pos.getX(), pos.getZ())) return false;
+        if (region.isShell(pos)) return false;
 
         BlockState state = level.getBlockState(pos);
         if (state.isAir() || state.liquid()) return false;
@@ -455,6 +486,10 @@ public final class Arena {
      * <p>不能直接用地表高度圖：那一欄被挖穿（或本來就是洞穴口）時，{@code getHeight} 會回傳
      * 世界的最低建築高度，玩家會被傳到虛空裡。所以先看高度圖，值落在競技場範圍外就改成
      * 從場地頂端往下找第一塊實心方塊，再找不到就退回核心的高度——核心一定站在地上。
+     *
+     * <p>往下掃**從 maxY − 1 開始，跳過天花板那一層**。從 maxY 開始的話第一個掃到的實心
+     * 方塊就是天花板本身，玩家會被放到盒子頂上——然後 confinePlayer 把他夾回 maxY − 1，
+     * 那是半空中，掉下來摔死、重生、再放到頂上，變成無限循環。
      */
     private int safeSpawnY(int x, int z, int fallback) {
         int surface = surfaceY(level, x, z);
@@ -462,7 +497,7 @@ public final class Arena {
             return surface;
         }
 
-        for (int y = region.maxY(); y > region.minY(); y--) {
+        for (int y = region.maxY() - 1; y > region.minY(); y--) {
             if (!level.getBlockState(new BlockPos(x, y, z)).isAir()) {
                 return y + 1;
             }

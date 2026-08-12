@@ -51,6 +51,8 @@ public final class DuelManager {
     private final Map<UUID, List<Challenge>> challenges = new HashMap<>();
 
     private long serverTick;
+    /** 對戰期間釘住時間與天氣。以「有沒有任何對戰進行中」開關，不是逐場——那兩件事是全域的。 */
+    private final WorldLock worldLock = new WorldLock();
 
     public DuelManager(ConfigManager config) {
         this.config = config;
@@ -62,6 +64,8 @@ public final class DuelManager {
     }
 
     public void register() {
+        // Mixin 織進原版的爆炸邏輯，沒有建構子可以注入，只能走這道靜態橋
+        ArenaGuard.install(this);
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> abortAll());
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
@@ -134,6 +138,7 @@ public final class DuelManager {
             return "這裡跟另一場正在進行的對戰重疊了，走遠一點再試。";
         }
 
+        lockWorld(level);
         Duel duel = Duel.start(level.getServer(), level, settings, services, challenger, target);
         activeDuels.add(duel);
         duelsByPlayer.put(challenger.getUUID(), duel);
@@ -165,6 +170,7 @@ public final class DuelManager {
             return "這裡跟另一場正在進行的對戰重疊了，走遠一點再試。";
         }
 
+        lockWorld(level);
         Duel duel = Duel.startSolo(level.getServer(), level, dummyPos, settings, services, player);
         activeDuels.add(duel);
         duelsByPlayer.put(player.getUUID(), duel);
@@ -221,6 +227,11 @@ public final class DuelManager {
      * <p>怪物技能要用它：怪身上只有座標，不知道自己屬於哪一場，而「能不能拆這一格」
      * 是那一場的規則（框線拆不得、範圍外碰不得）。
      */
+    /** 有沒有任何對戰進行中。爆炸的熱路徑先問這個，沒有就完全不做逐格判斷。 */
+    public boolean hasActiveDuels() {
+        return !activeDuels.isEmpty();
+    }
+
     public Duel duelAt(ServerLevel level, BlockPos pos) {
         for (Duel duel : activeDuels) {
             if (duel.arena().level() == level && duel.arena().region().contains(pos)) {
@@ -266,6 +277,23 @@ public final class DuelManager {
                 duelsByPlayer.values().removeIf(d -> d == duel);
             }
         }
+
+        // 最後一場收掉之後才還原：同時開好幾場時中間那幾場結束不該把天亮回去
+        if (activeDuels.isEmpty()) {
+            worldLock.release(server, server.overworld());
+        }
+    }
+
+    /**
+     * 第一場對戰開始時把時間與天氣釘住。
+     *
+     * <p>入夜什麼都看不見、下雨會讓遠處的粒子糊掉，而那兩件事是隨機的、跟雙方的操作無關——
+     * 一場對戰的勝負不該取決於它剛好開在幾點。細節見 {@link WorldLock}。
+     */
+    private void lockWorld(ServerLevel level) {
+        DuelSettings settings = config.settings();
+        worldLock.apply(level.getServer(), level,
+                WorldLock.markerByName(settings.lockTime()), settings.lockWeather());
     }
 
     private void expireChallenges(MinecraftServer server) {
@@ -300,11 +328,14 @@ public final class DuelManager {
         FortressDuel.LOGGER.info("Server stopping with {} duel(s) in progress, aborting them so the arenas get restored",
                 activeDuels.size());
         // 對複本迭代：finish 會發 END 事件，各子系統在那裡動自己的表
+        MinecraftServer server = activeDuels.getFirst().arena().level().getServer();
         for (Duel duel : List.copyOf(activeDuels)) {
             duel.finish(Duel.Result.aborted());
         }
         activeDuels.clear();
         duelsByPlayer.clear();
+        // 時間與天氣是寫進存檔的，關機前不還原的話下次開機世界會永遠停在正午
+        worldLock.release(server, server.overworld());
     }
 
     private void onDisconnect(ServerPlayer player) {
@@ -386,7 +417,7 @@ public final class DuelManager {
             player.sendSystemMessage(Msg.warn("對戰期間不能挖競技場外面的方塊。"));
             return false;
         }
-        if (region.isHorizontalEdge(pos.getX(), pos.getZ())) {
+        if (region.isShell(pos)) {
             player.sendSystemMessage(Msg.warn("那是競技場的框線，拆不掉。"));
             return false;
         }

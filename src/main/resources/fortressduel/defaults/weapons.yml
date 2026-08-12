@@ -69,7 +69,8 @@
 #   fire_sound        開火音效
 #   ammo_per_shot     一次擊發消耗幾發（散彈打六七顆但只算 1 發，跟 pellets 是兩回事）
 #                     只從**副手那一疊**扣，不會去背包裡湊——副手就是上膛的彈匣
-#   starting_ammo     開場就配給的量。上限由堆疊上限與背包空間決定，沒有另外的彈藥上限
+#   starting_ammo     開場就配給的量。預設全部 0——開場不發任何東西，所有補給都要跟軍火商買，
+#                     那是這個遊戲唯一的資源出口（見 duel.yml 的 battle.starting_items）
 
 weapons:
   scrap:
@@ -96,7 +97,7 @@ weapons:
     trail_particle: minecraft:crit
     trail_color: "#C8C8C8"
     fire_sound: minecraft:entity.arrow.shoot
-    starting_ammo: 60
+    starting_ammo: 0
 
   mg:
     name: 機槍彈
@@ -125,7 +126,7 @@ weapons:
     trail_particle: minecraft:smoke
     trail_color: "#FFB03A"
     fire_sound: minecraft:entity.arrow.shoot
-    starting_ammo: 60
+    starting_ammo: 0
 
   ap:
     name: 穿甲彈
