@@ -85,19 +85,26 @@ public final class SkillTypes {
     /**
      * 啃方塊：把附近**玩家蓋的**東西拆掉。
      *
-     * <p>params：{@code radius}（找幾格內）、{@code count}（一次最多拆幾格）。
+     * <p>params：{@code radius}（找幾格內）、{@code count}（一次最多拆幾格）、
+     * {@code max_hardness}（只啃得動硬度不超過這個值的方塊，省略 = 不限）。
      *
      * <p>只拆「跟開場前不一樣」的格子（見 {@code Arena.isBuilt}）——天然地形不動，框線也不動。
      * 不然這隻怪會在中場自己挖出一個坑，看起來只是壞掉，而它的定位是「對人造物有破壞慾」。
+     *
+     * <p>{@code max_hardness} 用的是原版硬度，跟 weapons.yml 算方塊血量的是同一個數字，
+     * 所以門檻直接對應建材的價格階梯：泥土 0.5、石頭 1.5、橡木板 2.0、鐵塊 5.0、黑曜石 50。
+     * 填 2.0 就是「便宜建材啃得穿、鐵塊與黑曜石完全免疫」——貴的建材因此買到的不只是血量。
      *
      * <p>拆掉的格子照樣進快照的還原路徑，所以對戰結束地形會補回來；也不掉落物品，
      * 理由跟玩家自己挖一樣——牆被拆開不該順便變成建材。
      *
      * <p>找不到人造物就回 false（不進冷卻）：這不是「發動了」，是「沒東西可拆」。
+     * 硬度擋下來的也算「沒東西可拆」——啃不動黑曜石的老鼠應該一直試，不是試一次就休息。
      */
     private static boolean breakBlocks(SkillEngine engine, SkillContext ctx) {
         int radius = Math.max(1, ctx.skill().param("radius", 3));
         int count = Math.max(1, ctx.skill().param("count", 2));
+        double maxHardness = ctx.skill().param("max_hardness", Double.MAX_VALUE);
 
         LivingEntity caster = ctx.caster();
         ServerLevel level = ctx.level();
@@ -110,9 +117,10 @@ public final class SkillTypes {
         List<BlockPos> targets = new ArrayList<>();
         for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-radius, -radius, -radius),
                 origin.offset(radius, radius, radius))) {
-            if (duel.arena().isBuilt(pos)) {
-                targets.add(pos.immutable());
-            }
+            if (!duel.arena().isBuilt(pos)) continue;
+            // isBuilt 已經擋掉了硬度為負的（基岩之類），所以這裡只要比上界
+            if (level.getBlockState(pos).getDestroySpeed(level, pos) > maxHardness) continue;
+            targets.add(pos.immutable());
         }
         if (targets.isEmpty()) return false;
 
