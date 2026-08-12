@@ -117,6 +117,14 @@ public record DuelSettings(
          * 打的不是同一場遊戲。關掉它是給開發用的——每次測試都被收走測試道具很難做事。
          */
         boolean clearInventory,
+        /**
+         * 對戰期間把時間釘在哪個時刻：noon／day／night／midnight；空字串 ＝ 不鎖。
+         *
+         * <p>入夜之後什麼都看不見，而這是一個靠看彈道打的遊戲——勝負不該取決於它剛好開在幾點。
+         */
+        String lockTime,
+        /** 對戰期間強制晴天。下雨會讓遠處的彈道粒子糊掉。 */
+        boolean lockWeather,
 
         // ---- 突發事件 ----
         int incidentIntervalSeconds,
@@ -183,9 +191,11 @@ public record DuelSettings(
                 Math.max(0, cfg.getInt("battle.build_timeout_seconds", 300)),
                 cfg.getInt("battle.combat_seconds", 60),
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
-                startingItems(cfg),
+                cfg.getStringList("battle.starting_items"),
                 cfg.getString("battle.gamemode", "survival"),
                 cfg.getBoolean("battle.clear_inventory", true),
+                cfg.getString("battle.lock_time", "noon"),
+                cfg.getBoolean("battle.lock_weather", true),
 
                 cfg.getInt("incident.interval_seconds", 120),
 
@@ -195,15 +205,6 @@ public record DuelSettings(
 
                 cfg.getDouble("weapon.block_hp_per_hardness", 10.0),
                 cfg.getDoubleMap("weapon.block_hp"));
-    }
-
-    /**
-     * 設定檔沒寫 starting_items 時給一份預設，而不是什麼都不發——雙方在建造階段手上是空的話
-     * 第一回合完全沒事做（建材要自己挖，但挖也需要時間）。
-     */
-    private static List<String> startingItems(YamlConfig cfg) {
-        List<String> configured = cfg.getStringList("battle.starting_items");
-        return configured.isEmpty() ? List.of("minecraft:dirt 20", "minecraft:bamboo 16") : configured;
     }
 
     /**
