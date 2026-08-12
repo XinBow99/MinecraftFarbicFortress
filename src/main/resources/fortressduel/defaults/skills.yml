@@ -5,11 +5,12 @@
 # 欄位
 #   name              顯示名稱
 #   type              對應程式裡的實作，決定「做什麼」。內建：
-#                       clone     分身：複製自己
-#                       summon    召喚：叫出 mobs.yml 裡的另一種怪
-#                       heal      回血
-#                       teleport  順移
-#                       effect    給自己上一個藥水效果
+#                       clone         分身：複製自己
+#                       summon        召喚：叫出 mobs.yml 裡的另一種怪
+#                       break_blocks  啃方塊：把附近**玩家蓋的**東西拆掉
+#                       heal          回血
+#                       teleport      順移
+#                       effect        給自己上一個藥水效果
 #   trigger           什麼時候發動：
 #                       ON_SPAWN       生成的當下
 #                       INTERVAL       每隔 interval_seconds
@@ -18,6 +19,9 @@
 #                       ON_DEATH       死亡的當下
 #   chance            觸發時真正發動的機率 0~1
 #   cooldown_seconds  冷卻，冷卻中不會再發動
+#   once              true = 一隻怪一輩子只發動這個技能一次。跟冷卻是兩回事：冷卻只是
+#                     「等一下再來」，而會增加實體數量的技能（分身、召喚）光靠冷卻擋不住
+#                     ON_LOW_HEALTH 永遠是 once，不管這裡寫什麼
 #   interval_seconds  trigger = INTERVAL 時的間隔
 #   health_threshold  trigger = ON_LOW_HEALTH 時的血量門檻（佔上限的比例）
 #   message           發動時附近玩家看到的訊息，留空 = 不公告
@@ -27,12 +31,23 @@
 # 都是 clone，只是觸發時機與數量不同。
 
 skills:
+  # once + inherit_skills: false ＝ 每一隻**一輩子只分裂一次**，而且分身不會再分裂。
+  #
+  # 兩個都需要，各擋一條增殖路徑：
+  #   沒有 once：冷卻只是「等一下再來」。一隻被持續射擊的怪每 12 秒就多兩隻，
+  #             60 秒的攻擊階段下來一隻變十隻，場面直接被淹掉。
+  #   inherit_skills: true：分身也會分裂，變成 1→2→4 的樹（有深度上限 2 擋著，
+  #             所以是 7 隻封頂，但那仍然是一棵樹而不是「分裂一次」）。
+  #
+  # 順帶一提，不繼承技能的分身也不會被登記進技能引擎，所以**打死分身沒有賞金**——
+  # 分裂因此不會變成印鈔機。
   分身:
     name: 分身
     type: clone
     trigger: ON_DAMAGED
     chance: 0.25
     cooldown_seconds: 12
+    once: true
     message: "§d怪物分裂出了分身！"
     params:
       count: 2
@@ -40,8 +55,8 @@ skills:
       health_ratio: 0.5
       scale_ratio: 0.8
       radius: 3
-      # true = 分身也帶著技能（會連鎖分身，但有連鎖深度上限 2 擋著）
-      inherit_skills: true
+      # false = 分身不帶技能，所以它不會再分裂
+      inherit_skills: false
 
   垂死分裂:
     name: 垂死分裂
@@ -58,16 +73,33 @@ skills:
       inherit_skills: false
 
   召喚蟲群:
-    name: 召喚蟲群
+    name: 召喚野獸
     type: summon
     trigger: INTERVAL
     interval_seconds: 20
     chance: 0.5
     cooldown_seconds: 20
-    message: "§d它召來了一批蟲群。"
+    message: "§d它召來了一批野獸。"
     params:
       mob: swarm
       radius: 5
+
+  # 只拆「跟開場前不一樣」的格子——玩家蓋的牆、平台、柵欄，天然地形與框線都不動。
+  # 不然這隻怪會在中場自己挖出一個坑，看起來只是壞掉，而它的定位是「對人造物有破壞慾」。
+  #
+  # 拆掉的格子照樣進快照的還原路徑（對戰結束會補回來），而且不掉落物品——牆被拆開不該
+  # 順便變成建材。
+  #
+  # 每 3 秒一次、一次最多 3 格：一隻的話大約每分鐘 60 格，四隻圍上來就是每分鐘 240 格。
+  # 那個速度拆得動一面石牆但拆不動黑曜石堡壘，所以它是壓力不是死刑
+  啃食:
+    name: 啃食
+    type: break_blocks
+    trigger: INTERVAL
+    interval_seconds: 3
+    params:
+      radius: 3
+      count: 3
 
   再生:
     name: 再生

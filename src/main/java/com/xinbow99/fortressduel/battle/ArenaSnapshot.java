@@ -79,6 +79,22 @@ public final class ArenaSnapshot {
         before.clear();
     }
 
+    /**
+     * 這一格跟開場前一樣嗎。
+     *
+     * <p>給「只拆人造物」的效果用（見蝕世之影）：跟開場前不同的，就是這場對戰開始之後才
+     * 出現的東西——玩家蓋的牆，或這個 mod 自己放的平台與柵欄。天然地形因此不會被動到。
+     *
+     * <p>{@code restoreTerrain = false} 的增量模式下判斷不準：那時表裡只有 mod 放過的格子，
+     * 天然地形查不到就會被當成「本來是空氣」而誤判成人造物。那個模式本來就是「地形隨便挖」，
+     * 所以這個誤差跟它的定位一致。
+     */
+    public boolean isUntouched(ServerLevel level, BlockPos pos) {
+        BlockState original = before.get(pos);
+        BlockState target = original == null ? Blocks.AIR.defaultBlockState() : original;
+        return level.getBlockState(pos).equals(target);
+    }
+
     public int recordedBlocks() {
         return before.size();
     }

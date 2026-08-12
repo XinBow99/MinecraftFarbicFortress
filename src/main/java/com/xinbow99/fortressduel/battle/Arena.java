@@ -319,6 +319,29 @@ public final class Arena {
         return region;
     }
 
+    /**
+     * 這一格能不能被「拆人造物」的效果拆掉。
+     *
+     * <p>三個條件：在場內、不是框線（框線是場地的一部分，誰都拆不掉）、而且跟開場前不一樣
+     * ——最後那條就是「人造」的定義，天然地形不動。
+     */
+    public boolean isBuilt(BlockPos pos) {
+        if (!region.contains(pos)) return false;
+        if (region.isHorizontalEdge(pos.getX(), pos.getZ())) return false;
+
+        BlockState state = level.getBlockState(pos);
+        if (state.isAir() || state.liquid()) return false;
+        if (state.getDestroySpeed(level, pos) < 0) return false; // 基岩之類
+
+        return !snapshot.isUntouched(level, pos);
+    }
+
+    /** 拆掉一格並記進快照的還原路徑。不掉落物品——理由同玩家自己挖（見 DuelManager）。 */
+    public void breakBuilt(BlockPos pos) {
+        snapshot.record(level, pos);
+        level.destroyBlock(pos, false, null, 512);
+    }
+
     // ---------- 區塊 ----------
 
     /** 場上的三個區塊，沿著兩座熊貓圈的連線切開。 */
@@ -370,6 +393,23 @@ public final class Arena {
 
         Vec3 shifted = pos.add(axisDir.scale(target - s));
         return new Vec3(shifted.x, y, shifted.z);
+    }
+
+    /**
+     * 把一個位置夾回**整座競技場**（不分區塊），同時夾進垂直範圍。
+     *
+     * <p>給「可以到處跑、但不能離場」的生物用。跟 {@link #confine} 的差別是沒有沿軸的那道
+     * 分界——牠們可以走進任何一方的陣地，只是出不去框線。
+     *
+     * <p>水平方向夾進框線**內側**：框線那一圈是實心的牆，夾到牆上的話下一 tick 又會被推出來。
+     */
+    public Vec3 confineToArena(Vec3 pos, double buffer) {
+        double x = Math.clamp(pos.x, region.minX() + 1 + buffer, region.maxX() - buffer);
+        double z = Math.clamp(pos.z, region.minZ() + 1 + buffer, region.maxZ() - buffer);
+        double y = Math.clamp(pos.y, region.minY() + 1, region.maxY() - 1);
+
+        if (x == pos.x && y == pos.y && z == pos.z) return null;
+        return new Vec3(x, y, z);
     }
 
     public BlockPos penA() {

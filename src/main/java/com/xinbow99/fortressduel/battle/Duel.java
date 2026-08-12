@@ -127,6 +127,26 @@ public final class Duel {
      */
     private final Map<UUID, Notice> notices = new HashMap<>();
     /**
+     * 進行中的全域修正：種類 → 倍率與到期時間。突發事件用它改一段時間內的物理與數值
+     * （低重力、銅牆鐵壁、火力全開）。
+     *
+     * <p>放在 Duel 而不是武器系統：它是「這一場現在的規則」，而規則的持有者是這場對戰。
+     * 武器、方塊傷害那些子系統只是去問它現在的倍率是多少。
+     */
+    private final Map<String, Modifier> modifiers = new HashMap<>();
+
+    /** 一個有時限的全域修正。 */
+    private record Modifier(String label, double factor, long until) {
+    }
+
+    /** 彈丸重力的倍率（低重力）。開火那一刻決定。 */
+    public static final String MOD_GRAVITY = "gravity";
+    /** 武器傷害的倍率（火力全開）。開火那一刻決定。 */
+    public static final String MOD_WEAPON_DAMAGE = "weapon_damage";
+    /** 方塊受到的傷害的倍率（銅牆鐵壁）。**命中那一刻**決定。 */
+    public static final String MOD_BLOCK_DAMAGE = "block_damage";
+
+    /**
      * 這一輪建造階段已經按過 {@code /duel ready} 的人。每次進建造階段清空。
      *
      * <p>只在 {@code battle.build_until_ready} 開著時有意義。
@@ -318,6 +338,7 @@ public final class Duel {
                 finish(Result.aborted());
                 return;
             }
+            expireModifiers(new ServerPlayer[]{a});
             tickPhase(new ServerPlayer[]{a});
             keepInside(a, north);
             enforceZones();
@@ -337,6 +358,7 @@ public final class Duel {
             return;
         }
 
+        expireModifiers(new ServerPlayer[]{a, b});
         tickPhase(new ServerPlayer[]{a, b});
 
         keepInside(a, north);
@@ -718,6 +740,73 @@ public final class Duel {
         notices.put(player.getUUID(), new Notice(text, ticksElapsed + NOTICE_TICKS));
     }
 
+    // ---------- 全域修正（突發事件用） ----------
+
+    /**
+     * 套一個有時限的全域修正，例如「重力減半」「方塊受到的傷害減半」。
+     *
+     * <p>同一個 key 再套一次就整個換掉（倍率與到期時間都是新的），不是相乘——兩次低重力
+     * 疊成 0.25 倍重力沒有人預期得到，而事件是隨機抽的，疊加會讓場面偶爾失控。
+     *
+     * @param key   修正的種類，見 {@link #modifierFactor}
+     * @param label 顯示在動作列上的名字
+     */
+    public void applyModifier(String key, String label, double factor, int durationTicks) {
+        modifiers.put(key, new Modifier(label, factor, ticksElapsed + durationTicks));
+    }
+
+    /**
+     * 目前這種修正的倍率；沒有或已過期就是 1.0（＝沒有影響）。
+     *
+     * <p>目前用到的 key：
+     * <ul>
+     *   <li>{@code gravity}——彈丸重力，開火那一刻決定（低重力）</li>
+     *   <li>{@code weapon_damage}——彈丸傷害，開火那一刻決定（火力全開）</li>
+     *   <li>{@code block_damage}——方塊受到的傷害，**命中那一刻**決定（銅牆鐵壁）</li>
+     * </ul>
+     *
+     * <p>前兩個在開火時就寫進彈丸，最後一個在命中時才查：前兩個是「這一發打得多用力」，
+     * 屬於子彈；最後一個是「這面牆多耐打」，屬於牆。效果在彈丸飛行途中結束時，
+     * 這個分界才會給出符合直覺的結果。
+     */
+    public double modifierFactor(String key) {
+        Modifier modifier = modifiers.get(key);
+        if (modifier == null) return 1.0;
+        if (ticksElapsed > modifier.until()) {
+            modifiers.remove(key);
+            return 1.0;
+        }
+        return modifier.factor();
+    }
+
+    /** 修正到期時公告一次。不講的話玩家只會覺得「手感忽然變了」卻不知道為什麼。 */
+    private void expireModifiers(ServerPlayer[] players) {
+        modifiers.entrySet().removeIf(entry -> {
+            if (ticksElapsed <= entry.getValue().until()) return false;
+
+            for (ServerPlayer player : players) {
+                if (player != null) {
+                    player.sendSystemMessage(Msg.info(entry.getValue().label() + " 結束了。"));
+                }
+            }
+            return true;
+        });
+    }
+
+    /** 動作列上那段「還有哪些效果、剩幾秒」。沒有效果時回傳 null。 */
+    private String activeModifiers() {
+        if (modifiers.isEmpty()) return null;
+
+        StringBuilder text = new StringBuilder();
+        for (Modifier modifier : modifiers.values()) {
+            long left = (modifier.until() - ticksElapsed + 19) / 20;
+            if (left <= 0) continue;
+            if (!text.isEmpty()) text.append(' ');
+            text.append(modifier.label()).append(' ').append(left).append('s');
+        }
+        return text.isEmpty() ? null : text.toString();
+    }
+
     private Component noticeFor(ServerPlayer player) {
         Notice notice = notices.get(player.getUUID());
         if (notice == null) return null;
@@ -744,6 +833,12 @@ public final class Duel {
         };
 
         line.append(Msg.plain("   $" + services.economy().balanceOf(player), ChatFormatting.GOLD));
+
+        // 進行中的全域修正排在餘額後面、短訊之前：它是持續狀態，看一眼就要知道現在的規則是什麼
+        String effects = activeModifiers();
+        if (effects != null) {
+            line.append(Msg.plain("   " + effects, ChatFormatting.LIGHT_PURPLE));
+        }
 
         // 短訊優先：它是「剛剛發生了什麼」，比恆常顯示的彈藥數重要，而且只活兩秒
         Component notice = noticeFor(player);
@@ -836,7 +931,16 @@ public final class Duel {
         }
     }
 
-    /** 場上除了玩家與熊貓以外的活物，一律關在中場。 */
+    /**
+     * 場上除了玩家與熊貓以外的活物，不准離開競技場。
+     *
+     * <p>預設**不限制牠們待在哪一區**：中場的怪可以走進任何一方的陣地，事件放進陣地裡的怪
+     * 也可以跑到對面去。玩家與熊貓仍然各自關在自己那半場（那是 issue #5 的核心），所以
+     * 「打不到對面的人」這件事沒有變——變的只是怪會自己送上門，或自己跑掉。
+     *
+     * <p>代價要知道：牠們可能晃到某一方的陣地裡被安全地清掉，賞金因此帶一點運氣成分。
+     * 覺得太隨機就把 {@code arena.creatures_roam_freely} 關掉，牠們會被關回中場。
+     */
     private void confineBystanders() {
         ServerLevel level = arena.level();
         Region region = arena.region();
@@ -848,18 +952,25 @@ public final class Duel {
             if (sideOfGuardian(entity.getUUID()) != null) continue;
             if (entity instanceof Mob mob && mob.isNoAi()) continue;
 
-            confineCreature(entity, Arena.Zone.NEUTRAL);
+            Vec3 corrected = settings.creaturesRoamFreely()
+                    ? arena.confineToArena(entity.position(), CONFINE_BUFFER)
+                    : arena.confine(entity.position(), Arena.Zone.NEUTRAL, CONFINE_BUFFER);
+            moveBack(entity, corrected);
         }
     }
 
+    /** 夾一隻非玩家的生物回它該待的區塊。 */
+    private void confineCreature(LivingEntity entity, Arena.Zone zone) {
+        moveBack(entity, arena.confine(entity.position(), zone, CONFINE_BUFFER));
+    }
+
     /**
-     * 夾一隻非玩家的生物。
+     * 把一隻非玩家的生物挪到 {@code corrected}；傳 null ＝ 它本來就在範圍內，不要動。
      *
-     * <p>夾完要把速度歸零：被擊退推出界的那一下帶著動量，只改位置的話下一 tick 又會衝出去，
+     * <p>挪完要把速度歸零：被擊退推出界的那一下帶著動量，只改位置的話下一 tick 又會衝出去，
      * 看起來像在邊界上彈跳。
      */
-    private void confineCreature(LivingEntity entity, Arena.Zone zone) {
-        Vec3 corrected = arena.confine(entity.position(), zone, CONFINE_BUFFER);
+    private void moveBack(LivingEntity entity, Vec3 corrected) {
         if (corrected == null) return;
 
         entity.teleportTo(corrected.x, corrected.y, corrected.z);

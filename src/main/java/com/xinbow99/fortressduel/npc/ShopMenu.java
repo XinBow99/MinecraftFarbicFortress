@@ -177,7 +177,7 @@ public final class ShopMenu extends ChestMenu {
         String rate = String.format("%.1f", 20.0 / weapon.cooldownTicks());
         lore.add(Component.literal("傷害 " + Math.round(weapon.damage())
                         + "   每秒 " + rate + " 發"
-                        + (weapon.pellets() > 1 ? "   一次 " + weapon.pellets() + " 顆" : ""))
+                        + pelletText(weapon))
                 .withStyle(ChatFormatting.AQUA));
 
         // 四種建材全列：穿甲彈這種「只剋一種材質」的武器，少列一種就看不出它剋的是誰
@@ -195,6 +195,14 @@ public final class ShopMenu extends ChestMenu {
             lore.add(Component.literal("濺射半徑 " + weapon.splashRadius() + " 格")
                     .withStyle(ChatFormatting.DARK_AQUA));
         }
+    }
+
+    /** 「一次 6~7 顆」那一段。單發武器不顯示——那是散彈才有的軸。 */
+    private static String pelletText(WeaponDef weapon) {
+        if (weapon.pelletsMax() <= 1) return "";
+        return weapon.pelletsMax() > weapon.pellets()
+                ? "   一次 " + weapon.pellets() + "~" + weapon.pelletsMax() + " 顆"
+                : "   一次 " + weapon.pellets() + " 顆";
     }
 
     private static String shotsAgainst(WeaponDef weapon, Block block,

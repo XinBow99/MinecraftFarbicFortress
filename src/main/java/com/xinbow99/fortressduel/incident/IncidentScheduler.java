@@ -136,9 +136,54 @@ public final class IncidentScheduler {
                 // 公告已經在 announce 做完了，沒有額外效果
             }
             case "spawn_mobs" -> spawnMobs(duel, incident);
+            case "raid" -> raid(duel, incident);
             case "meteor" -> meteorShower(duel, incident);
+            case "modifier" -> applyModifier(duel, incident);
             default -> FortressDuel.LOGGER.warn("Incident {} uses action '{}' which is not implemented yet",
                     incident.id(), incident.action());
+        }
+    }
+
+    /**
+     * 有時限的全域修正：低重力、銅牆鐵壁、火力全開。
+     *
+     * <p>效果本身由 {@link Duel} 持有（那是「這一場現在的規則」），這裡只負責把設定翻譯過去。
+     */
+    private void applyModifier(Duel duel, IncidentDef incident) {
+        if (incident.modifier().isBlank()) {
+            FortressDuel.LOGGER.warn("Incident {} uses action 'modifier' but has no modifier field", incident.id());
+            return;
+        }
+        duel.applyModifier(incident.modifier(), incident.displayName(),
+                incident.factor(), incident.durationSeconds() * 20);
+    }
+
+    /**
+     * 在**雙方各自的熊貓圈旁邊**放一批怪，而不是中場。
+     *
+     * <p>跟 {@code spawn_mobs} 的差別就是落點，而落點決定了它是什麼樣的事件：中場的怪是
+     * 雙方要搶的**收入**，家裡的怪是你自己要處理的**麻煩**。兩邊同時放，所以它仍然對稱。
+     *
+     * <p>{@code arena.creatures_roam_freely} 開著時牠們不會被鎖在生成的那一側，會追著人跑，
+     * 所以有機會晃到對面去。起點對稱、而且牠們追的是最近的玩家，所以那是浮動不是不公平。
+     */
+    private void raid(Duel duel, IncidentDef incident) {
+        ServerLevel level = duel.arena().level();
+        BlockPos[] pens = {duel.arena().penA(), duel.arena().penB()};
+        // 散在圈外一點：直接生在柵欄裡的話牠們會卡在熊貓中間，玩家不敢開火
+        int spread = Math.max(3, config.settings().penRadius() + 3);
+
+        for (String mobId : incident.mobs()) {
+            MobDef def = config.mobs().byId(mobId);
+            if (def == null) {
+                FortressDuel.LOGGER.warn("Incident {} references mob '{}' which is not defined in mobs.yml",
+                        incident.id(), mobId);
+                continue;
+            }
+            for (BlockPos pen : pens) {
+                if (pen == null) continue;
+                MobSpawner.spawnPack(level, def, pen, spread, skills);
+            }
         }
     }
 

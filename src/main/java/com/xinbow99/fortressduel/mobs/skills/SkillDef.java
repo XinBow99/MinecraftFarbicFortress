@@ -27,6 +27,17 @@ public record SkillDef(
         double intervalSeconds,
         /** trigger = ON_LOW_HEALTH 時的血量門檻（佔血量上限的比例）。 */
         double healthThreshold,
+        /**
+         * 一隻怪一輩子只發動這個技能一次。
+         *
+         * <p>跟冷卻是兩回事：冷卻只是「等一下再來」，時間到了還能再發動一次。分身這種會
+         * 增加實體數量的技能只有冷卻擋不住——一隻血厚的怪被持續射擊，每過一次冷卻就多兩隻，
+         * 一場下來會把場面淹掉。
+         *
+         * <p>{@code ON_LOW_HEALTH} 永遠是 once，不管這裡寫什麼：殘血是一個持續狀態，
+         * 不鎖的話殘血之後每挨一下都會再觸發一次。
+         */
+        boolean once,
         /** 發動時給雙方看的訊息；空字串 ＝ 不公告。 */
         String message,
         /** 各 type 自己解讀的參數。 */
@@ -49,6 +60,7 @@ public record SkillDef(
                 YamlConfig.d(section, "cooldown_seconds", 0.0),
                 YamlConfig.d(section, "interval_seconds", 10.0),
                 YamlConfig.d(section, "health_threshold", 0.3),
+                YamlConfig.bool(section, "once", false),
                 YamlConfig.str(section, "message", ""),
                 params);
     }

@@ -33,9 +33,17 @@ final class Projectile {
      * 留著倍率才能讓那些計算照原本的順序疊上去。
      */
     final double damageScale;
+    /**
+     * 開火那一刻的全域修正（低重力、火力全開），見 {@link Duel#modifierFactor}。
+     *
+     * <p>寫進彈丸而不是每 tick 去問對戰：效果在飛行途中結束時，已經射出去的那一發應該
+     * 照它離手時的規則走完。一顆飛到一半忽然開始正常下墜的彈丸，玩家只會覺得是 bug。
+     */
+    final double gravityScale;
+    final double damageBoost;
 
     Projectile(WeaponDef weapon, Duel duel, ServerPlayer shooter, Vec3 pos, Vec3 velocity,
-               double damageScale) {
+               double damageScale, double gravityScale, double damageBoost) {
         this.weapon = weapon;
         this.duel = duel;
         this.shooterId = shooter.getUUID();
@@ -43,17 +51,19 @@ final class Projectile {
         this.pos = pos;
         this.velocity = velocity;
         this.damageScale = damageScale;
+        this.gravityScale = gravityScale;
+        this.damageBoost = damageBoost;
         this.ticksLeft = weapon.lifetimeTicks();
     }
 
-    /** 這一發的實際傷害（已含蓄力倍率）。 */
+    /** 這一發的實際傷害（已含蓄力倍率與開火時的全域修正）。 */
     double damage() {
-        return weapon.damage() * damageScale;
+        return weapon.damage() * damageScale * damageBoost;
     }
 
-    /** 這一發對方塊的實際傷害（已含蓄力倍率）。 */
+    /** 這一發對方塊的實際傷害（已含蓄力倍率與開火時的全域修正）。 */
     double damageVsBlock() {
-        return weapon.damageVsBlock() * damageScale;
+        return weapon.damageVsBlock() * damageScale * damageBoost;
     }
 
     /** 這一 tick 的終點（還沒考慮碰撞）。 */
@@ -65,7 +75,7 @@ final class Projectile {
     void advance() {
         pos = pos.add(velocity);
         if (weapon.gravity() != 0) {
-            velocity = velocity.subtract(0, weapon.gravity(), 0);
+            velocity = velocity.subtract(0, weapon.gravity() * gravityScale, 0);
         }
         ticksLeft--;
         if (ticksLeft <= 0) {

@@ -75,6 +75,16 @@ public final class WeaponSystem {
     private static final double CHARGE_SPEED_FLOOR = 0.35;
     /** 空弓的傷害下限（滿傷的幾成）。 */
     private static final double CHARGE_DAMAGE_FLOOR = 0.3;
+    /**
+     * 一顆彈丸一 tick 最多畫幾顆軌跡粒子。
+     *
+     * <p>每一顆粒子都是一個廣播封包，而軌跡是「一格一顆」——雷射一 tick 飛 20 格，
+     * 每秒 10 發，光它一把就是每秒六百個封包。上限 12 之後雷射的粒子間距變成 1.7 格，
+     * 看起來仍然是一條線（end_rod 的粒子本來就比一格大），封包量少四成。
+     *
+     * <p>其餘八把武器一 tick 都飛不到 12 格，所以這條上限只作用在雷射身上。
+     */
+    private static final int TRAIL_MAX_STEPS = 12;
 
     private final ConfigManager config;
     private final DuelManager duels;
@@ -427,10 +437,19 @@ public final class WeaponSystem {
                 ? CHARGE_DAMAGE_FLOOR + (1 - CHARGE_DAMAGE_FLOOR) * power
                 : 1.0;
 
-        for (int i = 0; i < weapon.pellets(); i++) {
+        // 開火那一刻的全域修正（低重力、火力全開）寫進彈丸，見 Projectile.gravityScale
+        double gravityScale = duel.modifierFactor(Duel.MOD_GRAVITY);
+        double damageBoost = duel.modifierFactor(Duel.MOD_WEAPON_DAMAGE);
+
+        // 顆數每一發重抽：散彈的手感有一半來自「這一發到底打出去多少」不是固定的
+        int pellets = weapon.pellets() + (weapon.pelletsMax() > weapon.pellets()
+                ? level.getRandom().nextInt(weapon.pelletsMax() - weapon.pellets() + 1)
+                : 0);
+
+        for (int i = 0; i < pellets; i++) {
             Vec3 direction = applySpread(level, look, spread);
             projectiles.add(new Projectile(weapon, duel, player, origin,
-                    direction.scale(speed), damageScale));
+                    direction.scale(speed), damageScale, gravityScale, damageBoost));
         }
 
         SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(weapon.fireSound());
@@ -577,8 +596,9 @@ public final class WeaponSystem {
 
     private void trail(ServerLevel level, Projectile projectile, Vec3 from, Vec3 to) {
         ParticleOptions particle = particle(projectile.weapon);
-        // 一格一顆：速度快的武器（雷射一 tick 飛 20 格）也要畫成一條連續的線，不是一串點
-        int steps = Math.max(1, (int) from.distanceTo(to));
+        // 一格一顆，畫成連續的線而不是一串點。但上限 TRAIL_MAX_STEPS——
+        // 每一顆粒子都是一個廣播封包，而雷射一 tick 飛 20 格
+        int steps = Math.clamp((long) from.distanceTo(to), 1, TRAIL_MAX_STEPS);
         for (int i = 0; i < steps; i++) {
             Vec3 point = from.lerp(to, (double) i / steps);
             level.sendParticles(particle, point.x, point.y, point.z, 1, 0, 0, 0, 0);
@@ -695,6 +715,9 @@ public final class WeaponSystem {
         if (damage <= 0 || !projectile.weapon.breaksBlocks()) return false;
 
         Duel duel = projectile.duel;
+        // 銅牆鐵壁：在命中這一刻才查，因為它是「這面牆現在多耐打」而不是「這一發多用力」
+        damage *= duel.modifierFactor(Duel.MOD_BLOCK_DAMAGE);
+        if (damage <= 0) return false;
         Region region = duel.arena().region();
         if (!region.contains(pos)) return false;
 
