@@ -2,6 +2,7 @@ package com.xinbow99.fortressduel.mobs.entity;
 
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
+import com.xinbow99.fortressduel.util.Ground;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -16,7 +17,6 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -97,11 +97,11 @@ public final class MobSpawner {
         return types.getLast();
     }
 
+    /** 在 center 附近隨機挑一格地面。走 {@link Ground} 而不是直接問 heightmap——理由見那裡。 */
     private static BlockPos scatter(ServerLevel level, BlockPos center, int spread) {
         int x = center.getX() + level.getRandom().nextInt(spread * 2 + 1) - spread;
         int z = center.getZ() + level.getRandom().nextInt(spread * 2 + 1) - spread;
-        int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-        return new BlockPos(x, y, z);
+        return Ground.onSurface(level, x, z);
     }
 
     // ---------- 屬性（技能也會用到，所以是 public） ----------
