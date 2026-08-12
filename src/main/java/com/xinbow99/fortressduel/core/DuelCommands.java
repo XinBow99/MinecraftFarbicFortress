@@ -33,6 +33,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
 
 /**
  * {@code /duel} 指令。
@@ -131,7 +132,7 @@ public final class DuelCommands {
     }
 
     /**
-     * 清掉附近殘留的競技場框線。
+     * 清掉附近殘留的競技場框線，以及事件留下來的怪。
      *
      * <p>需要它的原因是快照只活在記憶體裡：伺服器被硬砍（或在 SERVER_STOPPING 的處理加進去
      * 之前關掉）時，{@code Duel.finish} 沒跑到，那圈屏障牆就永遠留在世界上了。而屏障是
@@ -139,6 +140,10 @@ public final class DuelCommands {
      *
      * <p>只清設定裡的 {@code arena.border_block}（預設屏障），不碰別的方塊：柵欄與木板平台
      * 至少看得見，玩家自己拆得掉；而屏障在生存模式是拆不掉的，只有這條路。
+     *
+     * <p>怪的情況完全一樣、而且更糟：牠們被 {@code setPersistenceRequired()} 標記成不會自然
+     * 消失，正常結束時由 {@code IncidentScheduler} 收掉，但那條路沒跑到的話牠們就永久留著。
+     * 標籤跟著實體寫進 NBT，所以重啟之後仍然認得出來——這正是最需要它的時候。
      */
     private int cleanup(CommandContext<CommandSourceStack> ctx, int radius) {
         CommandSourceStack source = ctx.getSource();
@@ -172,8 +177,15 @@ public final class DuelCommands {
             }
         }
 
+        // 怪用同一個半徑，垂直則放到剛才算出來的整段：飛行的怪停在框線頂端上方時
+        // 仍然在這個範圍裡。篩選條件是標籤不是位置，所以掃寬一點不會誤傷玩家自己的動物
+        int mobs = MobSpawner.clearIn(level, new AABB(
+                center.getX() - radius, minY, center.getZ() - radius,
+                center.getX() + radius + 1.0, maxY + 1.0, center.getZ() + radius + 1.0));
+
         int total = removed;
-        source.sendSuccess(() -> Msg.good("清掉了 " + total + " 格殘留的框線（半徑 " + radius + "）。"), true);
+        source.sendSuccess(() -> Msg.good("清掉了 " + total + " 格殘留的框線與 " + mobs
+                + " 隻殘留的怪（半徑 " + radius + "）。"), true);
         return total;
     }
 

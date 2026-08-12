@@ -16,7 +16,9 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.level.entity.EntityTypeTest;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.AABB;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,7 +32,38 @@ import java.util.List;
  */
 public final class MobSpawner {
 
+    /**
+     * 掛在每一隻本 mod 生成的怪身上的計分板標籤，用來在對戰結束時把牠們認出來收掉。
+     *
+     * <p>為什麼需要標籤而不是直接掃範圍內的生物：競技場蓋在正常的世界裡，範圍內本來就可能
+     * 有玩家自己養的動物、或路過的原版怪。全掃的話對戰結束會順手殺掉不屬於這場對戰的東西，
+     * 那比留下殘留更糟。
+     *
+     * <p>用計分板標籤而不是自己記一份 UUID 清單，是因為它跟著實體寫進 NBT：伺服器重啟或
+     * 對戰因為當機而沒跑完 {@code finish} 時，這些怪仍然認得出來，{@code /duel cleanup}
+     * 才有辦法補收。記在記憶體裡的清單一重啟就沒了，而那正是最需要它的時候。
+     */
+    public static final String DUEL_MOB_TAG = "fortressduel_mob";
+
     private MobSpawner() {}
+
+    /**
+     * 把某個範圍內所有本 mod 生成的怪收掉，回傳收了幾隻。
+     *
+     * <p>只收帶著 {@link #DUEL_MOB_TAG} 的，所以玩家的牛、路過的殭屍都不會被波及。
+     *
+     * <p>用範圍掃描而不是逐一記帳，理由跟 {@code IncidentScheduler.clearMeteors} 一樣：
+     * 怪會走動、會被打飛、會分身出新的個體，記帳容易漏，而這是一場對戰只做一次的事。
+     */
+    public static int clearIn(ServerLevel level, AABB box) {
+        int cleared = 0;
+        for (Entity entity : level.getEntities(EntityTypeTest.forClass(Entity.class), box,
+                e -> e.entityTags().contains(DUEL_MOB_TAG))) {
+            entity.discard();
+            cleared++;
+        }
+        return cleared;
+    }
 
     /**
      * 在 center 附近散開生成一群，並掛上牠的技能。
@@ -113,6 +146,10 @@ public final class MobSpawner {
         if (living instanceof Mob mob) {
             mob.setPersistenceRequired();
         }
+        // 上一行關掉了自然消失，所以牠們**只能**靠對戰結束時的清理離開世界。標籤打在這裡而不是
+        // spawnPack，是因為分身走的是 clone 那條路、不經過 spawnPack，但兩條路都會呼叫 applyStats
+        // ——這是唯一同時涵蓋兩者的地方。少打一隻的代價就是那隻永久留在世界上。
+        living.addTag(DUEL_MOB_TAG);
         setMaxHealth(living, (float) def.health());
         set(living, Attributes.ATTACK_DAMAGE, def.attackDamage());
         set(living, Attributes.MOVEMENT_SPEED, def.movementSpeed());
