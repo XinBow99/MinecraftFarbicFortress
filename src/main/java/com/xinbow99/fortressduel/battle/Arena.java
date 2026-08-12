@@ -212,8 +212,25 @@ public final class Arena {
         return new BlockPos(x, y, z);
     }
 
-    private static int surfaceY(ServerLevel level, int x, int z) {
-        return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+    /**
+     * 這一欄的「地面上方第一格」——也就是站上去的那一格。
+     *
+     * <p><b>必須無視盒子的外殼。</b>封頂之後天花板是這一欄最高的方塊，原版的 heightmap
+     * 會直接回報盒頂——熊貓圈、平台、商人、熊貓的生成點全部用這個函式找地面，所以那時候
+     * 整套東西會被蓋在天花板底下而不是玩家腳邊。
+     *
+     * <p>做法是先問 heightmap，答案落在盒子裡就直接用（絕大多數情況，也最便宜）；
+     * 答案跑到盒頂以上才往下掃，跳過那一層殼去找真正的地面。
+     */
+    private int surfaceY(ServerLevel level, int x, int z) {
+        int fromHeightmap = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        if (fromHeightmap <= region.maxY()) return fromHeightmap;
+
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int y = region.maxY() - 1; y > region.minY(); y--) {
+            if (!level.getBlockState(cursor.set(x, y, z)).isAir()) return y + 1;
+        }
+        return region.minY() + 1;
     }
 
     // ---------- 建造 ----------
