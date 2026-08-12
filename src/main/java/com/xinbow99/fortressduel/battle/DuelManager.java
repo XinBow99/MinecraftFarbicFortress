@@ -62,6 +62,8 @@ public final class DuelManager {
     }
 
     public void register() {
+        // Mixin 織進原版的爆炸邏輯，沒有建構子可以注入，只能走這道靜態橋
+        ArenaGuard.install(this);
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> abortAll());
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
@@ -221,6 +223,11 @@ public final class DuelManager {
      * <p>怪物技能要用它：怪身上只有座標，不知道自己屬於哪一場，而「能不能拆這一格」
      * 是那一場的規則（框線拆不得、範圍外碰不得）。
      */
+    /** 有沒有任何對戰進行中。爆炸的熱路徑先問這個，沒有就完全不做逐格判斷。 */
+    public boolean hasActiveDuels() {
+        return !activeDuels.isEmpty();
+    }
+
     public Duel duelAt(ServerLevel level, BlockPos pos) {
         for (Duel duel : activeDuels) {
             if (duel.arena().level() == level && duel.arena().region().contains(pos)) {
@@ -386,7 +393,7 @@ public final class DuelManager {
             player.sendSystemMessage(Msg.warn("對戰期間不能挖競技場外面的方塊。"));
             return false;
         }
-        if (region.isHorizontalEdge(pos.getX(), pos.getZ())) {
+        if (region.isShell(pos)) {
             player.sendSystemMessage(Msg.warn("那是競技場的框線，拆不掉。"));
             return false;
         }

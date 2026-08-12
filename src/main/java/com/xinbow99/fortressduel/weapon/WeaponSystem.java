@@ -722,7 +722,7 @@ public final class WeaponSystem {
         if (!region.contains(pos)) return false;
 
         // 框線是場地的一部分，任何武器都拆不掉
-        if (region.isHorizontalEdge(pos.getX(), pos.getZ())) return false;
+        if (region.isShell(pos)) return false;
 
         BlockState state = level.getBlockState(pos);
         if (state.isAir() || state.liquid()) return false;

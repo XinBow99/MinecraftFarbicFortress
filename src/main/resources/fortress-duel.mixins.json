@@ -5,6 +5,7 @@
 	"mixins": [
 		"BowItemMixin",
 		"ExampleMixin",
+		"ExplosionMixin",
 		"InventoryDropMixin"
 	],
 	"injectors": {

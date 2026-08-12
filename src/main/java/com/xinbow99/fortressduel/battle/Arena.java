@@ -231,21 +231,36 @@ public final class Arena {
      */
     private void placeBorder(DuelSettings settings) {
         BlockState wall = blockState(settings.borderBlock(), Blocks.BARRIER);
+        boolean sealed = !settings.borderCapBlock().isBlank();
+        BlockState cap = sealed ? blockState(settings.borderCapBlock(), Blocks.GLASS) : null;
 
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int x = region.minX(); x <= region.maxX(); x++) {
             for (int z = region.minZ(); z <= region.maxZ(); z++) {
-                if (!region.isHorizontalEdge(x, z)) continue;
-
-                // 牆從該欄地表往下扎一格（免得地形起伏時牆底浮空）、往上長 borderHeight
-                int base = Math.clamp(surfaceY(level, x, z) - 1, region.minY(), region.maxY());
-                int top = Math.min(region.maxY(), base + settings.borderHeight());
-                for (int y = base; y <= top; y++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    snapshot.record(level, pos);
-                    level.setBlock(pos, wall, 2);
+                if (region.isHorizontalEdge(x, z)) {
+                    // 封起來的話牆從盒底長到盒頂，玩家往上爬或往下挖都看得到同一面牆。
+                    // 沒封的話沿用舊行為：從該欄地表往下扎一格（免得地形起伏時牆底浮空）、
+                    // 往上長 border_height
+                    int base = sealed ? region.minY()
+                            : Math.clamp(surfaceY(level, x, z) - 1, region.minY(), region.maxY());
+                    int top = sealed ? region.maxY()
+                            : Math.min(region.maxY(), base + settings.borderHeight());
+                    for (int y = base; y <= top; y++) {
+                        place(cursor.set(x, y, z), wall);
+                    }
+                } else if (sealed) {
+                    // 內部的欄位只鋪頂和底兩層——四面牆上面那圈已經在前一個分支蓋掉了
+                    place(cursor.set(x, region.maxY(), z), cap);
+                    place(cursor.set(x, region.minY(), z), cap);
                 }
             }
         }
+    }
+
+    private void place(BlockPos pos, BlockState state) {
+        snapshot.record(level, pos);
+        // 旗標 2 ＝ 通知客戶端但不觸發鄰居更新：一次放幾萬格，讓沙子掉下來、水流開來會爆掉
+        level.setBlock(pos, state, 2);
     }
 
     /**
@@ -337,7 +352,7 @@ public final class Arena {
      */
     public boolean isBuilt(BlockPos pos) {
         if (!region.contains(pos)) return false;
-        if (region.isHorizontalEdge(pos.getX(), pos.getZ())) return false;
+        if (region.isShell(pos)) return false;
 
         BlockState state = level.getBlockState(pos);
         if (state.isAir() || state.liquid()) return false;

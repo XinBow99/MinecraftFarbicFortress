@@ -21,6 +21,14 @@ public record DuelSettings(
         int arenaDepth,
         int arenaMinSeparation,
         String borderBlock,
+        /**
+         * 天花板與地板用什麼方塊；留空 ＝ 不封頂不封底（只有一圈牆）。
+         *
+         * <p>設了就是一個封閉的盒子，四面牆也跟著長到盒底與盒頂——玩家往上爬或往下挖都會
+         * 撞到同一個殼。跟牆用不同的方塊是為了視覺：紅色玻璃當天花板會把整片天空染紅。
+         */
+        String borderCapBlock,
+        /** 沒封頂時，牆從地表往上長幾格。封頂時這個值不參與（牆一律長滿整個盒子）。 */
         int borderHeight,
         boolean restoreTerrain,
         /** 競技場邊界離最外側玩家至少留幾格。 */
@@ -148,6 +156,7 @@ public record DuelSettings(
                 cfg.getInt("arena.depth", 8),
                 cfg.getInt("arena.min_separation", 24),
                 cfg.getString("arena.border_block", "minecraft:barrier"),
+                cfg.getString("arena.border_cap_block", ""),
                 cfg.getInt("arena.border_height", 32),
                 cfg.getBoolean("arena.restore_terrain", true),
                 cfg.getInt("arena.margin", 16),
