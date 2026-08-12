@@ -39,6 +39,9 @@ public final class IncidentScheduler {
     /** 隕石的初始下墜速度（格/tick）。原版 TNT 出生時是往上彈的，要覆蓋掉。 */
     private static final double METEOR_FALL_SPEED = 0.6;
 
+    /** 結束時清怪的範圍要比競技場往外放寬幾格。見 {@link #clearMobs}。 */
+    private static final double MOB_SWEEP_MARGIN = 16.0;
+
     private final ConfigManager config;
     private final SkillEngine skills;
 
@@ -55,6 +58,7 @@ public final class IncidentScheduler {
         DuelEvents.END.register((duel, result) -> {
             countdowns.remove(duel);
             clearMeteors(duel);
+            clearMobs(duel);
         });
         DuelEvents.TICK.register(this::onDuelTick);
     }
@@ -136,9 +140,54 @@ public final class IncidentScheduler {
                 // 公告已經在 announce 做完了，沒有額外效果
             }
             case "spawn_mobs" -> spawnMobs(duel, incident);
+            case "raid" -> raid(duel, incident);
             case "meteor" -> meteorShower(duel, incident);
+            case "modifier" -> applyModifier(duel, incident);
             default -> FortressDuel.LOGGER.warn("Incident {} uses action '{}' which is not implemented yet",
                     incident.id(), incident.action());
+        }
+    }
+
+    /**
+     * 有時限的全域修正：低重力、銅牆鐵壁、火力全開。
+     *
+     * <p>效果本身由 {@link Duel} 持有（那是「這一場現在的規則」），這裡只負責把設定翻譯過去。
+     */
+    private void applyModifier(Duel duel, IncidentDef incident) {
+        if (incident.modifier().isBlank()) {
+            FortressDuel.LOGGER.warn("Incident {} uses action 'modifier' but has no modifier field", incident.id());
+            return;
+        }
+        duel.applyModifier(incident.modifier(), incident.displayName(),
+                incident.factor(), incident.durationSeconds() * 20);
+    }
+
+    /**
+     * 在**雙方各自的熊貓圈旁邊**放一批怪，而不是中場。
+     *
+     * <p>跟 {@code spawn_mobs} 的差別就是落點，而落點決定了它是什麼樣的事件：中場的怪是
+     * 雙方要搶的**收入**，家裡的怪是你自己要處理的**麻煩**。兩邊同時放，所以它仍然對稱。
+     *
+     * <p>{@code arena.creatures_roam_freely} 開著時牠們不會被鎖在生成的那一側，會追著人跑，
+     * 所以有機會晃到對面去。起點對稱、而且牠們追的是最近的玩家，所以那是浮動不是不公平。
+     */
+    private void raid(Duel duel, IncidentDef incident) {
+        ServerLevel level = duel.arena().level();
+        BlockPos[] pens = {duel.arena().penA(), duel.arena().penB()};
+        // 散在圈外一點：直接生在柵欄裡的話牠們會卡在熊貓中間，玩家不敢開火
+        int spread = Math.max(3, config.settings().penRadius() + 3);
+
+        for (String mobId : incident.mobs()) {
+            MobDef def = config.mobs().byId(mobId);
+            if (def == null) {
+                FortressDuel.LOGGER.warn("Incident {} references mob '{}' which is not defined in mobs.yml",
+                        incident.id(), mobId);
+                continue;
+            }
+            for (BlockPos pen : pens) {
+                if (pen == null) continue;
+                MobSpawner.spawnPack(level, def, pen, spread, skills);
+            }
         }
     }
 
@@ -214,13 +263,34 @@ public final class IncidentScheduler {
      * 而這是一場對戰只做一次的事，掃一遍很便宜。
      */
     private void clearMeteors(Duel duel) {
-        Region region = duel.arena().region();
-        AABB box = new AABB(region.minX(), region.minY(), region.minZ(),
-                region.maxX() + 1.0, region.maxY() + 1.0, region.maxZ() + 1.0);
-
-        for (PrimedTnt tnt : duel.arena().level().getEntitiesOfClass(PrimedTnt.class, box)) {
+        for (PrimedTnt tnt : duel.arena().level().getEntitiesOfClass(PrimedTnt.class, boxOf(duel))) {
             tnt.discard();
         }
+    }
+
+    /**
+     * 對戰結束時收掉事件生出來的怪。
+     *
+     * <p>沒有這一步的話牠們會**永遠**留在世界上：{@code MobSpawner.applyStats} 會呼叫
+     * {@code setPersistenceRequired()}（不然沒有玩家在附近時原版會把牠們清掉，突發事件就變成
+     * 隨機失效），代價是自然消失這條退路也一起關掉了。所以「對戰結束時收乾淨」不是禮貌，
+     * 是關掉自然消失之後唯一剩下的出口。
+     *
+     * <p>只收帶標籤的（見 {@code MobSpawner.DUEL_MOB_TAG}），玩家自己養的動物不會被波及。
+     *
+     * <p>掃描範圍往外放寬 {@link #MOB_SWEEP_MARGIN} 格：會飛的（悅靈、漂鳥、蝙蝠）可能正好在
+     * 區域上緣外面，而 {@code arena.creatures_roam_freely} 開著時牠們也會追人追到邊上。
+     * 因為篩選條件是標籤而不是位置，放寬範圍不會誤傷任何東西——寧可掃寬一點也不要漏。
+     */
+    private void clearMobs(Duel duel) {
+        MobSpawner.clearIn(duel.arena().level(), boxOf(duel).inflate(MOB_SWEEP_MARGIN));
+    }
+
+    /** 競技場區域的碰撞箱。清隕石與清怪共用。 */
+    private static AABB boxOf(Duel duel) {
+        Region region = duel.arena().region();
+        return new AABB(region.minX(), region.minY(), region.minZ(),
+                region.maxX() + 1.0, region.maxY() + 1.0, region.maxZ() + 1.0);
     }
 
     private ServerPlayer[] playersOf(Duel duel) {

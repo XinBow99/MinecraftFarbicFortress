@@ -1,6 +1,7 @@
 package com.xinbow99.fortressduel.mobs.skills;
 
 import com.xinbow99.fortressduel.FortressDuel;
+import com.xinbow99.fortressduel.battle.Duel;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import net.minecraft.core.BlockPos;
@@ -16,6 +17,10 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * 內建的技能實作。
@@ -33,6 +38,7 @@ public final class SkillTypes {
         engine.registerType("heal", SkillTypes::heal);
         engine.registerType("teleport", SkillTypes::teleport);
         engine.registerType("effect", SkillTypes::effect);
+        engine.registerType("break_blocks", ctx -> breakBlocks(engine, ctx));
     }
 
     /**
@@ -74,6 +80,60 @@ public final class SkillTypes {
             spawned++;
         }
         return spawned > 0;
+    }
+
+    /**
+     * 啃方塊：把附近**玩家蓋的**東西拆掉。
+     *
+     * <p>params：{@code radius}（找幾格內）、{@code count}（一次最多拆幾格）、
+     * {@code max_hardness}（只啃得動硬度不超過這個值的方塊，省略 = 不限）。
+     *
+     * <p>只拆「跟開場前不一樣」的格子（見 {@code Arena.isBuilt}）——天然地形不動，框線也不動。
+     * 不然這隻怪會在中場自己挖出一個坑，看起來只是壞掉，而它的定位是「對人造物有破壞慾」。
+     *
+     * <p>{@code max_hardness} 用的是原版硬度，跟 weapons.yml 算方塊血量的是同一個數字，
+     * 所以門檻直接對應建材的價格階梯：泥土 0.5、石頭 1.5、橡木板 2.0、鐵塊 5.0、黑曜石 50。
+     * 填 2.0 就是「便宜建材啃得穿、鐵塊與黑曜石完全免疫」——貴的建材因此買到的不只是血量。
+     *
+     * <p>拆掉的格子照樣進快照的還原路徑，所以對戰結束地形會補回來；也不掉落物品，
+     * 理由跟玩家自己挖一樣——牆被拆開不該順便變成建材。
+     *
+     * <p>找不到人造物就回 false（不進冷卻）：這不是「發動了」，是「沒東西可拆」。
+     * 硬度擋下來的也算「沒東西可拆」——啃不動黑曜石的老鼠應該一直試，不是試一次就休息。
+     */
+    private static boolean breakBlocks(SkillEngine engine, SkillContext ctx) {
+        int radius = Math.max(1, ctx.skill().param("radius", 3));
+        int count = Math.max(1, ctx.skill().param("count", 2));
+        double maxHardness = ctx.skill().param("max_hardness", Double.MAX_VALUE);
+
+        LivingEntity caster = ctx.caster();
+        ServerLevel level = ctx.level();
+        BlockPos origin = caster.blockPosition();
+
+        Duel duel = engine.duels().duelAt(level, origin);
+        if (duel == null) return false;   // 不在任何競技場裡，沒有規則可以套
+
+        // 先收集再拆：邊掃邊拆會讓「已經變成空氣」的格子影響後面的判斷
+        List<BlockPos> targets = new ArrayList<>();
+        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-radius, -radius, -radius),
+                origin.offset(radius, radius, radius))) {
+            if (!duel.arena().isBuilt(pos)) continue;
+            // isBuilt 已經擋掉了硬度為負的（基岩之類），所以這裡只要比上界
+            if (level.getBlockState(pos).getDestroySpeed(level, pos) > maxHardness) continue;
+            targets.add(pos.immutable());
+        }
+        if (targets.isEmpty()) return false;
+
+        Collections.shuffle(targets, new java.util.Random(level.getRandom().nextLong()));
+        int broken = 0;
+        for (BlockPos pos : targets) {
+            if (broken >= count) break;
+            duel.arena().breakBuilt(pos);
+            // 武器系統累積的傷害要跟著忘掉，不然補一塊新的上去會繼承舊傷害
+            engine.duels().forgetBlockDamage(pos);
+            broken++;
+        }
+        return broken > 0;
     }
 
     /**

@@ -75,6 +75,16 @@ public final class WeaponSystem {
     private static final double CHARGE_SPEED_FLOOR = 0.35;
     /** 空弓的傷害下限（滿傷的幾成）。 */
     private static final double CHARGE_DAMAGE_FLOOR = 0.3;
+    /**
+     * 一顆彈丸一 tick 最多畫幾顆軌跡粒子。
+     *
+     * <p>每一顆粒子都是一個廣播封包，而軌跡是「一格一顆」——雷射一 tick 飛 20 格，
+     * 每秒 10 發，光它一把就是每秒六百個封包。上限 12 之後雷射的粒子間距變成 1.7 格，
+     * 看起來仍然是一條線（end_rod 的粒子本來就比一格大），封包量少四成。
+     *
+     * <p>其餘八把武器一 tick 都飛不到 12 格，所以這條上限只作用在雷射身上。
+     */
+    private static final int TRAIL_MAX_STEPS = 12;
 
     private final ConfigManager config;
     private final DuelManager duels;
@@ -240,24 +250,32 @@ public final class WeaponSystem {
     }
 
     /**
-     * 一格硬度 {@code hardness} 的方塊有多少血量（不含穿甲折減）。
+     * 一格 {@code block} 有多少血量（不含穿甲折減）。
      *
      * <p>商店要用它把「硬度 50」翻譯成玩家真正在乎的「血量 500」——原版硬度是「挖多久」的單位，
      * 在這個 mod 裡沒有直接意義。
      */
-    public float blockHpOf(float hardness) {
-        return blockHp(hardness, 0);
+    public float blockHpOf(Identifier block, float hardness) {
+        return blockHp(block, hardness, 0);
     }
 
     /**
-     * 這把武器要幾發才打得破一格硬度 {@code hardness} 的方塊。
+     * 這把武器要幾發才打得破一格 {@code block}（硬度 {@code hardness}）。
+     *
+     * <p>要方塊 id 而不是只要硬度：穿甲可以限定只對某幾種方塊生效（{@code pierce_blocks}），
+     * 所以「幾發打得破」不再只是硬度的函數——穿甲彈打鐵塊一發、打同硬度的別種方塊要好幾發。
      *
      * @return 打不破（傷害 0 或不破壞方塊）時回傳 -1
      */
-    public int shotsToBreak(WeaponDef weapon, float hardness) {
+    public int shotsToBreak(WeaponDef weapon, Identifier block, float hardness) {
         if (!weapon.breaksBlocks() || weapon.damageVsBlock() <= 0) return -1;
-        float hp = blockHp(hardness, weapon.pierce());
+        float hp = blockHp(block, hardness, effectivePierce(weapon, block));
         return (int) Math.ceil(hp / weapon.damageVsBlock());
+    }
+
+    /** 這一發對這種方塊實際吃得到多少穿甲。不在 {@code pierce_blocks} 名單上就是 0。 */
+    private static double effectivePierce(WeaponDef weapon, Identifier block) {
+        return weapon.piercesThrough(block) ? weapon.pierce() : 0.0;
     }
 
     /**
@@ -419,10 +437,19 @@ public final class WeaponSystem {
                 ? CHARGE_DAMAGE_FLOOR + (1 - CHARGE_DAMAGE_FLOOR) * power
                 : 1.0;
 
-        for (int i = 0; i < weapon.pellets(); i++) {
+        // 開火那一刻的全域修正（低重力、火力全開）寫進彈丸，見 Projectile.gravityScale
+        double gravityScale = duel.modifierFactor(Duel.MOD_GRAVITY);
+        double damageBoost = duel.modifierFactor(Duel.MOD_WEAPON_DAMAGE);
+
+        // 顆數每一發重抽：散彈的手感有一半來自「這一發到底打出去多少」不是固定的
+        int pellets = weapon.pellets() + (weapon.pelletsMax() > weapon.pellets()
+                ? level.getRandom().nextInt(weapon.pelletsMax() - weapon.pellets() + 1)
+                : 0);
+
+        for (int i = 0; i < pellets; i++) {
             Vec3 direction = applySpread(level, look, spread);
             projectiles.add(new Projectile(weapon, duel, player, origin,
-                    direction.scale(speed), damageScale));
+                    direction.scale(speed), damageScale, gravityScale, damageBoost));
         }
 
         SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(weapon.fireSound());
@@ -569,8 +596,9 @@ public final class WeaponSystem {
 
     private void trail(ServerLevel level, Projectile projectile, Vec3 from, Vec3 to) {
         ParticleOptions particle = particle(projectile.weapon);
-        // 一格一顆：速度快的武器（雷射一 tick 飛 20 格）也要畫成一條連續的線，不是一串點
-        int steps = Math.max(1, (int) from.distanceTo(to));
+        // 一格一顆，畫成連續的線而不是一串點。但上限 TRAIL_MAX_STEPS——
+        // 每一顆粒子都是一個廣播封包，而雷射一 tick 飛 20 格
+        int steps = Math.clamp((long) from.distanceTo(to), 1, TRAIL_MAX_STEPS);
         for (int i = 0; i < steps; i++) {
             Vec3 point = from.lerp(to, (double) i / steps);
             level.sendParticles(particle, point.x, point.y, point.z, 1, 0, 0, 0, 0);
@@ -687,6 +715,9 @@ public final class WeaponSystem {
         if (damage <= 0 || !projectile.weapon.breaksBlocks()) return false;
 
         Duel duel = projectile.duel;
+        // 銅牆鐵壁：在命中這一刻才查，因為它是「這面牆現在多耐打」而不是「這一發多用力」
+        damage *= duel.modifierFactor(Duel.MOD_BLOCK_DAMAGE);
+        if (damage <= 0) return false;
         Region region = duel.arena().region();
         if (!region.contains(pos)) return false;
 
@@ -699,7 +730,8 @@ public final class WeaponSystem {
         float hardness = state.getDestroySpeed(level, pos);
         if (hardness < 0) return false; // 基岩之類：原版就打不掉
 
-        float maxHp = blockHp(hardness, projectile.weapon.pierce());
+        Identifier blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        float maxHp = blockHp(blockId, hardness, effectivePierce(projectile.weapon, blockId));
         Map<BlockPos, Float> damageMap = blockDamage.computeIfAbsent(duel, k -> new HashMap<>());
         float accumulated = damageMap.merge(pos, (float) damage, Float::sum);
 
@@ -721,9 +753,23 @@ public final class WeaponSystem {
      *
      * <p>穿甲 1.0 會把血量壓到最低的 1 點——「完全無視硬度」，一發就破，但仍然要打中。
      */
-    private float blockHp(float hardness, double pierce) {
-        float base = Math.max(1f, hardness * (float) config.settings().blockHpPerHardness());
+    private float blockHp(Identifier block, float hardness, double pierce) {
+        float base = Math.max(1f, baseHp(block, hardness));
         return Math.max(1f, base * (float) (1.0 - pierce));
+    }
+
+    /**
+     * 一格的滿血量，還沒套穿甲。設定檔有逐方塊的覆寫就用它，否則走「硬度 × 係數」。
+     *
+     * <p>需要覆寫是因為原版硬度量的是「挖多久」而不是「多耐打」。大部分時候兩者方向一致，
+     * 但橡木板的硬度 2.0 比石頭的 1.5 高——照公式算木牆會比石牆耐打，沒有人會這樣預期，
+     * 而建材的取捨正是靠這種直覺在做的。
+     */
+    private float baseHp(Identifier block, float hardness) {
+        Double override = block == null ? null : config.settings().blockHpOverrides().get(block.toString());
+        if (override != null) return override.floatValue();
+
+        return hardness * (float) config.settings().blockHpPerHardness();
     }
 
     /**

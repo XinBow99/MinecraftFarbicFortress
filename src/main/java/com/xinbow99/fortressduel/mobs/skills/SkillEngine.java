@@ -1,6 +1,7 @@
 package com.xinbow99.fortressduel.mobs.skills;
 
 import com.xinbow99.fortressduel.FortressDuel;
+import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -38,9 +39,20 @@ public final class SkillEngine {
     private final Map<String, MobSkill> types = new HashMap<>();
     private final Map<UUID, Tracked> tracked = new HashMap<>();
 
-    public SkillEngine(ConfigManager config) {
+    /**
+     * 對戰的總管。技能要拆方塊時得先問「這一格屬於哪一場、拆不拆得動」——那是對戰的規則，
+     * 不是怪物的（見 {@code break_blocks}）。
+     */
+    private final DuelManager duels;
+
+    public SkillEngine(ConfigManager config, DuelManager duels) {
         this.config = config;
+        this.duels = duels;
         SkillTypes.registerBuiltins(this);
+    }
+
+    public DuelManager duels() {
+        return duels;
     }
 
     /** 一隻被追蹤的怪：牠的設定、連鎖深度、各技能的冷卻與「只觸發一次」的記錄。 */
@@ -161,10 +173,14 @@ public final class SkillEngine {
             if (skill.trigger() != trigger) continue;
             if (state.cooldowns.containsKey(skill.id())) continue;
 
-            if (trigger == SkillTrigger.ON_LOW_HEALTH) {
-                // 殘血技能整個生命週期只發動一次，否則殘血狀態下每挨一下就會再觸發
-                if (state.firedOnce.contains(skill.id())) continue;
-                if (entity.getHealth() > entity.getMaxHealth() * skill.healthThreshold()) continue;
+            // 一輩子只一次。殘血技能永遠算在內——殘血是持續狀態，不鎖的話每挨一下就再觸發
+            if ((skill.once() || trigger == SkillTrigger.ON_LOW_HEALTH)
+                    && state.firedOnce.contains(skill.id())) {
+                continue;
+            }
+            if (trigger == SkillTrigger.ON_LOW_HEALTH
+                    && entity.getHealth() > entity.getMaxHealth() * skill.healthThreshold()) {
+                continue;
             }
 
             if (skill.chance() < 1.0 && level.getRandom().nextDouble() > skill.chance()) continue;
@@ -197,8 +213,23 @@ public final class SkillEngine {
 
     // ---------- 工具 ----------
 
-    /** 這隻怪身上實際掛得起來的技能（設定裡寫錯 id 的會被濾掉並留下一行 log）。 */
+    /**
+     * 這隻怪身上實際掛得起來的技能（設定裡寫錯 id 的會被濾掉並留下一行 log）。
+     *
+     * <p>結果快取起來：這個方法在 tick 迴圈裡對**每一隻**怪都會呼叫一次，不快取的話
+     * 每 tick 每隻怪都會配一個新的 List 再逐個查表。場上四十隻怪就是每秒八百次無謂的配置。
+     *
+     * <p>快取的鍵是 {@link MobDef} 物件本身，而 {@code /duel reload} 會整個換掉那些物件，
+     * 所以重讀設定之後舊的 entry 只是變成垃圾，不會回傳過期的技能。用 WeakHashMap
+     * 讓它們跟著被回收。
+     */
+    private final Map<MobDef, List<SkillDef>> skillCache = new java.util.WeakHashMap<>();
+
     private List<SkillDef> skillsOf(MobDef def) {
+        return skillCache.computeIfAbsent(def, this::resolveSkills);
+    }
+
+    private List<SkillDef> resolveSkills(MobDef def) {
         List<SkillDef> out = new ArrayList<>(def.skills().size());
         for (String id : def.skills()) {
             SkillDef skill = config.skills().byId(id);
@@ -208,7 +239,7 @@ public final class SkillEngine {
             }
             out.add(skill);
         }
-        return out;
+        return List.copyOf(out);
     }
 
     private LivingEntity findEntity(MinecraftServer server, UUID id) {

@@ -19,10 +19,21 @@ public record IncidentDef(
         String description,
         /** 抽中這個事件的相對權重。 */
         double weight,
-        /** 效果種類：spawn_mobs / meteor / message。 */
+        /** 效果種類：spawn_mobs / raid / meteor / modifier / message。 */
         String action,
-        /** action ＝ spawn_mobs 時要生成的怪物 id（對應 mobs.yml）。 */
+        /** action ＝ spawn_mobs（生在中場）或 raid（生在雙方玩家區塊）時要生成的怪物 id。 */
         List<String> mobs,
+
+        // ---- action ＝ modifier 專用 ----
+        /**
+         * 要改的東西：{@code gravity}／{@code weapon_damage}／{@code block_damage}，
+         * 對應 {@link com.xinbow99.fortressduel.battle.Duel} 的 MOD_* 常數。
+         */
+        String modifier,
+        /** 倍率。0.5 ＝ 減半，1.5 ＝ 增加五成。 */
+        double factor,
+        /** 持續幾秒。 */
+        int durationSeconds,
 
         // ---- action ＝ meteor 專用 ----
         /** 每一方的頭上各落幾顆。 */
@@ -56,6 +67,9 @@ public record IncidentDef(
                 YamlConfig.d(section, "weight", 1.0),
                 YamlConfig.str(section, "action", "message"),
                 mobs,
+                YamlConfig.str(section, "modifier", ""),
+                YamlConfig.d(section, "factor", 1.0),
+                Math.max(1, YamlConfig.i(section, "duration_seconds", 60)),
                 Math.max(1, YamlConfig.i(section, "meteor_count", 10)),
                 Math.max(1, YamlConfig.i(section, "meteor_height", 26)),
                 Math.max(0, YamlConfig.i(section, "meteor_spread", 8)),

@@ -10,7 +10,12 @@
 #   action            效果種類：
 #                       message     只公告，沒有其他效果
 #                       spawn_mobs  在場中央生成 mobs 列出的怪
+#                       raid        在**雙方各自的熊貓圈旁邊**放一批怪（家裡的麻煩）
 #                       meteor      在雙方的熊貓圈上方落下一批已點燃的 TNT
+#                       modifier    有時限的全域修正（重力／武器傷害／方塊受到的傷害）
+#   modifier            action = modifier 時要改什麼：gravity / weapon_damage / block_damage
+#   factor              倍率。0.5 = 減半，1.5 = 增加五成
+#   duration_seconds    修正持續幾秒
 #   mobs              action = spawn_mobs 時要生成哪幾種（對應 mobs.yml 的 id）
 #   meteor_count      action = meteor 時，每一方的頭上各落幾顆
 #   meteor_height     從熊貓圈上方幾格落下
@@ -23,8 +28,8 @@
 #   music_volume      音量倍率，預設 1.0
 #   music_pitch       音高倍率，預設 1.0（0.5 = 低一個八度，聽起來更沉）
 #
-# 尚未實作：持續型事件（低重力、銅牆鐵壁、火力全開那種「持續 N 秒」的效果）還沒有
-# 對應的機制，所以也沒有 duration 欄位。它們目前都是 action: message，只會公告。
+# action: message 是「只公告、沒有效果」。現在沒有事件在用它——留著是因為做新事件的時候
+# 先寫 message 版本、確認公告與音效的感覺對了再接效果，是個方便的中間狀態。
 #
 # 想放自己的音樂：把 ogg 放進資源包的 assets/<namespace>/sounds/，在 sounds.json 註冊一個
 # 事件名，這裡就填那個 id。原版可用的例如：
@@ -36,11 +41,11 @@
 incidents:
   dungeon:
     name: 隱藏副本
-    description: 中場湧出一大群蟲群，先搶先贏。
+    description: 中場湧出一群雜七雜八的野獸，先搶先贏。
     weight: 15
     action: spawn_mobs
     mobs: [swarm]
-    music: minecraft:entity.silverfish.ambient
+    music: minecraft:entity.polar_bear.ambient
 
   ground_horde:
     name: 土偶大軍
@@ -69,7 +74,7 @@ incidents:
 
   eclipse:
     name: 蝕世之影
-    description: 它對人沒興趣，但對人造物有無法抑制的破壞慾。
+    description: 它們對人沒興趣，但對人造物有無法抑制的破壞慾——牆會被一格一格啃掉。
     weight: 5
     action: spawn_mobs
     mobs: [eclipse]
@@ -104,28 +109,78 @@ incidents:
     music: minecraft:entity.generic.explode
     music_pitch: 0.5
 
-  # ---- 以下的效果還沒實作，目前只會公告（action: message）----
+  # ---- 有時限的全域修正（action: modifier）----
+  #
+  # modifier 指定改什麼、factor 是倍率、duration_seconds 是持續多久：
+  #
+  #   gravity        彈丸重力        開火那一刻決定
+  #   weapon_damage  武器傷害        開火那一刻決定
+  #   block_damage   方塊受到的傷害   **命中那一刻**決定
+  #
+  # 前兩個寫進彈丸、最後一個在命中時才查，這個分界是刻意的：前兩個是「這一發打得多用力」，
+  # 屬於子彈；最後一個是「這面牆多耐打」，屬於牆。效果在彈丸飛到一半時結束的話，這樣才
+  # 不會出現「射出去的東西忽然改變物理」那種看起來像 bug 的畫面。
+  #
+  # 60 秒是照攻擊階段的長度設的。事件每 120 秒抽一次而且不管當下是哪個階段，所以這個長度
+  # 保證它至少涵蓋一段攻擊階段的一部分——完全落在建造階段的話前半段確實會浪費掉。
+  #
+  # 同一種修正再抽到一次是整個換掉、不是相乘：兩次低重力疊成 0.25 倍重力沒有人預期得到
 
   low_gravity:
     name: 低重力
     description: 這段時間重力減半，彈道又高又遠。
     weight: 5
-    action: message
+    action: modifier
+    modifier: gravity
+    factor: 0.5
+    duration_seconds: 60
+    music: minecraft:block.beacon.activate
+    music_pitch: 1.4
 
   fortify:
     name: 銅牆鐵壁
     description: 這段時間所有方塊受到的傷害減半。
     weight: 5
-    action: message
+    action: modifier
+    modifier: block_damage
+    factor: 0.5
+    duration_seconds: 60
+    music: minecraft:block.anvil_use
+    music_pitch: 0.7
 
   rampage:
     name: 火力全開
     description: 這段時間所有武器傷害 ×1.5。
     weight: 5
-    action: message
+    action: modifier
+    modifier: weapon_damage
+    factor: 1.5
+    duration_seconds: 60
+    music: minecraft:entity.blaze.shoot
+    music_pitch: 0.8
 
+  # ---- 家裡的麻煩（action: raid）----
+  #
+  # 跟 spawn_mobs 的差別只有落點，而落點就是這個事件的全部意義：中場的怪是雙方要搶的
+  # **收入**，生在自己熊貓圈旁邊的怪是你自己要處理的**麻煩**。兩邊同時放，所以起點對稱。
+  #
+  # duel.yml 的 arena.creatures_roam_freely 開著時牠們不會被鎖在生成的那一側，會追著人跑，
+  # 所以真的會有幾隻晃到對面去。那是可以接受的浮動——牠們追的是最近的玩家，多數還是留在原地。
+  #
+  # 黑鼠是 mobs.yml 裡唯一敵對的一種：牠一生出來就往人走。中場那些是被動或中立的，要你先
+  # 動手才會理你；這裡要的效果剛好相反，就是要逼你放下手上的工事回頭處理
+  #
+  # 這個事件問的問題跟其他事件都不一樣：不是「你的牆有多少血」，是「你的牆是什麼做的」。
+  # 黑鼠的「鼠嚙」有硬度上限 2.0（見 skills.yml），泥土、木板、石頭啃得穿，鐵塊與黑曜石
+  # 完全免疫。所以省錢用木板圍一大圈的人這一輪會被咬出好幾個洞，而把錢花在好料上的人
+  # 只會看到一群老鼠在牆上爬來爬去卻毫無進展——那個對比就是這個事件的全部內容。
+  #
+  # 會爬牆所以「蓋高」不是解法，跟悅靈會飛是同一類的設計：純粹加高度不該解得掉任何事件。
   plague:
     name: 鼠疫
     description: 一大群黑老鼠沿著牆往上啃，薄材料會被啃穿。
     weight: 5
-    action: message
+    action: raid
+    mobs: [vermin]
+    music: minecraft:entity.spider.ambient
+    music_pitch: 1.6

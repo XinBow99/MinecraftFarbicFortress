@@ -4,8 +4,10 @@ import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.util.YamlConfig;
 import net.minecraft.resources.Identifier;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 一種武器的設定，對應 weapons.yml 裡的一個區段。
@@ -26,6 +28,14 @@ public record WeaponDef(
         double splashRadius,
         /** 穿甲：0~1。1 ＝ 完全無視方塊硬度。 */
         double pierce,
+        /**
+         * 穿甲只對這幾種方塊生效。空的 ＝ 對所有方塊生效（穿甲是一個泛用屬性）。
+         *
+         * <p>這是「剋制」與「泛用」的分界。穿甲彈填 {@code [minecraft:iron_block]} 之後，
+         * 它對鐵塊一發一格、對石頭與黑曜石只剩自己那點基礎傷害——一把專門的破甲彈，
+         * 而不是一把「什麼牆都一發」的萬用解。狙擊與導彈的穿甲維持泛用（留空）。
+         */
+        Set<Identifier> pierceBlocks,
         /** 命中生物時推開多遠（格/tick 的速度增量）。0 ＝ 不推。 */
         double knockback,
         /** 力道曲線。 */
@@ -38,8 +48,15 @@ public record WeaponDef(
         boolean chargeAffectsDamage,
         /** 力道要不要影響散佈（滿弓最準）。 */
         boolean chargeAffectsSpread,
-        /** 一次擊發幾顆（散彈用）。 */
+        /** 一次擊發至少幾顆（散彈用）。 */
         int pellets,
+        /**
+         * 一次擊發最多幾顆。跟 {@link #pellets} 相同 ＝ 固定顆數。
+         *
+         * <p>有範圍是為了散彈那種「每一發的彈著都不一樣」的手感：固定顆數時彈著雖然隨機，
+         * 但「這一發有多少火力」是恆定的，打起來比較像一把數值穩定的槍而不是霰彈。
+         */
+        int pelletsMax,
         /** 散佈：以視線為軸的圓錐半頂角（度）。0 ＝ 完全不散。 */
         double spreadDegrees,
         /** 後座力：每擊發一次，散佈額外增加幾度。 */
@@ -98,6 +115,7 @@ public record WeaponDef(
     public static WeaponDef from(String id, Map<String, Object> section) {
         double damage = YamlConfig.d(section, "damage", 1.0);
         double spread = YamlConfig.d(section, "spread_degrees", 0.0);
+        int pellets = Math.max(1, YamlConfig.i(section, "pellets", 1));
 
         Map<String, Object> charge = section.get("charge") instanceof Map<?, ?> map
                 ? castCharge(map) : Map.of();
@@ -114,6 +132,7 @@ public record WeaponDef(
                 damage,
                 YamlConfig.d(section, "splash_radius", 0.0),
                 Math.clamp(YamlConfig.d(section, "pierce", 0.0), 0.0, 1.0),
+                pierceBlocks(section, id),
                 // 預設值跟著傷害走，這樣既有的 weapons.yml（沒有這個欄位）也會有力道感——
                 // 設定檔是整份複製出去的、不會事後補鍵，預設 0 等於要玩家刪檔才吃得到這個功能
                 Math.max(0, YamlConfig.d(section, "knockback", damage * KNOCKBACK_PER_DAMAGE)),
@@ -122,7 +141,8 @@ public record WeaponDef(
                 affects.contains("speed"),
                 affects.contains("damage"),
                 affects.contains("spread"),
-                Math.max(1, YamlConfig.i(section, "pellets", 1)),
+                pellets,
+                Math.max(pellets, YamlConfig.i(section, "pellets_max", pellets)),
                 spread,
                 // 跟 knockback 同樣的理由：既有的設定檔沒有這些鍵，預設 0 等於要玩家刪檔
                 // 才吃得到後座力。用基礎散佈推一個——本來就不準的槍，連射時散得更快
@@ -170,6 +190,36 @@ public record WeaponDef(
     @SuppressWarnings("unchecked")
     private static Map<String, Object> castCharge(Map<?, ?> map) {
         return (Map<String, Object>) map;
+    }
+
+    /**
+     * 讀 {@code pierce_blocks}。沒寫或寫成空的 ＝ 空集合 ＝ 穿甲對所有方塊生效。
+     *
+     * <p>「沒寫等於全部」而不是「沒寫等於都不」：這個欄位是後來加的，既有的設定檔不會被補鍵
+     * （見 {@code YamlConfig}），預設成「都不」的話所有武器的穿甲會在升級後靜默失效。
+     */
+    private static Set<Identifier> pierceBlocks(Map<String, Object> section, String weaponId) {
+        if (!(section.get("pierce_blocks") instanceof List<?> list)) return Set.of();
+
+        Set<Identifier> blocks = new LinkedHashSet<>();
+        for (Object raw : list) {
+            try {
+                blocks.add(Identifier.parse(String.valueOf(raw)));
+            } catch (Exception e) {
+                FortressDuel.LOGGER.warn("Weapon {} has an unparsable pierce_blocks entry '{}', ignoring it",
+                        weaponId, raw);
+            }
+        }
+        return blocks;
+    }
+
+    /**
+     * 這一發的穿甲吃不吃得到這種方塊。
+     *
+     * @param block 方塊的註冊 id
+     */
+    public boolean piercesThrough(Identifier block) {
+        return pierceBlocks.isEmpty() || pierceBlocks.contains(block);
     }
 
     /**

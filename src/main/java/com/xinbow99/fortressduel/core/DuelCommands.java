@@ -1,6 +1,11 @@
 package com.xinbow99.fortressduel.core;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -28,6 +33,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
 
 /**
  * {@code /duel} 指令。
@@ -115,9 +121,72 @@ public final class DuelCommands {
                         .then(Commands.argument("incident", StringArgumentType.word())
                                 .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
                                         config.incidents().all().stream().map(IncidentDef::id), builder))
-                                .executes(this::incident)));
+                                .executes(this::incident)))
+                .then(Commands.literal("cleanup")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(ctx -> cleanup(ctx, 64))
+                        .then(Commands.argument("radius", IntegerArgumentType.integer(1, 256))
+                                .executes(ctx -> cleanup(ctx, IntegerArgumentType.getInteger(ctx, "radius")))));
 
         dispatcher.register(root);
+    }
+
+    /**
+     * 清掉附近殘留的競技場框線，以及事件留下來的怪。
+     *
+     * <p>需要它的原因是快照只活在記憶體裡：伺服器被硬砍（或在 SERVER_STOPPING 的處理加進去
+     * 之前關掉）時，{@code Duel.finish} 沒跑到，那圈屏障牆就永遠留在世界上了。而屏障是
+     * **看不見的**——玩家只會發現「這裡有一道打不穿的空氣牆」，連要清什麼都不知道。
+     *
+     * <p>只清設定裡的 {@code arena.border_block}（預設屏障），不碰別的方塊：柵欄與木板平台
+     * 至少看得見，玩家自己拆得掉；而屏障在生存模式是拆不掉的，只有這條路。
+     *
+     * <p>怪的情況完全一樣、而且更糟：牠們被 {@code setPersistenceRequired()} 標記成不會自然
+     * 消失，正常結束時由 {@code IncidentScheduler} 收掉，但那條路沒跑到的話牠們就永久留著。
+     * 標籤跟著實體寫進 NBT，所以重啟之後仍然認得出來——這正是最需要它的時候。
+     */
+    private int cleanup(CommandContext<CommandSourceStack> ctx, int radius) {
+        CommandSourceStack source = ctx.getSource();
+        ServerLevel level = source.getLevel();
+        BlockPos center = BlockPos.containing(source.getPosition());
+
+        Block border = BuiltInRegistries.BLOCK
+                .getOptional(Identifier.parse(config.settings().borderBlock()))
+                .orElse(Blocks.BARRIER);
+
+        // 垂直只掃競技場可能碰得到的那一段，不是整個世界高度。
+        //
+        // 掃全高的話一次是 (2r+1)² × 384 格：半徑 128 就是兩千五百萬次 getBlockState，
+        // 同步跑在主執行緒上會把伺服器凍住好幾秒。框線的範圍是 arena.depth 往下、
+        // arena.border_height 往上，多留 16 格緩衝就綽綽有餘
+        DuelSettings settings = config.settings();
+        int minY = Math.max(level.getMinY(), center.getY() - settings.arenaDepth() - 16);
+        int maxY = Math.min(level.getMaxY() - 1, center.getY() + settings.borderHeight() + 16);
+
+        int removed = 0;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int x = center.getX() - radius; x <= center.getX() + radius; x++) {
+            for (int z = center.getZ() - radius; z <= center.getZ() + radius; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    cursor.set(x, y, z);
+                    if (!level.getBlockState(cursor).is(border)) continue;
+                    // 旗標 2 ＝ 只通知客戶端，不觸發鄰居更新：一次清幾萬格時那個更新很貴
+                    level.setBlock(cursor, Blocks.AIR.defaultBlockState(), 2);
+                    removed++;
+                }
+            }
+        }
+
+        // 怪用同一個半徑，垂直則放到剛才算出來的整段：飛行的怪停在框線頂端上方時
+        // 仍然在這個範圍裡。篩選條件是標籤不是位置，所以掃寬一點不會誤傷玩家自己的動物
+        int mobs = MobSpawner.clearIn(level, new AABB(
+                center.getX() - radius, minY, center.getZ() - radius,
+                center.getX() + radius + 1.0, maxY + 1.0, center.getZ() + radius + 1.0));
+
+        int total = removed;
+        source.sendSuccess(() -> Msg.good("清掉了 " + total + " 格殘留的框線與 " + mobs
+                + " 隻殘留的怪（半徑 " + radius + "）。"), true);
+        return total;
     }
 
     /**
