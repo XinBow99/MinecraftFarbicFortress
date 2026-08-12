@@ -372,6 +372,23 @@ public final class Arena {
         return new Vec3(shifted.x, y, shifted.z);
     }
 
+    /**
+     * 把一個位置夾回**整座競技場**（不分區塊），同時夾進垂直範圍。
+     *
+     * <p>給「可以到處跑、但不能離場」的生物用。跟 {@link #confine} 的差別是沒有沿軸的那道
+     * 分界——牠們可以走進任何一方的陣地，只是出不去框線。
+     *
+     * <p>水平方向夾進框線**內側**：框線那一圈是實心的牆，夾到牆上的話下一 tick 又會被推出來。
+     */
+    public Vec3 confineToArena(Vec3 pos, double buffer) {
+        double x = Math.clamp(pos.x, region.minX() + 1 + buffer, region.maxX() - buffer);
+        double z = Math.clamp(pos.z, region.minZ() + 1 + buffer, region.maxZ() - buffer);
+        double y = Math.clamp(pos.y, region.minY() + 1, region.maxY() - 1);
+
+        if (x == pos.x && y == pos.y && z == pos.z) return null;
+        return new Vec3(x, y, z);
+    }
+
     public BlockPos penA() {
         return penA;
     }

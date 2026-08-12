@@ -35,6 +35,16 @@ public record DuelSettings(
          * <p>用比例而不是固定格數：玩家可能站得很近，固定寬度的中場在那種局面會把整個場地吃掉。
          */
         double neutralFraction,
+        /**
+         * 中場的怪可不可以走進玩家的陣地。
+         *
+         * <p>true ＝ 只限制「不能離開競技場」，區塊分界對牠們不生效——怪會自己送上門，也可能
+         * 自己跑掉。false ＝ 關回中場（原本的行為）。
+         *
+         * <p>玩家與熊貓**不受這個設定影響**，永遠關在自己那半場：那是三區塊限制真正要解的
+         * 問題（不能跑去對方陣地破壞），怪物待在哪裡只是附帶的。
+         */
+        boolean creaturesRoamFreely,
 
         // ---- 目標（要保護的熊貓）----
         /** 目標生物的實體 id。換成別種生物只要改這裡，不用寫 Java。 */
@@ -144,6 +154,7 @@ public record DuelSettings(
                 cfg.getInt("arena.core_offset", 3),
                 cfg.getStringList("arena.buildings"),
                 cfg.getDouble("arena.neutral_fraction", 0.3),
+                cfg.getBoolean("arena.creatures_roam_freely", true),
 
                 cfg.getString("objective.entity", "minecraft:panda"),
                 Math.max(1, cfg.getInt("objective.panda_count", 4)),

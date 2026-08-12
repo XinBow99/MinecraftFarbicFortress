@@ -164,8 +164,8 @@ public final class IncidentScheduler {
      * <p>跟 {@code spawn_mobs} 的差別就是落點，而落點決定了它是什麼樣的事件：中場的怪是
      * 雙方要搶的**收入**，家裡的怪是你自己要處理的**麻煩**。兩邊同時放，所以它仍然對稱。
      *
-     * <p>三區塊限制（見 {@code Duel.enforceZones}）會把牠們鎖在生成的那一側，所以牠們不會
-     * 跑去騷擾對手——那也是這個事件成立的前提，不然先清完的人等於幫對手清了一半。
+     * <p>{@code arena.creatures_roam_freely} 開著時牠們不會被鎖在生成的那一側，會追著人跑，
+     * 所以有機會晃到對面去。起點對稱、而且牠們追的是最近的玩家，所以那是浮動不是不公平。
      */
     private void raid(Duel duel, IncidentDef incident) {
         ServerLevel level = duel.arena().level();

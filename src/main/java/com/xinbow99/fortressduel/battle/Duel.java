@@ -931,7 +931,16 @@ public final class Duel {
         }
     }
 
-    /** 場上除了玩家與熊貓以外的活物，一律關在中場。 */
+    /**
+     * 場上除了玩家與熊貓以外的活物，不准離開競技場。
+     *
+     * <p>預設**不限制牠們待在哪一區**：中場的怪可以走進任何一方的陣地，事件放進陣地裡的怪
+     * 也可以跑到對面去。玩家與熊貓仍然各自關在自己那半場（那是 issue #5 的核心），所以
+     * 「打不到對面的人」這件事沒有變——變的只是怪會自己送上門，或自己跑掉。
+     *
+     * <p>代價要知道：牠們可能晃到某一方的陣地裡被安全地清掉，賞金因此帶一點運氣成分。
+     * 覺得太隨機就把 {@code arena.creatures_roam_freely} 關掉，牠們會被關回中場。
+     */
     private void confineBystanders() {
         ServerLevel level = arena.level();
         Region region = arena.region();
@@ -943,18 +952,25 @@ public final class Duel {
             if (sideOfGuardian(entity.getUUID()) != null) continue;
             if (entity instanceof Mob mob && mob.isNoAi()) continue;
 
-            confineCreature(entity, Arena.Zone.NEUTRAL);
+            Vec3 corrected = settings.creaturesRoamFreely()
+                    ? arena.confineToArena(entity.position(), CONFINE_BUFFER)
+                    : arena.confine(entity.position(), Arena.Zone.NEUTRAL, CONFINE_BUFFER);
+            moveBack(entity, corrected);
         }
     }
 
+    /** 夾一隻非玩家的生物回它該待的區塊。 */
+    private void confineCreature(LivingEntity entity, Arena.Zone zone) {
+        moveBack(entity, arena.confine(entity.position(), zone, CONFINE_BUFFER));
+    }
+
     /**
-     * 夾一隻非玩家的生物。
+     * 把一隻非玩家的生物挪到 {@code corrected}；傳 null ＝ 它本來就在範圍內，不要動。
      *
-     * <p>夾完要把速度歸零：被擊退推出界的那一下帶著動量，只改位置的話下一 tick 又會衝出去，
+     * <p>挪完要把速度歸零：被擊退推出界的那一下帶著動量，只改位置的話下一 tick 又會衝出去，
      * 看起來像在邊界上彈跳。
      */
-    private void confineCreature(LivingEntity entity, Arena.Zone zone) {
-        Vec3 corrected = arena.confine(entity.position(), zone, CONFINE_BUFFER);
+    private void moveBack(LivingEntity entity, Vec3 corrected) {
         if (corrected == null) return;
 
         entity.teleportTo(corrected.x, corrected.y, corrected.z);
