@@ -1,6 +1,11 @@
 package com.xinbow99.fortressduel.core;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -115,9 +120,52 @@ public final class DuelCommands {
                         .then(Commands.argument("incident", StringArgumentType.word())
                                 .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
                                         config.incidents().all().stream().map(IncidentDef::id), builder))
-                                .executes(this::incident)));
+                                .executes(this::incident)))
+                .then(Commands.literal("cleanup")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(ctx -> cleanup(ctx, 128))
+                        .then(Commands.argument("radius", IntegerArgumentType.integer(1, 512))
+                                .executes(ctx -> cleanup(ctx, IntegerArgumentType.getInteger(ctx, "radius")))));
 
         dispatcher.register(root);
+    }
+
+    /**
+     * 清掉附近殘留的競技場框線。
+     *
+     * <p>需要它的原因是快照只活在記憶體裡：伺服器被硬砍（或在 SERVER_STOPPING 的處理加進去
+     * 之前關掉）時，{@code Duel.finish} 沒跑到，那圈屏障牆就永遠留在世界上了。而屏障是
+     * **看不見的**——玩家只會發現「這裡有一道打不穿的空氣牆」，連要清什麼都不知道。
+     *
+     * <p>只清設定裡的 {@code arena.border_block}（預設屏障），不碰別的方塊：柵欄與木板平台
+     * 至少看得見，玩家自己拆得掉；而屏障在生存模式是拆不掉的，只有這條路。
+     */
+    private int cleanup(CommandContext<CommandSourceStack> ctx, int radius) {
+        CommandSourceStack source = ctx.getSource();
+        ServerLevel level = source.getLevel();
+        BlockPos center = BlockPos.containing(source.getPosition());
+
+        Block border = BuiltInRegistries.BLOCK
+                .getOptional(Identifier.parse(config.settings().borderBlock()))
+                .orElse(Blocks.BARRIER);
+
+        int removed = 0;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int x = center.getX() - radius; x <= center.getX() + radius; x++) {
+            for (int z = center.getZ() - radius; z <= center.getZ() + radius; z++) {
+                for (int y = level.getMinY(); y < level.getMaxY(); y++) {
+                    cursor.set(x, y, z);
+                    if (!level.getBlockState(cursor).is(border)) continue;
+                    // 旗標 2 ＝ 只通知客戶端，不觸發鄰居更新：一次清幾萬格時那個更新很貴
+                    level.setBlock(cursor, Blocks.AIR.defaultBlockState(), 2);
+                    removed++;
+                }
+            }
+        }
+
+        int total = removed;
+        source.sendSuccess(() -> Msg.good("清掉了 " + total + " 格殘留的框線（半徑 " + radius + "）。"), true);
+        return total;
     }
 
     /**

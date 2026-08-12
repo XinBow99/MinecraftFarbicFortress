@@ -1,5 +1,6 @@
 package com.xinbow99.fortressduel.battle;
 
+import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelSettings;
 import com.xinbow99.fortressduel.util.DuelItems;
@@ -7,6 +8,7 @@ import com.xinbow99.fortressduel.util.InventoryStash;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
@@ -61,6 +63,7 @@ public final class DuelManager {
 
     public void register() {
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> abortAll());
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> onJoin(handler.player));
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) ->
@@ -257,6 +260,29 @@ public final class DuelManager {
             });
             if (entry.getValue().isEmpty()) it.remove();
         }
+    }
+
+    /**
+     * 伺服器要關了：把還在進行的對戰全部收掉。
+     *
+     * <p>不收的話**框線那圈屏障牆會永遠留在世界上**——地形快照只活在記憶體裡，伺服器一關就
+     * 沒了，下次開機沒有任何東西知道那些方塊本來長什麼樣。而屏障是看不見的，玩家只會發現
+     * 「這裡有一道打不穿的空氣牆」，還完全不知道要怎麼清。同理熊貓、彈丸、寄放的背包。
+     *
+     * <p>擋不住 {@code kill -9}：那條路徑沒有任何程式跑得到。真的要防那種情況得把快照寫進
+     * 存檔，那是另一個層級的工程；先把「正常關機」這條最常見的路補起來。
+     */
+    private void abortAll() {
+        if (activeDuels.isEmpty()) return;
+
+        FortressDuel.LOGGER.info("Server stopping with {} duel(s) in progress, aborting them so the arenas get restored",
+                activeDuels.size());
+        // 對複本迭代：finish 會發 END 事件，各子系統在那裡動自己的表
+        for (Duel duel : List.copyOf(activeDuels)) {
+            duel.finish(Duel.Result.aborted());
+        }
+        activeDuels.clear();
+        duelsByPlayer.clear();
     }
 
     private void onDisconnect(ServerPlayer player) {
