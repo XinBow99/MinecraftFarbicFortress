@@ -151,12 +151,17 @@ public final class ShopMenu extends ChestMenu {
                     .withStyle(ChatFormatting.AQUA));
         }
 
+        Identifier blockId = BuiltInRegistries.BLOCK.getKey(block.getBlock());
+        // 由少排到多：玩家真正要知道的是「哪一把最快拆掉它」，那一把在剋制關係成立時
+        // 會遙遙領先（穿甲彈打鐵塊 1 發、打別的要好幾發），排在最前面才看得出那件事
         String shots = weapons.allWeapons().stream()
                 .map(weapon -> {
-                    int n = weapons.shotsToBreak(weapon, hardness);
-                    return n < 0 ? null : weapon.displayName() + " " + n + " 發";
+                    int n = weapons.shotsToBreak(weapon, blockId, hardness);
+                    return n < 0 ? null : new Object[]{n, weapon.displayName() + " " + n + " 發"};
                 })
                 .filter(java.util.Objects::nonNull)
+                .sorted(java.util.Comparator.comparingInt(a -> (int) a[0]))
+                .map(a -> (String) a[1])
                 .limit(4)
                 .collect(java.util.stream.Collectors.joining("、"));
         if (!shots.isEmpty()) {
@@ -175,11 +180,14 @@ public final class ShopMenu extends ChestMenu {
                         + (weapon.pellets() > 1 ? "   一次 " + weapon.pellets() + " 顆" : ""))
                 .withStyle(ChatFormatting.AQUA));
 
-        // 拿場上最常見的兩種牆當基準，比列一堆抽象數值好懂
+        // 四種建材全列：穿甲彈這種「只剋一種材質」的武器，少列一種就看不出它剋的是誰
+        String wood = shotsAgainst(weapon, Blocks.OAK_PLANKS, player, weapons);
         String stone = shotsAgainst(weapon, Blocks.STONE, player, weapons);
+        String iron = shotsAgainst(weapon, Blocks.IRON_BLOCK, player, weapons);
         String obsidian = shotsAgainst(weapon, Blocks.OBSIDIAN, player, weapons);
-        if (stone != null && obsidian != null) {
-            lore.add(Component.literal("石頭 " + stone + " 發   黑曜石 " + obsidian + " 發")
+        if (stone != null) {
+            lore.add(Component.literal("木 " + wood + "   石 " + stone
+                            + "   鐵 " + iron + "   黑曜石 " + obsidian + "  （發）")
                     .withStyle(ChatFormatting.DARK_AQUA));
         }
 
@@ -192,7 +200,7 @@ public final class ShopMenu extends ChestMenu {
     private static String shotsAgainst(WeaponDef weapon, Block block,
                                        ServerPlayer player, WeaponSystem weapons) {
         float hardness = block.defaultBlockState().getDestroySpeed(player.level(), BlockPos.ZERO);
-        int shots = weapons.shotsToBreak(weapon, hardness);
+        int shots = weapons.shotsToBreak(weapon, BuiltInRegistries.BLOCK.getKey(block), hardness);
         return shots < 0 ? null : String.valueOf(shots);
     }
 

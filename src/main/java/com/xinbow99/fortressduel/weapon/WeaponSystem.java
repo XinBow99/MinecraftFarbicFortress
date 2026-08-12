@@ -250,14 +250,22 @@ public final class WeaponSystem {
     }
 
     /**
-     * 這把武器要幾發才打得破一格硬度 {@code hardness} 的方塊。
+     * 這把武器要幾發才打得破一格 {@code block}（硬度 {@code hardness}）。
+     *
+     * <p>要方塊 id 而不是只要硬度：穿甲可以限定只對某幾種方塊生效（{@code pierce_blocks}），
+     * 所以「幾發打得破」不再只是硬度的函數——穿甲彈打鐵塊一發、打同硬度的別種方塊要好幾發。
      *
      * @return 打不破（傷害 0 或不破壞方塊）時回傳 -1
      */
-    public int shotsToBreak(WeaponDef weapon, float hardness) {
+    public int shotsToBreak(WeaponDef weapon, Identifier block, float hardness) {
         if (!weapon.breaksBlocks() || weapon.damageVsBlock() <= 0) return -1;
-        float hp = blockHp(hardness, weapon.pierce());
+        float hp = blockHp(hardness, effectivePierce(weapon, block));
         return (int) Math.ceil(hp / weapon.damageVsBlock());
+    }
+
+    /** 這一發對這種方塊實際吃得到多少穿甲。不在 {@code pierce_blocks} 名單上就是 0。 */
+    private static double effectivePierce(WeaponDef weapon, Identifier block) {
+        return weapon.piercesThrough(block) ? weapon.pierce() : 0.0;
     }
 
     /**
@@ -699,7 +707,8 @@ public final class WeaponSystem {
         float hardness = state.getDestroySpeed(level, pos);
         if (hardness < 0) return false; // 基岩之類：原版就打不掉
 
-        float maxHp = blockHp(hardness, projectile.weapon.pierce());
+        float maxHp = blockHp(hardness,
+                effectivePierce(projectile.weapon, BuiltInRegistries.BLOCK.getKey(state.getBlock())));
         Map<BlockPos, Float> damageMap = blockDamage.computeIfAbsent(duel, k -> new HashMap<>());
         float accumulated = damageMap.merge(pos, (float) damage, Float::sum);
 
