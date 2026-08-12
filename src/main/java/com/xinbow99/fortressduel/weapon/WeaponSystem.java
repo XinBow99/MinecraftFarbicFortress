@@ -240,13 +240,13 @@ public final class WeaponSystem {
     }
 
     /**
-     * 一格硬度 {@code hardness} 的方塊有多少血量（不含穿甲折減）。
+     * 一格 {@code block} 有多少血量（不含穿甲折減）。
      *
      * <p>商店要用它把「硬度 50」翻譯成玩家真正在乎的「血量 500」——原版硬度是「挖多久」的單位，
      * 在這個 mod 裡沒有直接意義。
      */
-    public float blockHpOf(float hardness) {
-        return blockHp(hardness, 0);
+    public float blockHpOf(Identifier block, float hardness) {
+        return blockHp(block, hardness, 0);
     }
 
     /**
@@ -259,7 +259,7 @@ public final class WeaponSystem {
      */
     public int shotsToBreak(WeaponDef weapon, Identifier block, float hardness) {
         if (!weapon.breaksBlocks() || weapon.damageVsBlock() <= 0) return -1;
-        float hp = blockHp(hardness, effectivePierce(weapon, block));
+        float hp = blockHp(block, hardness, effectivePierce(weapon, block));
         return (int) Math.ceil(hp / weapon.damageVsBlock());
     }
 
@@ -707,8 +707,8 @@ public final class WeaponSystem {
         float hardness = state.getDestroySpeed(level, pos);
         if (hardness < 0) return false; // 基岩之類：原版就打不掉
 
-        float maxHp = blockHp(hardness,
-                effectivePierce(projectile.weapon, BuiltInRegistries.BLOCK.getKey(state.getBlock())));
+        Identifier blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        float maxHp = blockHp(blockId, hardness, effectivePierce(projectile.weapon, blockId));
         Map<BlockPos, Float> damageMap = blockDamage.computeIfAbsent(duel, k -> new HashMap<>());
         float accumulated = damageMap.merge(pos, (float) damage, Float::sum);
 
@@ -730,9 +730,23 @@ public final class WeaponSystem {
      *
      * <p>穿甲 1.0 會把血量壓到最低的 1 點——「完全無視硬度」，一發就破，但仍然要打中。
      */
-    private float blockHp(float hardness, double pierce) {
-        float base = Math.max(1f, hardness * (float) config.settings().blockHpPerHardness());
+    private float blockHp(Identifier block, float hardness, double pierce) {
+        float base = Math.max(1f, baseHp(block, hardness));
         return Math.max(1f, base * (float) (1.0 - pierce));
+    }
+
+    /**
+     * 一格的滿血量，還沒套穿甲。設定檔有逐方塊的覆寫就用它，否則走「硬度 × 係數」。
+     *
+     * <p>需要覆寫是因為原版硬度量的是「挖多久」而不是「多耐打」。大部分時候兩者方向一致，
+     * 但橡木板的硬度 2.0 比石頭的 1.5 高——照公式算木牆會比石牆耐打，沒有人會這樣預期，
+     * 而建材的取捨正是靠這種直覺在做的。
+     */
+    private float baseHp(Identifier block, float hardness) {
+        Double override = block == null ? null : config.settings().blockHpOverrides().get(block.toString());
+        if (override != null) return override.floatValue();
+
+        return hardness * (float) config.settings().blockHpPerHardness();
     }
 
     /**

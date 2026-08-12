@@ -124,6 +124,27 @@ public final class YamlConfig {
     }
 
     /**
+     * 取一包「鍵 → 數字」的對照表，例如逐方塊的血量覆寫。
+     *
+     * <p>值不是數字的項目會被跳過並留一行警告——整包丟掉的話，一個打錯的數值會靜默地讓
+     * 其他每一項都失效。
+     */
+    public Map<String, Double> getDoubleMap(String path) {
+        Object v = resolve(path);
+        if (!(v instanceof Map<?, ?> map)) return Map.of();
+
+        java.util.LinkedHashMap<String, Double> out = new java.util.LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : map.entrySet()) {
+            if (e.getValue() instanceof Number n) {
+                out.put(String.valueOf(e.getKey()), n.doubleValue());
+            } else {
+                FortressDuel.LOGGER.warn("{}: {}.{} is not a number, skipping it", name, path, e.getKey());
+            }
+        }
+        return out;
+    }
+
+    /**
      * 取一個「子區段」，也就是 {@code key: {…}} 底下那一整包。
      * 怪物、武器、事件的設定都是「一個 id 對一組欄位」，載入器會用這個把它們一個個拆出來。
      */

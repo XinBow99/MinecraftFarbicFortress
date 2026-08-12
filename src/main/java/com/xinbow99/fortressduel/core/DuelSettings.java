@@ -3,6 +3,7 @@ package com.xinbow99.fortressduel.core;
 import com.xinbow99.fortressduel.util.YamlConfig;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * duel.yml 的內容。競技場尺寸、核心血量、挑戰逾時這類「一場對戰怎麼跑」的參數。
@@ -116,7 +117,15 @@ public record DuelSettings(
 
         // ---- 武器 ----
         /** 方塊血量 ＝ 原版硬度 × 這個係數。調大 ＝ 牆更耐打，整場節奏變慢。 */
-        double blockHpPerHardness
+        double blockHpPerHardness,
+        /**
+         * 逐方塊的血量覆寫（方塊 id → 血量），蓋過「硬度 × 係數」那條公式。
+         *
+         * <p>原版硬度是「挖多久」的單位，不是「多耐打」——兩者大部分時候方向一致，但也有
+         * 對不上的地方：橡木板的硬度 2.0 比石頭的 1.5 高，照公式算木牆會比石牆耐打。
+         * 沒有人會這樣預期，而建材的取捨就是靠這種直覺在做的。
+         */
+        Map<String, Double> blockHpOverrides
 ) {
 
     public static DuelSettings from(YamlConfig cfg) {
@@ -162,9 +171,10 @@ public record DuelSettings(
 
                 cfg.getInt("economy.starting_money", 600),
                 cfg.getInt("economy.round_income", 380),
-                cfg.getInt("economy.damage_penalty", 5),
+                cfg.getInt("economy.damage_penalty", 2),
 
-                cfg.getDouble("weapon.block_hp_per_hardness", 10.0));
+                cfg.getDouble("weapon.block_hp_per_hardness", 10.0),
+                cfg.getDoubleMap("weapon.block_hp"));
     }
 
     /**

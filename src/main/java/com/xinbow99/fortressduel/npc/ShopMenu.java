@@ -140,7 +140,8 @@ public final class ShopMenu extends ChestMenu {
         float hardness = state.getDestroySpeed(player.level(), BlockPos.ZERO);
         if (hardness < 0) return; // 基岩之類，本來就打不掉
 
-        float hp = weapons.blockHpOf(hardness);
+        Identifier blockId = BuiltInRegistries.BLOCK.getKey(block.getBlock());
+        float hp = weapons.blockHpOf(blockId, hardness);
         lore.add(Component.literal("血量 " + Math.round(hp) + " / 格")
                 .withStyle(ChatFormatting.AQUA));
 
@@ -151,7 +152,6 @@ public final class ShopMenu extends ChestMenu {
                     .withStyle(ChatFormatting.AQUA));
         }
 
-        Identifier blockId = BuiltInRegistries.BLOCK.getKey(block.getBlock());
         // 由少排到多：玩家真正要知道的是「哪一把最快拆掉它」，那一把在剋制關係成立時
         // 會遙遙領先（穿甲彈打鐵塊 1 發、打別的要好幾發），排在最前面才看得出那件事
         String shots = weapons.allWeapons().stream()
