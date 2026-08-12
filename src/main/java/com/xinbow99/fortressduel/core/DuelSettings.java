@@ -135,7 +135,18 @@ public record DuelSettings(
          * 對不上的地方：橡木板的硬度 2.0 比石頭的 1.5 高，照公式算木牆會比石牆耐打。
          * 沒有人會這樣預期，而建材的取捨就是靠這種直覺在做的。
          */
-        Map<String, Double> blockHpOverrides
+        Map<String, Double> blockHpOverrides,
+        /**
+         * 要不要把彈丸的飛行軌跡用粒子畫出來。
+         *
+         * <p>預設開著，因為**彈丸不是實體**（見 {@link com.xinbow99.fortressduel.weapon.WeaponSystem}）
+         * ——沒有實體就沒有模型，客戶端完全看不到子彈本身。粒子軌跡是它唯一的可見形式，
+         * 關掉之後子彈是真的隱形的：只看得到命中的結果，看不到那一發從哪裡來、走什麼弧線。
+         *
+         * <p>所以這個開關實際上是在調「看不看得到拋物線」。留著它是為了兩種情況：粒子太多
+         * 造成的封包量在低配伺服器上有感，或是刻意要玩「看不見的子彈」那種規則。
+         */
+        boolean drawTrajectory
 ) {
 
     public static DuelSettings from(YamlConfig cfg) {
@@ -185,7 +196,8 @@ public record DuelSettings(
                 cfg.getInt("economy.damage_penalty", 2),
 
                 cfg.getDouble("weapon.block_hp_per_hardness", 10.0),
-                cfg.getDoubleMap("weapon.block_hp"));
+                cfg.getDoubleMap("weapon.block_hp"),
+                cfg.getBoolean("weapon.draw_trajectory", true));
     }
 
     /**

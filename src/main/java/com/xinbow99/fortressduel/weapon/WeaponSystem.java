@@ -594,7 +594,19 @@ public final class WeaponSystem {
         projectile.advance();
     }
 
+    /**
+     * 把這一 tick 飛過的那一段畫出來。
+     *
+     * <p>整條拋物線是這樣長出來的：每一 tick 的位移本身是直的，但重力每 tick 改變一次速度，
+     * 所以把每段接起來就是彈道的折線近似。段內再補點只是讓它看起來連續——真正決定弧線形狀的
+     * 是逐 tick 的積分，不是這裡。
+     *
+     * <p>{@code weapon.draw_trajectory: false} 時整個跳過。彈丸不是實體、沒有模型，
+     * 所以關掉之後子彈是真的看不見的，只剩命中的結果。
+     */
     private void trail(ServerLevel level, Projectile projectile, Vec3 from, Vec3 to) {
+        if (!config.settings().drawTrajectory()) return;
+
         ParticleOptions particle = particle(projectile.weapon);
         // 一格一顆，畫成連續的線而不是一串點。但上限 TRAIL_MAX_STEPS——
         // 每一顆粒子都是一個廣播封包，而雷射一 tick 飛 20 格
