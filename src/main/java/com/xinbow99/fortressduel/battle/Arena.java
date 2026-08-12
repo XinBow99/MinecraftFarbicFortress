@@ -497,6 +497,10 @@ public final class Arena {
      * <p>不能直接用地表高度圖：那一欄被挖穿（或本來就是洞穴口）時，{@code getHeight} 會回傳
      * 世界的最低建築高度，玩家會被傳到虛空裡。所以先看高度圖，值落在競技場範圍外就改成
      * 從場地頂端往下找第一塊實心方塊，再找不到就退回核心的高度——核心一定站在地上。
+     *
+     * <p>往下掃**從 maxY − 1 開始，跳過天花板那一層**。從 maxY 開始的話第一個掃到的實心
+     * 方塊就是天花板本身，玩家會被放到盒子頂上——然後 confinePlayer 把他夾回 maxY − 1，
+     * 那是半空中，掉下來摔死、重生、再放到頂上，變成無限循環。
      */
     private int safeSpawnY(int x, int z, int fallback) {
         int surface = surfaceY(level, x, z);
@@ -504,7 +508,7 @@ public final class Arena {
             return surface;
         }
 
-        for (int y = region.maxY(); y > region.minY(); y--) {
+        for (int y = region.maxY() - 1; y > region.minY(); y--) {
             if (!level.getBlockState(new BlockPos(x, y, z)).isAir()) {
                 return y + 1;
             }
