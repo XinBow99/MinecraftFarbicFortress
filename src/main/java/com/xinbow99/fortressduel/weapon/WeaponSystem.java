@@ -75,6 +75,16 @@ public final class WeaponSystem {
     private static final double CHARGE_SPEED_FLOOR = 0.35;
     /** 空弓的傷害下限（滿傷的幾成）。 */
     private static final double CHARGE_DAMAGE_FLOOR = 0.3;
+    /**
+     * 一顆彈丸一 tick 最多畫幾顆軌跡粒子。
+     *
+     * <p>每一顆粒子都是一個廣播封包，而軌跡是「一格一顆」——雷射一 tick 飛 20 格，
+     * 每秒 10 發，光它一把就是每秒六百個封包。上限 12 之後雷射的粒子間距變成 1.7 格，
+     * 看起來仍然是一條線（end_rod 的粒子本來就比一格大），封包量少四成。
+     *
+     * <p>其餘八把武器一 tick 都飛不到 12 格，所以這條上限只作用在雷射身上。
+     */
+    private static final int TRAIL_MAX_STEPS = 12;
 
     private final ConfigManager config;
     private final DuelManager duels;
@@ -586,8 +596,9 @@ public final class WeaponSystem {
 
     private void trail(ServerLevel level, Projectile projectile, Vec3 from, Vec3 to) {
         ParticleOptions particle = particle(projectile.weapon);
-        // 一格一顆：速度快的武器（雷射一 tick 飛 20 格）也要畫成一條連續的線，不是一串點
-        int steps = Math.max(1, (int) from.distanceTo(to));
+        // 一格一顆，畫成連續的線而不是一串點。但上限 TRAIL_MAX_STEPS——
+        // 每一顆粒子都是一個廣播封包，而雷射一 tick 飛 20 格
+        int steps = Math.clamp((long) from.distanceTo(to), 1, TRAIL_MAX_STEPS);
         for (int i = 0; i < steps; i++) {
             Vec3 point = from.lerp(to, (double) i / steps);
             level.sendParticles(particle, point.x, point.y, point.z, 1, 0, 0, 0, 0);

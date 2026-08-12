@@ -123,8 +123,8 @@ public final class DuelCommands {
                                 .executes(this::incident)))
                 .then(Commands.literal("cleanup")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                        .executes(ctx -> cleanup(ctx, 128))
-                        .then(Commands.argument("radius", IntegerArgumentType.integer(1, 512))
+                        .executes(ctx -> cleanup(ctx, 64))
+                        .then(Commands.argument("radius", IntegerArgumentType.integer(1, 256))
                                 .executes(ctx -> cleanup(ctx, IntegerArgumentType.getInteger(ctx, "radius")))));
 
         dispatcher.register(root);
@@ -149,11 +149,20 @@ public final class DuelCommands {
                 .getOptional(Identifier.parse(config.settings().borderBlock()))
                 .orElse(Blocks.BARRIER);
 
+        // 垂直只掃競技場可能碰得到的那一段，不是整個世界高度。
+        //
+        // 掃全高的話一次是 (2r+1)² × 384 格：半徑 128 就是兩千五百萬次 getBlockState，
+        // 同步跑在主執行緒上會把伺服器凍住好幾秒。框線的範圍是 arena.depth 往下、
+        // arena.border_height 往上，多留 16 格緩衝就綽綽有餘
+        DuelSettings settings = config.settings();
+        int minY = Math.max(level.getMinY(), center.getY() - settings.arenaDepth() - 16);
+        int maxY = Math.min(level.getMaxY() - 1, center.getY() + settings.borderHeight() + 16);
+
         int removed = 0;
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int x = center.getX() - radius; x <= center.getX() + radius; x++) {
             for (int z = center.getZ() - radius; z <= center.getZ() + radius; z++) {
-                for (int y = level.getMinY(); y < level.getMaxY(); y++) {
+                for (int y = minY; y <= maxY; y++) {
                     cursor.set(x, y, z);
                     if (!level.getBlockState(cursor).is(border)) continue;
                     // 旗標 2 ＝ 只通知客戶端，不觸發鄰居更新：一次清幾萬格時那個更新很貴

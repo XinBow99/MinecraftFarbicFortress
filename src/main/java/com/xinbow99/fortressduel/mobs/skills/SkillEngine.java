@@ -213,8 +213,23 @@ public final class SkillEngine {
 
     // ---------- 工具 ----------
 
-    /** 這隻怪身上實際掛得起來的技能（設定裡寫錯 id 的會被濾掉並留下一行 log）。 */
+    /**
+     * 這隻怪身上實際掛得起來的技能（設定裡寫錯 id 的會被濾掉並留下一行 log）。
+     *
+     * <p>結果快取起來：這個方法在 tick 迴圈裡對**每一隻**怪都會呼叫一次，不快取的話
+     * 每 tick 每隻怪都會配一個新的 List 再逐個查表。場上四十隻怪就是每秒八百次無謂的配置。
+     *
+     * <p>快取的鍵是 {@link MobDef} 物件本身，而 {@code /duel reload} 會整個換掉那些物件，
+     * 所以重讀設定之後舊的 entry 只是變成垃圾，不會回傳過期的技能。用 WeakHashMap
+     * 讓它們跟著被回收。
+     */
+    private final Map<MobDef, List<SkillDef>> skillCache = new java.util.WeakHashMap<>();
+
     private List<SkillDef> skillsOf(MobDef def) {
+        return skillCache.computeIfAbsent(def, this::resolveSkills);
+    }
+
+    private List<SkillDef> resolveSkills(MobDef def) {
         List<SkillDef> out = new ArrayList<>(def.skills().size());
         for (String id : def.skills()) {
             SkillDef skill = config.skills().byId(id);
@@ -224,7 +239,7 @@ public final class SkillEngine {
             }
             out.add(skill);
         }
-        return out;
+        return List.copyOf(out);
     }
 
     private LivingEntity findEntity(MinecraftServer server, UUID id) {
