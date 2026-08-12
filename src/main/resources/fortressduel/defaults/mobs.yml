@@ -122,6 +122,29 @@ mobs:
     reward: 180
     skills: [閃現, 再生]
 
+  # 鼠疫事件專用，是這份檔案裡**唯一敵對**的一種。
+  #
+  # 其餘的怪生在中場、完全被動，是雙方要搶的收入；這種生在雙方自己的熊貓圈旁邊、會主動
+  # 咬玩家，是你家裡的麻煩。兩邊同時放所以仍然對稱，而三區塊限制會把牠們鎖在生成的那一側。
+  #
+  # 血量壓低（30）是刻意的：它要能被清掉，而且清得完。清不完的話這個事件就不是「處理麻煩」
+  # 而是「這一輪你別想蓋東西了」，那太重了。
+  #
+  # 原版蠹蟲有鑽進石頭裡的行為，但那條 goal 在牠有目標時不會執行，而且要 mobGriefing 開著。
+  # 牠們一生出來就會盯上玩家，所以實務上很少發生；真的鑽進去也只是少一隻。
+  vermin:
+    name: 蠹蟲
+    entity: minecraft:silverfish
+    health: 30
+    attack_damage: 2
+    movement_speed: 0.3
+    scale: 1.0
+    pack_min: 5
+    pack_max: 8
+    # 0 = 不進一般抽籤，只由突發事件叫出來
+    weight: 0
+    reward: 35
+
   boss:
     name: 巨獸
     entity: minecraft:sniffer

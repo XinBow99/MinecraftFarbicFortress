@@ -427,10 +427,14 @@ public final class WeaponSystem {
                 ? CHARGE_DAMAGE_FLOOR + (1 - CHARGE_DAMAGE_FLOOR) * power
                 : 1.0;
 
+        // 開火那一刻的全域修正（低重力、火力全開）寫進彈丸，見 Projectile.gravityScale
+        double gravityScale = duel.modifierFactor(Duel.MOD_GRAVITY);
+        double damageBoost = duel.modifierFactor(Duel.MOD_WEAPON_DAMAGE);
+
         for (int i = 0; i < weapon.pellets(); i++) {
             Vec3 direction = applySpread(level, look, spread);
             projectiles.add(new Projectile(weapon, duel, player, origin,
-                    direction.scale(speed), damageScale));
+                    direction.scale(speed), damageScale, gravityScale, damageBoost));
         }
 
         SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(weapon.fireSound());
@@ -695,6 +699,9 @@ public final class WeaponSystem {
         if (damage <= 0 || !projectile.weapon.breaksBlocks()) return false;
 
         Duel duel = projectile.duel;
+        // 銅牆鐵壁：在命中這一刻才查，因為它是「這面牆現在多耐打」而不是「這一發多用力」
+        damage *= duel.modifierFactor(Duel.MOD_BLOCK_DAMAGE);
+        if (damage <= 0) return false;
         Region region = duel.arena().region();
         if (!region.contains(pos)) return false;
 
