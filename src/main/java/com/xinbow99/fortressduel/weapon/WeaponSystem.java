@@ -562,8 +562,10 @@ public final class WeaponSystem {
         Vec3 from = projectile.pos;
         Vec3 to = projectile.nextPos();
 
-        // 飛出競技場就消失。用終點判斷而不是起點——擦過框線的那一發不該還打得到外面
+        // 飛出競技場就消失。用終點判斷而不是起點——擦過框線的那一發不該還打得到外面。
+        // 軌跡照畫：看到自己那一發飛出界，比它憑空消失好懂
         if (!projectile.duel.arena().region().contains(to.x, to.y, to.z)) {
+            trail(level, projectile, from, to);
             projectile.dead = true;
             return;
         }
@@ -577,6 +579,9 @@ public final class WeaponSystem {
                 Entity::isAlive,
                 0.3f);
         if (entityHit != null) {
+            // 先畫到命中點再結算：不畫的話最後那一段是斷的，而那一段正好是「打中了沒」
+            // 最需要看清楚的地方
+            trail(level, projectile, from, entityHit.getLocation());
             onHit(projectile, level, entityHit.getLocation(), entityHit.getEntity(), null);
             return;
         }
@@ -586,6 +591,7 @@ public final class WeaponSystem {
         BlockHitResult blockHit = level.clip(new ClipContext(
                 from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, CollisionContext.empty()));
         if (blockHit.getType() == HitResult.Type.BLOCK) {
+            trail(level, projectile, from, blockHit.getLocation());
             onHit(projectile, level, blockHit.getLocation(), null, blockHit.getBlockPos());
             return;
         }
@@ -594,6 +600,17 @@ public final class WeaponSystem {
         projectile.advance();
     }
 
+    /**
+     * 畫一段軌跡。
+     *
+     * <p><b>一定要 force。</b>不加的話 {@code sendParticles} 只送給 32 格內的玩家，而場地
+     * 有 80~132 格寬——你自己那一發飛過 32 格之後軌跡就斷了，剩下的路線完全看不到。
+     * 而這個遊戲是靠看彈道來修正瞄準的，斷在 32 格等於這個機制只在貼臉時有用。
+     * force 之後範圍變成 512 格，整座場地都涵蓋得到。
+     *
+     * <p>{@code alwaysShow} 也開：客戶端的粒子設定調到「最少」時，一般粒子會被大量丟棄，
+     * 而軌跡不是裝飾——它是瞄準的依據，被丟掉的話那個玩家等於瞎打。
+     */
     private void trail(ServerLevel level, Projectile projectile, Vec3 from, Vec3 to) {
         ParticleOptions particle = particle(projectile.weapon);
         // 一格一顆，畫成連續的線而不是一串點。但上限 TRAIL_MAX_STEPS——
@@ -601,7 +618,7 @@ public final class WeaponSystem {
         int steps = Math.clamp((long) from.distanceTo(to), 1, TRAIL_MAX_STEPS);
         for (int i = 0; i < steps; i++) {
             Vec3 point = from.lerp(to, (double) i / steps);
-            level.sendParticles(particle, point.x, point.y, point.z, 1, 0, 0, 0, 0);
+            level.sendParticles(particle, true, true, point.x, point.y, point.z, 1, 0, 0, 0, 0);
         }
     }
 
@@ -612,7 +629,9 @@ public final class WeaponSystem {
         projectile.dead = true;
         WeaponDef weapon = projectile.weapon;
 
-        level.sendParticles(ParticleTypes.EXPLOSION, location.x, location.y, location.z, 1, 0, 0, 0, 0);
+        // 同樣要 force：命中點常常在 32 格外，而「我這一發打到哪」跟軌跡一樣是瞄準的依據
+        level.sendParticles(ParticleTypes.EXPLOSION, true, true,
+                location.x, location.y, location.z, 1, 0, 0, 0, 0);
 
         if (weapon.splashRadius() > 0) {
             splash(projectile, level, location);
