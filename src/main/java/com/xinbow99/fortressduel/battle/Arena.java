@@ -218,7 +218,17 @@ public final class Arena {
 
     // ---------- 建造 ----------
 
-    /** 沿著水平邊界砌一圈牆，把 n×n 的範圍框出來。 */
+    /**
+     * 沿著水平邊界砌一圈牆，把 n×n 的範圍框出來。
+     *
+     * <p><b>這圈牆是標示，不是圍欄。</b>真正把人跟東西關在場內的全部在程式裡：
+     * {@link Duel#keepInside}（玩家）、{@link #confineToArena}（生物）、
+     * {@code WeaponSystem.step}（彈丸飛出範圍就消失），以及三個否決「挖／打／在場外放方塊」
+     * 的事件處理。所以牆破了一個洞也沒有人跑得出去——它唯一的工作是讓玩家看得到邊界在哪。
+     *
+     * <p>正因為如此，材質該選看得見的（預設紅色玻璃）而不是屏障。屏障看不見，那個唯一的
+     * 工作它做不到，反而製造出「這裡有一道打不穿的空氣牆」這種無法理解的體驗。
+     */
     private void placeBorder(DuelSettings settings) {
         BlockState wall = blockState(settings.borderBlock(), Blocks.BARRIER);
 
