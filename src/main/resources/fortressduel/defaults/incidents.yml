@@ -74,7 +74,7 @@ incidents:
 
   eclipse:
     name: 蝕世之影
-    description: 它對人沒興趣，但對人造物有無法抑制的破壞慾。
+    description: 它們對人沒興趣，但對人造物有無法抑制的破壞慾——牆會被一格一格啃掉。
     weight: 5
     action: spawn_mobs
     mobs: [eclipse]

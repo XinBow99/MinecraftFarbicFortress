@@ -5,11 +5,12 @@
 # 欄位
 #   name              顯示名稱
 #   type              對應程式裡的實作，決定「做什麼」。內建：
-#                       clone     分身：複製自己
-#                       summon    召喚：叫出 mobs.yml 裡的另一種怪
-#                       heal      回血
-#                       teleport  順移
-#                       effect    給自己上一個藥水效果
+#                       clone         分身：複製自己
+#                       summon        召喚：叫出 mobs.yml 裡的另一種怪
+#                       break_blocks  啃方塊：把附近**玩家蓋的**東西拆掉
+#                       heal          回血
+#                       teleport      順移
+#                       effect        給自己上一個藥水效果
 #   trigger           什麼時候發動：
 #                       ON_SPAWN       生成的當下
 #                       INTERVAL       每隔 interval_seconds
@@ -82,6 +83,23 @@ skills:
     params:
       mob: swarm
       radius: 5
+
+  # 只拆「跟開場前不一樣」的格子——玩家蓋的牆、平台、柵欄，天然地形與框線都不動。
+  # 不然這隻怪會在中場自己挖出一個坑，看起來只是壞掉，而它的定位是「對人造物有破壞慾」。
+  #
+  # 拆掉的格子照樣進快照的還原路徑（對戰結束會補回來），而且不掉落物品——牆被拆開不該
+  # 順便變成建材。
+  #
+  # 每 3 秒一次、一次最多 3 格：一隻的話大約每分鐘 60 格，四隻圍上來就是每分鐘 240 格。
+  # 那個速度拆得動一面石牆但拆不動黑曜石堡壘，所以它是壓力不是死刑
+  啃食:
+    name: 啃食
+    type: break_blocks
+    trigger: INTERVAL
+    interval_seconds: 3
+    params:
+      radius: 3
+      count: 3
 
   再生:
     name: 再生

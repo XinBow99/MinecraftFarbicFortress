@@ -43,7 +43,7 @@ public class FortressDuel implements ModInitializer {
         ConfigManager config = new ConfigManager();
 
         DuelManager duels = new DuelManager(config);
-        SkillEngine skills = new SkillEngine(config);
+        SkillEngine skills = new SkillEngine(config, duels);
         WeaponSystem weapons = new WeaponSystem(config, duels);
         EconomyManager economy = new EconomyManager(config, duels, skills);
         NpcManager npcs = new NpcManager(config, economy, weapons);

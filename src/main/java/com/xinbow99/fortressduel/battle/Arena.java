@@ -319,6 +319,29 @@ public final class Arena {
         return region;
     }
 
+    /**
+     * 這一格能不能被「拆人造物」的效果拆掉。
+     *
+     * <p>三個條件：在場內、不是框線（框線是場地的一部分，誰都拆不掉）、而且跟開場前不一樣
+     * ——最後那條就是「人造」的定義，天然地形不動。
+     */
+    public boolean isBuilt(BlockPos pos) {
+        if (!region.contains(pos)) return false;
+        if (region.isHorizontalEdge(pos.getX(), pos.getZ())) return false;
+
+        BlockState state = level.getBlockState(pos);
+        if (state.isAir() || state.liquid()) return false;
+        if (state.getDestroySpeed(level, pos) < 0) return false; // 基岩之類
+
+        return !snapshot.isUntouched(level, pos);
+    }
+
+    /** 拆掉一格並記進快照的還原路徑。不掉落物品——理由同玩家自己挖（見 DuelManager）。 */
+    public void breakBuilt(BlockPos pos) {
+        snapshot.record(level, pos);
+        level.destroyBlock(pos, false, null, 512);
+    }
+
     // ---------- 區塊 ----------
 
     /** 場上的三個區塊，沿著兩座熊貓圈的連線切開。 */

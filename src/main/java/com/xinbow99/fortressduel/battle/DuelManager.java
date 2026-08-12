@@ -215,6 +215,28 @@ public final class DuelManager {
      * <p>就地開場之後沒有「選址」這回事了——場地是玩家自己站出來的，系統只需要否決
      * 「站在別人的競技場裡開新的一場」。
      */
+    /**
+     * 這個座標落在哪一場對戰的競技場裡；都不在就回 null。
+     *
+     * <p>怪物技能要用它：怪身上只有座標，不知道自己屬於哪一場，而「能不能拆這一格」
+     * 是那一場的規則（框線拆不得、範圍外碰不得）。
+     */
+    public Duel duelAt(ServerLevel level, BlockPos pos) {
+        for (Duel duel : activeDuels) {
+            if (duel.arena().level() == level && duel.arena().region().contains(pos)) {
+                return duel;
+            }
+        }
+        return null;
+    }
+
+    /** 讓武器系統忘掉某一格累積的傷害。怪物拆掉方塊時也要清，理由同玩家自己挖掉。 */
+    public void forgetBlockDamage(BlockPos pos) {
+        if (services != null) {
+            services.weapons().forgetBlock(pos);
+        }
+    }
+
     private boolean overlapsExistingArena(ServerLevel level, BlockPos a, BlockPos b) {
         int keepOut = config.settings().arenaMinSeparation();
         for (Duel duel : activeDuels) {

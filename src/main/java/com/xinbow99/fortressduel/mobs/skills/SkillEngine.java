@@ -1,6 +1,7 @@
 package com.xinbow99.fortressduel.mobs.skills;
 
 import com.xinbow99.fortressduel.FortressDuel;
+import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -38,9 +39,20 @@ public final class SkillEngine {
     private final Map<String, MobSkill> types = new HashMap<>();
     private final Map<UUID, Tracked> tracked = new HashMap<>();
 
-    public SkillEngine(ConfigManager config) {
+    /**
+     * 對戰的總管。技能要拆方塊時得先問「這一格屬於哪一場、拆不拆得動」——那是對戰的規則，
+     * 不是怪物的（見 {@code break_blocks}）。
+     */
+    private final DuelManager duels;
+
+    public SkillEngine(ConfigManager config, DuelManager duels) {
         this.config = config;
+        this.duels = duels;
         SkillTypes.registerBuiltins(this);
+    }
+
+    public DuelManager duels() {
+        return duels;
     }
 
     /** 一隻被追蹤的怪：牠的設定、連鎖深度、各技能的冷卻與「只觸發一次」的記錄。 */
