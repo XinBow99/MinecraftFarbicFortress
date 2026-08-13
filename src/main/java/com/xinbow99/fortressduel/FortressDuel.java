@@ -44,9 +44,9 @@ public class FortressDuel implements ModInitializer {
 
         DuelManager duels = new DuelManager(config);
         SkillEngine skills = new SkillEngine(config, duels);
-        WeaponSystem weapons = new WeaponSystem(config, duels);
+        WeaponSystem weapons = new WeaponSystem(config, duels, skills);
         EconomyManager economy = new EconomyManager(config, duels, skills);
-        NpcManager npcs = new NpcManager(config, economy, weapons);
+        NpcManager npcs = new NpcManager(config, economy, weapons, duels);
         BuildingPlacer buildings = new BuildingPlacer(npcs);
 
         // 子系統之間互相需要，所以先全部建好再互相登記，最後才第一次讀設定

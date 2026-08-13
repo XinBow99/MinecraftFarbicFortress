@@ -2,6 +2,7 @@ package com.xinbow99.fortressduel.mobs.entity;
 
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
+import com.xinbow99.fortressduel.util.Ground;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -17,7 +18,6 @@ import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.entity.EntityTypeTest;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 
 import java.util.ArrayList;
@@ -74,6 +74,24 @@ public final class MobSpawner {
      */
     public static List<Entity> spawnPack(ServerLevel level, MobDef def, BlockPos center, int spread,
                                          SkillEngine engine) {
+        return spawn(level, def, center, spread, engine, 0);
+    }
+
+    /**
+     * 只生一隻，不管那隻怪的 {@code pack_min/max}。
+     *
+     * <p>給「一次放一隻」的來源用（例如寶貝蛋那種投放型彈藥）：數量該由投放它的東西決定，
+     * 不是由那個 MobDef 決定——一顆蛋孵出一整群的話那就不是騷擾道具而是一發清場的核彈。
+     */
+    public static Entity spawnOne(ServerLevel level, MobDef def, BlockPos center, int spread,
+                                  SkillEngine engine) {
+        List<Entity> spawned = spawn(level, def, center, spread, engine, 1);
+        return spawned.isEmpty() ? null : spawned.getFirst();
+    }
+
+    /** @param forceCount 大於 0 ＝ 就生這麼多隻；0 ＝ 照 {@code pack_min/max} 抽 */
+    private static List<Entity> spawn(ServerLevel level, MobDef def, BlockPos center, int spread,
+                                      SkillEngine engine, int forceCount) {
         // 逐隻依權重抽型別，所以「混合族群」（一群裡有兔子、狐狸、駱駝…）不用開好幾個
         // MobDef。只寫一種 entity 的怪，這裡就是一個只有一個元素的清單，行為跟以前完全一樣
         List<EntityType<?>> types = new ArrayList<>(def.entities().size());
@@ -95,7 +113,9 @@ public final class MobSpawner {
             return List.of();
         }
 
-        int count = def.packMin() + level.getRandom().nextInt(def.packMax() - def.packMin() + 1);
+        int count = forceCount > 0
+                ? forceCount
+                : def.packMin() + level.getRandom().nextInt(def.packMax() - def.packMin() + 1);
         List<Entity> spawned = new ArrayList<>(count);
 
         for (int i = 0; i < count; i++) {
@@ -130,11 +150,11 @@ public final class MobSpawner {
         return types.getLast();
     }
 
+    /** 在 center 附近隨機挑一格地面。走 {@link Ground} 而不是直接問 heightmap——理由見那裡。 */
     private static BlockPos scatter(ServerLevel level, BlockPos center, int spread) {
         int x = center.getX() + level.getRandom().nextInt(spread * 2 + 1) - spread;
         int z = center.getZ() + level.getRandom().nextInt(spread * 2 + 1) - spread;
-        int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-        return new BlockPos(x, y, z);
+        return Ground.onSurface(level, x, z);
     }
 
     // ---------- 屬性（技能也會用到，所以是 public） ----------
@@ -153,6 +173,11 @@ public final class MobSpawner {
         setMaxHealth(living, (float) def.health());
         set(living, Attributes.ATTACK_DAMAGE, def.attackDamage());
         set(living, Attributes.MOVEMENT_SPEED, def.movementSpeed());
+        // 飛行生物的速度來源是 FLYING_SPEED，MOVEMENT_SPEED 對牠們沒有作用——
+        // 所以這一欄不是「另一個速度」，是飛的那些唯一有效的那個（見 MobDef.flyingSpeed）
+        if (def.flyingSpeed() > 0) {
+            set(living, Attributes.FLYING_SPEED, def.flyingSpeed());
+        }
         setScale(living, def.scale());
         // 血量上限改完要補滿，否則實體會維持原本型別的血量（可能只有新上限的一小截）
         living.setHealth(living.getMaxHealth());

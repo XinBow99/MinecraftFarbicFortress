@@ -338,7 +338,7 @@ public final class Duel {
                 finish(Result.aborted());
                 return;
             }
-            expireModifiers(new ServerPlayer[]{a});
+            tickModifiers(new ServerPlayer[]{a});
             tickPhase(new ServerPlayer[]{a});
             keepInside(a, north);
             enforceZones();
@@ -358,7 +358,7 @@ public final class Duel {
             return;
         }
 
-        expireModifiers(new ServerPlayer[]{a, b});
+        tickModifiers(new ServerPlayer[]{a, b});
         tickPhase(new ServerPlayer[]{a, b});
 
         keepInside(a, north);
@@ -522,16 +522,22 @@ public final class Duel {
     /**
      * 熊貓身上的傷害算不算數。
      *
-     * <p>只有**對手的攻擊**與我們自己送的窒息傷害算。摔落、突發事件的怪、自己人的濺射誤傷
-     * 一律免疫——因為一個你無法控制的意外而輸掉整場是很糟的體驗，而這些來源全都不是對手的操作。
+     * <p>只有**玩家的攻擊**與我們自己送的窒息傷害算。摔落、突發事件的怪、隕石一律免疫——
+     * 因為一個你無法控制的意外而輸掉整場是很糟的體驗，而這些來源都不是任何一方的操作。
      * 建造階段也一律免疫，那時本來就不能攻擊。
+     *
+     * <p>算不算**自己人**由 {@code battle.guardian_friendly_fire} 決定。打開時自己的濺射誤傷
+     * 也照扣：高爆彈與無人機在自家陣地就變成真的危險，那把「站在核心旁邊近距離轟」
+     * 從免費變成有代價。關掉就回到只有對手打得動的舊行為。
      */
     public boolean allowGuardianDamage(Side owner, DamageSource source) {
         if (applyingSuffocation) return true;  // 我們自己送的窒息傷害
         if (!state.canAttack()) return false;
+        if (!(source.getEntity() instanceof ServerPlayer attacker)) return false;
 
-        return source.getEntity() instanceof ServerPlayer attacker
-                && opponentOf(owner).playerId().equals(attacker.getUUID());
+        UUID shooter = attacker.getUUID();
+        if (opponentOf(owner).playerId().equals(shooter)) return true;
+        return settings.guardianFriendlyFire() && owner.playerId().equals(shooter);
     }
 
     /**
@@ -772,25 +778,37 @@ public final class Duel {
     public double modifierFactor(String key) {
         Modifier modifier = modifiers.get(key);
         if (modifier == null) return 1.0;
-        if (ticksElapsed > modifier.until()) {
-            modifiers.remove(key);
-            return 1.0;
-        }
-        return modifier.factor();
+        // 過期的只回報 1.0，**不**在這裡把它移除：移除是 tickModifiers 的責任，而它要在移除的
+        // 同時把玩家身上的屬性收乾淨（低重力）。這裡順手刪掉的話，tickModifiers 下一 tick 就
+        // 看不到這筆記錄，玩家會永遠飄著
+        return ticksElapsed > modifier.until() ? 1.0 : modifier.factor();
     }
 
-    /** 修正到期時公告一次。不講的話玩家只會覺得「手感忽然變了」卻不知道為什麼。 */
-    private void expireModifiers(ServerPlayer[] players) {
+    /**
+     * 每 tick 維護全域修正：到期的收掉並公告，還活著的把玩家身上的效果補齊。
+     *
+     * <p>低重力要每 tick 檢查是因為它掛在玩家的屬性上，而玩家物件會換（死亡重生、斷線重連）。
+     * 檢查很便宜，真正送封包的只有第一次，見 {@link LowGravity#sync}。
+     */
+    private void tickModifiers(ServerPlayer[] players) {
         modifiers.entrySet().removeIf(entry -> {
             if (ticksElapsed <= entry.getValue().until()) return false;
 
+            // 不講的話玩家只會覺得「手感忽然變了」卻不知道為什麼
             for (ServerPlayer player : players) {
                 if (player != null) {
                     player.sendSystemMessage(Msg.info(entry.getValue().label() + " 結束了。"));
+                    if (MOD_GRAVITY.equals(entry.getKey())) LowGravity.clear(player);
                 }
             }
             return true;
         });
+
+        Modifier gravity = modifiers.get(MOD_GRAVITY);
+        if (gravity == null) return;
+        for (ServerPlayer player : players) {
+            if (player != null) LowGravity.sync(player, gravity.factor());
+        }
     }
 
     /** 動作列上那段「還有哪些效果、剩幾秒」。沒有效果時回傳 null。 */
@@ -978,14 +996,26 @@ public final class Duel {
         entity.hurtMarked = true;
     }
 
-    /** 走出框線就拉回自己的出生點。只看水平方向——跳起來、挖到腳下都不算離場。 */
+    /**
+     * 跑出盒子就拉回自己的出生點。
+     *
+     * <p>水平與垂直都看。垂直那條是後來補的：盒子封頂之後，玩家死掉可能在**天花板上面**
+     * 重生（原版的重生點會找那一欄最高的方塊，而那就是天花板）。只看水平的話他站在頂上
+     * 不算離場，接著 confinePlayer 把他的 y 夾回 maxY − 1——那是半空中，掉下來摔死、
+     * 重生、再站上去，無限循環。
+     *
+     * <p>封頂之前垂直不能算：那時往上跳、往下挖都會超出範圍，但那些都不是離場。
+     * 現在上下都有實體的殼，超出去就真的是異常。
+     */
     private void keepInside(ServerPlayer player, Side side) {
         // 死亡畫面期間不要動他：那時原版正要把他移到重生點，兩邊搶著傳送會把人丟到奇怪的位置。
         // 等他按下重生、變回活著的狀態，下一 tick 自然會被拉回場內
         if (player.isDeadOrDying()) return;
 
+        Region region = arena.region();
         if (player.level() == arena.level()
-                && arena.region().containsHorizontally(player.getX(), player.getZ())) {
+                && region.containsHorizontally(player.getX(), player.getZ())
+                && player.getY() >= region.minY() && player.getY() <= region.maxY()) {
             return;
         }
         Vec3 spawn = arena.spawnFor(side.pen());
@@ -1003,6 +1033,8 @@ public final class Duel {
 
         DuelEvents.END.invoker().onDuelEnd(this, result);
 
+        clearPlayerModifiers();
+
         // 要在 arena.restore() 之前：還原只處理方塊，實體得自己收
         removeGuardians();
         reclaimIssuedItems();
@@ -1018,6 +1050,19 @@ public final class Duel {
         teleportOut(south);
 
         arena.restore();
+    }
+
+    /**
+     * 收掉掛在玩家身上的全域修正。
+     *
+     * <p>低重力是唯一一個會動到玩家本體的（其他兩個只影響彈丸與方塊），所以它是唯一一個
+     * 對戰結束時不收就會跟著玩家離場的。屬性本身是 transient 的（不會寫進存檔），但那只擋得住
+     * 「伺服器沒了」，擋不住「對戰結束但人還在線上」。
+     */
+    private void clearPlayerModifiers() {
+        for (ServerPlayer player : onlinePlayers()) {
+            LowGravity.clear(player);
+        }
     }
 
     /**
@@ -1162,6 +1207,11 @@ public final class Duel {
         return null;
     }
 
+
+    /** 這一方守的是哪半場。北 ＝ A、南 ＝ B，跟 {@code enforceZones} 用的是同一組對應。 */
+    public Arena.Zone zoneOf(Side side) {
+        return side == north ? Arena.Zone.A : Arena.Zone.B;
+    }
 
     public Side opponentOf(Side side) {
         return side == north ? south : north;

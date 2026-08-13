@@ -45,6 +45,19 @@
 #   recoil_max        後座力累積的上限（度）。不寫 = max(3, spread_degrees × 3)
 #   recoil_recovery   後座力每秒回復幾度。固定速率，不是按比例衰減——
 #                     「停火多久才會恢復準度」要能被背下來
+#
+#                     ※ 這三個欄位共用一個隱形計數器：開一槍 +recoil、每秒 −recoil_recovery、
+#                       上限 recoil_max，而**開槍那一刻的計數器就是散佈角**。
+#
+#                       所以真正決定有沒有效果的是「兩槍之間回復多少」對上「一槍加多少」：
+#                           每發淨增 = recoil − recoil_recovery × (cooldown_ticks / 20)
+#                       淨增 ≤ 0 的話計數器每次都在下一槍之前被扣回 0，後座力完全不存在——
+#                       這七把武器曾經全部踩到這個坑（狙擊的煞車是油門的五倍），而症狀是
+#                       「什麼都沒發生」，不會報錯也看不出來。改任何一個欄位都要重算這條。
+#
+#                       現在的取值原則：淨增 ≈ recoil 的一半，也就是
+#                           recoil_recovery ≈ recoil ÷ (2 × 冷卻秒數)
+#                       全速連射會累積、正常節奏打不出來，分界線落在射速上
 #   cooldown_ticks    裝填間隔（20 tick = 1 秒）
 #   projectile_speed  彈丸初速（格/tick）
 #   gravity           重力（格/tick²），0 = 直線飛行
@@ -60,6 +73,10 @@
 #                     連射武器只能設 true：機槍 cooldown 3、雷射 2，也就是每秒 7~10 發，
 #                     靠連點右鍵打到那個速度手感差得有感
 #   breaks_blocks     命中的方塊會不會被打掉（只在競技場範圍內生效）
+#   spawn_mobs        命中時在落點孵出哪幾種怪（mobs.yml 的 id），逐隻隨機。
+#                     **填了這一欄的彈藥完全不造成傷害、也不碰方塊**，只放怪——
+#                     所以它的 damage 與 splash_radius 寫什麼都沒有作用
+#   spawn_min/max     一發放幾隻，每一發在兩者之間重抽
 #   trail_particle    飛行時拖的粒子（沒指定 trail_color 時才用它）
 #   trail_color       彈道的顏色，"#RRGGBB"。指定之後就改走 dust 粒子——那是原版唯一能
 #                     任意上色的粒子，所以「紫色的光束」這種需求只能從這裡來。
@@ -69,7 +86,8 @@
 #   fire_sound        開火音效
 #   ammo_per_shot     一次擊發消耗幾發（散彈打六七顆但只算 1 發，跟 pellets 是兩回事）
 #                     只從**副手那一疊**扣，不會去背包裡湊——副手就是上膛的彈匣
-#   starting_ammo     開場就配給的量。上限由堆疊上限與背包空間決定，沒有另外的彈藥上限
+#   starting_ammo     開場就配給的量。預設全部 0——開場不發任何東西，所有補給都要跟軍火商買，
+#                     那是這個遊戲唯一的資源出口（見 duel.yml 的 battle.starting_items）
 
 weapons:
   scrap:
@@ -85,9 +103,10 @@ weapons:
       min_draw: 0.1
       affects: [speed]
     spread_degrees: 1.0
+    # 全場最溫和的懲罰：連打 14 發才觸頂，而它本來就是給人隨手打的萬用彈
     recoil: 0.6
     recoil_max: 4.0
-    recoil_recovery: 6.0
+    recoil_recovery: 0.35
     cooldown_ticks: 18
     projectile_speed: 3.0
     gravity: 0.04
@@ -96,7 +115,7 @@ weapons:
     trail_particle: minecraft:crit
     trail_color: "#C8C8C8"
     fire_sound: minecraft:entity.arrow.shoot
-    starting_ammo: 60
+    starting_ammo: 0
 
   mg:
     name: 機槍彈
@@ -112,10 +131,12 @@ weapons:
       min_draw: 0
       affects: []
     spread_degrees: 3.0
-    # 連射的代價全在這裡：打滿一梭最後幾發已經散到 9 度
+    # 連射的代價全在這裡：全速潑 3 秒（約 20 發）就散到 9 度，停火 3 秒回復。
+    # 這句話以前是假的——回復 7°/秒 對上 0.15 秒的冷卻，等於每發之間回復 1.05° 而只累積
+    # 0.9°，計數器永遠停在 0。這把武器整個定位建立在「連射會失準」上，而那件事沒有發生過
     recoil: 0.9
     recoil_max: 9.0
-    recoil_recovery: 7.0
+    recoil_recovery: 3.0
     cooldown_ticks: 3
     projectile_speed: 3.8
     gravity: 0.03
@@ -125,7 +146,7 @@ weapons:
     trail_particle: minecraft:smoke
     trail_color: "#FFB03A"
     fire_sound: minecraft:entity.arrow.shoot
-    starting_ammo: 60
+    starting_ammo: 0
 
   ap:
     name: 穿甲彈
@@ -151,9 +172,10 @@ weapons:
       min_draw: 0.25
       affects: [damage]
     spread_degrees: 1.6
+    # 拆鐵牆時不能無腦連點：10 發觸頂。它一發破一格鐵塊，沒有節奏限制的話那面牆等於紙做的
     recoil: 0.8
     recoil_max: 4.0
-    recoil_recovery: 5.0
+    recoil_recovery: 0.4
     cooldown_ticks: 20
     projectile_speed: 3.4
     gravity: 0.03
@@ -169,15 +191,23 @@ weapons:
   # 打出去多少」不是固定的——固定顆數時彈著雖然隨機，但總火力恆定，打起來像一把
   # 數值穩定的槍而不是霰彈。
   #
-  # 單顆傷害從 11 降到 8：6.5 顆 × 8 ≈ 52，跟舊的 5 × 11 = 55 幾乎一樣，所以
-  # 商店那個 $140/40 的定價不用跟著動。
+  # 單顆 16，滿中一發 6.5 × 16 ≈ 104。
   #
-  # 散佈從 1.5 度拉到 6 度：1.5 度在 15 格外只散開一格多，那是獨頭彈不是霰彈。
+  # 定價沿革：曾經是 11、後來降到 8（顆數從 5 提到 6~7 時為了維持總火力不變），但那個
+  # 「總火力不變」是拿滿中算的，而散彈幾乎不會滿中——6 度的圓錐在十幾格外就散開三格，
+  # 實際只中一兩顆。單顆 8 的話中兩顆才 16 點，比隨手一發廢鐵彈（20）還低，那把武器
+  # 就沒有理由存在了。提到 16 之後中兩顆 32、中三顆 48，貼臉全中破百——距離曲線很陡，
+  # 而那個陡度本來就是霰彈的定位。
+  #
+  # 副作用要知道：單顆 16 對只有 20 血的玩家來說，**中一顆就幾乎致命**（原本要中兩顆）。
+  # 對牆則是單顆就破石頭（15）與木板（10），所以貼臉掃牆會變快很多。
+  #
+  # 散佈 6 度：1.5 度在 15 格外只散開一格多，那是獨頭彈不是霰彈。
   # 6 度大約是 15 格外散開三格，貼臉幾乎全中、拉開就只中一兩顆——這才是它該有的距離曲線
   buck:
     name: 散彈
     item: minecraft:flint
-    damage: 8
+    damage: 16
     splash_radius: 0
     pierce: 0
     # 逐顆結算，貼臉全中等於推六七次
@@ -190,10 +220,11 @@ weapons:
     pellets: 6
     pellets_max: 7
     spread_degrees: 6.0
-    # 散佈本來就大，後座力再疊上去很快就完全失準——這是逼你控制節奏，不是連射武器
+    # 散佈本來就大，後座力再疊上去很快就完全失準——這是逼你控制節奏，不是連射武器。
+    # 連開 12 發觸頂，那時候是 6 度底噪 + 12 度後座 = 18 度，等於朝那個方向灑出去而已
     recoil: 2.0
     recoil_max: 12.0
-    recoil_recovery: 8.0
+    recoil_recovery: 0.85
     cooldown_ticks: 24
     projectile_speed: 2.6
     gravity: 0.05
@@ -214,16 +245,31 @@ weapons:
     splash_radius: 0
     pierce: 0.25
     knockback: 0.45
-    # 逼你站定：門檻最高，而且力道直接換成準度
+    # 門檻最高，逼你站定。affects 是空的不是漏寫：spread_degrees 已經是 0，
+    # 力道對散佈再乘一次還是 0——寫 [spread] 只是一句沒有作用的宣告。
+    # 這把武器的準度完全由下面的後座力決定
     charge:
       curve: linear
       min_draw: 0.3
-      affects: [spread]
+      affects: []
     spread_degrees: 0
-    # 單發極準，但連著開就完全失去狙擊的意義
+    # 單發極準，但連著開就完全失去狙擊的意義——這句話以前是假的。
+    #
+    # 回復曾經是 10°/秒，而冷卻是 1.5 秒，所以每打一發之間會回復 15°，遠超過單發累積的 2.5°。
+    # 換句話說**後座力永遠停在 0**，用最快的速度連打也發發正中紅心。這條在全部七把武器上
+    # 都成立（機槍那句「打滿一梭最後幾發已經散到 9 度」也從來沒有發生過）。
+    #
+    # 1.0°/秒 的算法：每發之間回復 1.5°、單發累積 2.5°，淨增 1.0°。
+    #   連續速射 → 第 2 發 1°、第 5 發 4°、第 9 發觸頂 8°（30 格外偏 4 格，等於打不中）
+    #   每 3 秒一發 → 回復 3° > 累積 2.5°，永遠維持 0°，跟以前完全一樣
+    # 所以分界線落在「你有沒有在瞄」：慢慢打的狙擊手不受影響，拿它掃怪的人會越打越歪。
+    #
+    # 這是衝著中場搶賞金來的。賞金是先殺先得、贏者全拿，所以重點不是「每塊錢多少傷害」
+    # （狙擊本來就是全場最貴的），是**清場速度**——平直彈道 + 永不失準的話，別人還在算
+    # 拋物線落點，狙擊已經一發一隻把整群收乾淨了。現在它得慢下來，那段時間就是別人的機會
     recoil: 2.5
     recoil_max: 8.0
-    recoil_recovery: 10.0
+    recoil_recovery: 1.0
     cooldown_ticks: 30
     projectile_speed: 5.0
     # 彈道平直：重力極低（平射約 93 格才落地），背下來的落點不會隨距離大幅改變。
@@ -249,9 +295,11 @@ weapons:
       min_draw: 0.2
       affects: [speed]   # 只影響射程，傷害維持固定，平衡不位移
     spread_degrees: 1.6
+    # 影響最小的一把：5 度封頂在 20 格外只偏 1.75 格，而它的濺射半徑就有 2.5 格——
+    # 對高爆彈來說後座力接近裝飾。留著是為了一致性，真正限制它的是 2 秒的冷卻
     recoil: 1.2
     recoil_max: 5.0
-    recoil_recovery: 6.0
+    recoil_recovery: 0.3
     cooldown_ticks: 40
     projectile_speed: 2.4
     gravity: 0.06
@@ -273,10 +321,10 @@ weapons:
       min_draw: 0
       affects: []
     spread_degrees: 0.3
-    # 每秒 10 發，單發加一點點就會在持續射擊時明顯散開
+    # 每秒 10 發，單發加一點點就會在持續射擊時明顯散開：照射 4 秒（40 發）觸頂 5 度
     recoil: 0.25
     recoil_max: 5.0
-    recoil_recovery: 5.0
+    recoil_recovery: 1.25
     cooldown_ticks: 2
     # 一 tick 飛 20 格 + 零重力 ＝ 幾乎是即時命中的直線光束。
     # 壽命曾經是 6，那等於一道 120 格的硬牆——雙方站得遠一點時它連場地都跨不過去，
@@ -316,6 +364,52 @@ weapons:
     trail_color: "#FF2E2E"
     trail_scale: 1.8
     fire_sound: minecraft:entity.firework_rocket.launch
+
+  # 寶貝蛋：唯一一發**不造成任何傷害**的彈藥。落地孵出 1~2 隻隨機敵對生物。
+  #
+  # 飛行參數整組照抄高爆彈（初速 2.4、重力 0.06、蓄力影響射程），所以會用高爆彈的人
+  # 立刻就會丟這顆——它們的落點是一樣的。這是刻意的：學一條拋物線，兩種用途。
+  #
+  # damage 與 splash_radius 寫著但完全不生效（spawn_mobs 有東西就走另一條命中路徑），
+  # 留 0 是為了不讓人以為它偷偷有傷害。
+  #
+  # 它賣的是**打斷對手的節奏**。中場的怪是收入、鼠疫是災難，這顆是「有人正在對你使壞」——
+  # 唯一一個由對手主動決定什麼時候發生的干擾，而那個差別是心理上的。
+  # 對方正在專心蓋牆或瞄準時，牆角忽然冒出一隻衛道士，他得放下手上的事。
+  #
+  # 六種可能的生物裡苦力怕真的會炸掉牆（見 mobs.yml 的 pest），所以它不是純惡作劇，
+  # 但期望值不高——一半的機率你只是丟了一隻煩人的東西過去。
+  #
+  # 冷卻 60 tick（3 秒）比高爆彈慢：它不該能連續丟，那會變成刷怪塔
+  egg:
+    name: 寶貝蛋
+    item: minecraft:turtle_egg
+    damage: 0
+    splash_radius: 0
+    pierce: 0
+    knockback: 0
+    charge:
+      curve: linear
+      min_draw: 0.2
+      affects: [speed]
+    spread_degrees: 1.6
+    recoil: 1.0
+    recoil_max: 4.0
+    recoil_recovery: 0.25
+    cooldown_ticks: 60
+    projectile_speed: 2.4
+    gravity: 0.06
+    lifetime_ticks: 200
+    # false：這顆不碰方塊，落在牆上就在那裡孵
+    breaks_blocks: false
+    # 命中時放 1~2 隻，每一發重抽。種類從 mobs.yml 的 pest 逐隻隨機
+    spawn_mobs: [pest]
+    spawn_min: 1
+    spawn_max: 2
+    trail_particle: minecraft:happy_villager
+    trail_color: "#7CE07C"
+    trail_scale: 1.5
+    fire_sound: minecraft:entity.egg.throw
 
   drone:
     name: 無人機

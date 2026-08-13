@@ -84,6 +84,18 @@ public record WeaponDef(
         /** 命中的方塊是否會被打掉（只在競技場範圍內生效）。 */
         boolean breaksBlocks,
 
+        /**
+         * 命中時在落點生出哪幾種怪（對應 mobs.yml 的 id）；空 ＝ 這不是投放型武器。
+         *
+         * <p>有這一欄的彈藥走完全不同的命中路徑：**不造成任何傷害、也不碰方塊**，只放怪。
+         * 所以它的傷害與濺射半徑填什麼都無所謂，飛行參數才是它的全部——
+         * 那決定了你丟不丟得進對方的院子。
+         */
+        List<String> spawnMobs,
+        /** 命中時放幾隻，在 min~max 之間每一發重抽。 */
+        int spawnMin,
+        int spawnMax,
+
         /** 一次擊發消耗幾發。散彈打出 5 顆但通常只算 1 發，所以這跟 pellets 是兩回事。 */
         int ammoPerShot,
         /** 開場就配給的量。 */
@@ -125,6 +137,12 @@ public record WeaponDef(
                 && map.get("affects") instanceof List<?> list
                 ? list.stream().map(String::valueOf).toList()
                 : List.of("speed");
+
+        List<String> spawnMobs = section.get("spawn_mobs") instanceof List<?> list
+                ? list.stream().map(String::valueOf).toList()
+                : List.of();
+        int spawnMin = Math.max(1, YamlConfig.i(section, "spawn_min", 1));
+
         return new WeaponDef(
                 id,
                 YamlConfig.str(section, "name", id),
@@ -156,6 +174,9 @@ public record WeaponDef(
                 Math.max(1, YamlConfig.i(section, "lifetime_ticks", 120)),
                 YamlConfig.bool(section, "auto", false),
                 YamlConfig.bool(section, "breaks_blocks", true),
+                spawnMobs,
+                spawnMin,
+                Math.max(spawnMin, YamlConfig.i(section, "spawn_max", spawnMin)),
                 Math.max(1, YamlConfig.i(section, "ammo_per_shot", 1)),
                 Math.max(0, YamlConfig.i(section, "starting_ammo", 0)),
                 Identifier.parse(YamlConfig.str(section, "trail_particle", "minecraft:crit")),
@@ -230,5 +251,10 @@ public record WeaponDef(
      */
     public double damageVsBlock() {
         return damage;
+    }
+
+    /** 這是不是一發「投放怪物」的彈藥。是的話它完全不造成傷害，見 {@link #spawnMobs}。 */
+    public boolean spawnsMobs() {
+        return !spawnMobs.isEmpty();
     }
 }

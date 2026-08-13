@@ -5,6 +5,9 @@ import com.xinbow99.fortressduel.battle.Duel;
 import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
+import com.xinbow99.fortressduel.mobs.entity.MobDef;
+import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
+import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -88,6 +91,11 @@ public final class WeaponSystem {
 
     private final ConfigManager config;
     private final DuelManager duels;
+    /**
+     * 技能引擎。投放型彈藥（寶貝蛋）孵出來的怪要跟突發事件的怪走同一條路——
+     * 掛技能、登記賞金、帶上對戰標籤，見 {@link #hatch}。
+     */
+    private final SkillEngine skills;
 
     private final List<Projectile> projectiles = new ArrayList<>();
     /** 玩家 → 各武器的剩餘冷卻（tick）。 */
@@ -102,9 +110,10 @@ public final class WeaponSystem {
     /** 每一場對戰裡、每一格已經累積的傷害。 */
     private final Map<Duel, Map<BlockPos, Float>> blockDamage = new HashMap<>();
 
-    public WeaponSystem(ConfigManager config, DuelManager duels) {
+    public WeaponSystem(ConfigManager config, DuelManager duels, SkillEngine skills) {
         this.config = config;
         this.duels = duels;
+        this.skills = skills;
     }
 
     public void register() {
@@ -562,8 +571,10 @@ public final class WeaponSystem {
         Vec3 from = projectile.pos;
         Vec3 to = projectile.nextPos();
 
-        // 飛出競技場就消失。用終點判斷而不是起點——擦過框線的那一發不該還打得到外面
+        // 飛出競技場就消失。用終點判斷而不是起點——擦過框線的那一發不該還打得到外面。
+        // 軌跡照畫：看到自己那一發飛出界，比它憑空消失好懂
         if (!projectile.duel.arena().region().contains(to.x, to.y, to.z)) {
+            trail(level, projectile, from, to);
             projectile.dead = true;
             return;
         }
@@ -577,6 +588,9 @@ public final class WeaponSystem {
                 Entity::isAlive,
                 0.3f);
         if (entityHit != null) {
+            // 先畫到命中點再結算：不畫的話最後那一段是斷的，而那一段正好是「打中了沒」
+            // 最需要看清楚的地方
+            trail(level, projectile, from, entityHit.getLocation());
             onHit(projectile, level, entityHit.getLocation(), entityHit.getEntity(), null);
             return;
         }
@@ -586,6 +600,7 @@ public final class WeaponSystem {
         BlockHitResult blockHit = level.clip(new ClipContext(
                 from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, CollisionContext.empty()));
         if (blockHit.getType() == HitResult.Type.BLOCK) {
+            trail(level, projectile, from, blockHit.getLocation());
             onHit(projectile, level, blockHit.getLocation(), null, blockHit.getBlockPos());
             return;
         }
@@ -594,6 +609,17 @@ public final class WeaponSystem {
         projectile.advance();
     }
 
+    /**
+     * 畫一段軌跡。
+     *
+     * <p><b>一定要 force。</b>不加的話 {@code sendParticles} 只送給 32 格內的玩家，而場地
+     * 有 80~132 格寬——你自己那一發飛過 32 格之後軌跡就斷了，剩下的路線完全看不到。
+     * 而這個遊戲是靠看彈道來修正瞄準的，斷在 32 格等於這個機制只在貼臉時有用。
+     * force 之後範圍變成 512 格，整座場地都涵蓋得到。
+     *
+     * <p>{@code alwaysShow} 也開：客戶端的粒子設定調到「最少」時，一般粒子會被大量丟棄，
+     * 而軌跡不是裝飾——它是瞄準的依據，被丟掉的話那個玩家等於瞎打。
+     */
     private void trail(ServerLevel level, Projectile projectile, Vec3 from, Vec3 to) {
         ParticleOptions particle = particle(projectile.weapon);
         // 一格一顆，畫成連續的線而不是一串點。但上限 TRAIL_MAX_STEPS——
@@ -601,7 +627,7 @@ public final class WeaponSystem {
         int steps = Math.clamp((long) from.distanceTo(to), 1, TRAIL_MAX_STEPS);
         for (int i = 0; i < steps; i++) {
             Vec3 point = from.lerp(to, (double) i / steps);
-            level.sendParticles(particle, point.x, point.y, point.z, 1, 0, 0, 0, 0);
+            level.sendParticles(particle, true, true, point.x, point.y, point.z, 1, 0, 0, 0, 0);
         }
     }
 
@@ -612,7 +638,16 @@ public final class WeaponSystem {
         projectile.dead = true;
         WeaponDef weapon = projectile.weapon;
 
-        level.sendParticles(ParticleTypes.EXPLOSION, location.x, location.y, location.z, 1, 0, 0, 0, 0);
+        // 同樣要 force：命中點常常在 32 格外，而「我這一發打到哪」跟軌跡一樣是瞄準的依據
+        level.sendParticles(ParticleTypes.EXPLOSION, true, true,
+                location.x, location.y, location.z, 1, 0, 0, 0, 0);
+
+        // 投放型彈藥：不造成傷害、不碰方塊，只把怪放下來。要排在傷害路徑前面，
+        // 因為它的傷害與濺射半徑純粹是為了讓彈道跟高爆彈一致才照抄的，不該真的生效
+        if (weapon.spawnsMobs()) {
+            hatch(projectile, level, location);
+            return;
+        }
 
         if (weapon.splashRadius() > 0) {
             splash(projectile, level, location);
@@ -624,6 +659,39 @@ public final class WeaponSystem {
             damageEntity(projectile, level, living, projectile.damage(), projectile.velocity, 1.0);
         } else if (directBlock != null) {
             damageBlock(projectile, level, directBlock, projectile.damageVsBlock());
+        }
+    }
+
+    /**
+     * 投放型彈藥落地：在命中點孵出幾隻怪。
+     *
+     * <p>走 {@link MobSpawner#spawnPack} 跟突發事件同一條路，所以牠們拿得到 mobs.yml 的數值、
+     * 掛得上技能，而且**帶著對戰標籤**——對戰結束時會跟事件生出來的怪一起被掃掉。
+     * 自己另外生一隻的話那隻會永遠留在世界上（生成時關掉了自然消失，見 MobSpawner）。
+     *
+     * <p>落在框線外就不放：那會把怪丟到不屬於這場對戰的世界裡去。
+     */
+    private void hatch(Projectile projectile, ServerLevel level, Vec3 location) {
+        Duel duel = projectile.duel;
+        BlockPos origin = BlockPos.containing(location);
+        if (!duel.arena().region().contains(origin)) return;
+
+        WeaponDef weapon = projectile.weapon;
+        int count = weapon.spawnMin() + (weapon.spawnMax() > weapon.spawnMin()
+                ? level.getRandom().nextInt(weapon.spawnMax() - weapon.spawnMin() + 1)
+                : 0);
+
+        for (int i = 0; i < count; i++) {
+            String mobId = weapon.spawnMobs().get(level.getRandom().nextInt(weapon.spawnMobs().size()));
+            MobDef def = config.mobs().byId(mobId);
+            if (def == null) {
+                FortressDuel.LOGGER.warn("Weapon {} spawns mob '{}' which is not defined in mobs.yml",
+                        weapon.id(), mobId);
+                continue;
+            }
+            // 一次放一隻：數量由武器的 spawn_min/max 決定，不是那隻怪的 pack_min/max——
+            // 一顆蛋孵出一整群的話這就不是騷擾道具而是一發清場的核彈了
+            MobSpawner.spawnOne(level, def, origin, 1, skills);
         }
     }
 
@@ -722,7 +790,7 @@ public final class WeaponSystem {
         if (!region.contains(pos)) return false;
 
         // 框線是場地的一部分，任何武器都拆不掉
-        if (region.isHorizontalEdge(pos.getX(), pos.getZ())) return false;
+        if (region.isShell(pos)) return false;
 
         BlockState state = level.getBlockState(pos);
         if (state.isAir() || state.liquid()) return false;

@@ -38,6 +38,17 @@ public record SkillDef(
          * 不鎖的話殘血之後每挨一下都會再觸發一次。
          */
         boolean once,
+        /**
+         * 一隻怪一輩子最多發動幾次；0 ＝ 不限。{@code once: true} 等於 {@code max_uses: 1}。
+         *
+         * <p>會生出新實體的技能（分身、召喚）光靠冷卻擋不住：冷卻只是「等一下再來」，
+         * 而一隻活得夠久的怪就能一直來。巨獸的召喚就是這樣——每 40 秒吐出一整群，
+         * 玩家的最優解變成不殺牠、站旁邊收割，而實體數量沒有任何東西擋著。
+         *
+         * <p>用次數上限而不是只有 once，是因為「召喚兩次」跟「召喚一次」在體感上差很多：
+         * 前者讀得出「牠會一直叫人」這件事，後者只是一個開場動畫。
+         */
+        int maxUses,
         /** 發動時給雙方看的訊息；空字串 ＝ 不公告。 */
         String message,
         /** 各 type 自己解讀的參數。 */
@@ -61,8 +72,19 @@ public record SkillDef(
                 YamlConfig.d(section, "interval_seconds", 10.0),
                 YamlConfig.d(section, "health_threshold", 0.3),
                 YamlConfig.bool(section, "once", false),
+                YamlConfig.i(section, "max_uses", 0),
                 YamlConfig.str(section, "message", ""),
                 params);
+    }
+
+    /**
+     * 這個技能一隻怪最多能發動幾次；0 ＝ 不限。
+     *
+     * <p>{@code once} 只是 {@code max_uses: 1} 的別名，兩個都寫時取比較嚴的那個。
+     */
+    public int useLimit() {
+        if (once) return maxUses > 0 ? Math.min(1, maxUses) : 1;
+        return Math.max(0, maxUses);
     }
 
     public int cooldownTicks() {

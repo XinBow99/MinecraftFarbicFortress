@@ -75,6 +75,20 @@ public record Region(int minX, int minY, int minZ, int maxX, int maxY, int maxZ)
         return x == minX || x == maxX || z == minZ || z == maxZ;
     }
 
+    /**
+     * 這一格是不是這個盒子的外殼——四面牆、天花板、或地板。
+     *
+     * <p>外殼是場地本身的一部分：挖不掉、打不掉、炸不掉。判斷「能不能動這一格」一律用這個，
+     * 不要只用 {@link #isHorizontalEdge}——那條漏掉了頂和底，而封起來之後那兩面同樣是牆。
+     */
+    public boolean isShell(int x, int y, int z) {
+        return contains(x, y, z) && (isHorizontalEdge(x, z) || y == minY || y == maxY);
+    }
+
+    public boolean isShell(BlockPos pos) {
+        return isShell(pos.getX(), pos.getY(), pos.getZ());
+    }
+
     public Region expand(int d) {
         return new Region(minX - d, minY - d, minZ - d, maxX + d, maxY + d, maxZ + d);
     }

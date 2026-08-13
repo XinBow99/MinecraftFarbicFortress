@@ -21,6 +21,14 @@ public record DuelSettings(
         int arenaDepth,
         int arenaMinSeparation,
         String borderBlock,
+        /**
+         * 天花板與地板用什麼方塊；留空 ＝ 不封頂不封底（只有一圈牆）。
+         *
+         * <p>設了就是一個封閉的盒子，四面牆也跟著長到盒底與盒頂——玩家往上爬或往下挖都會
+         * 撞到同一個殼。跟牆用不同的方塊是為了視覺：紅色玻璃當天花板會把整片天空染紅。
+         */
+        String borderCapBlock,
+        /** 沒封頂時，牆從地表往上長幾格。封頂時這個值不參與（牆一律長滿整個盒子）。 */
         int borderHeight,
         boolean restoreTerrain,
         /** 競技場邊界離最外側玩家至少留幾格。 */
@@ -109,6 +117,27 @@ public record DuelSettings(
          * 打的不是同一場遊戲。關掉它是給開發用的——每次測試都被收走測試道具很難做事。
          */
         boolean clearInventory,
+        /**
+         * 對戰期間把時間釘在哪個時刻：noon／day／night／midnight；空字串 ＝ 不鎖。
+         *
+         * <p>入夜之後什麼都看不見，而這是一個靠看彈道打的遊戲——勝負不該取決於它剛好開在幾點。
+         */
+        String lockTime,
+        /** 對戰期間強制晴天。下雨會讓遠處的彈道粒子糊掉。 */
+        boolean lockWeather,
+        /**
+         * 自己也打得到自己的熊貓。
+         *
+         * <p>false ＝ 只有對手的攻擊算數（原本的行為）。true ＝ 攻擊階段裡，任何一方玩家打在
+         * 熊貓身上的傷害都算，包含自己的濺射誤傷。
+         *
+         * <p>打開之後高爆彈與無人機在自家陣地變成真的危險：3.5 格的濺射從自己牆內炸出去，
+         * 波及的是自己要守的東西。那把「站在核心旁邊近距離轟」從免費變成有代價。
+         *
+         * <p>怪物、摔落、隕石造成的傷害仍然一律免疫——那些不是任何一方的操作，
+         * 因為一個你控制不了的意外而輸掉整場仍然是很糟的體驗。
+         */
+        boolean guardianFriendlyFire,
 
         // ---- 突發事件 ----
         int incidentIntervalSeconds,
@@ -148,6 +177,7 @@ public record DuelSettings(
                 cfg.getInt("arena.depth", 8),
                 cfg.getInt("arena.min_separation", 24),
                 cfg.getString("arena.border_block", "minecraft:barrier"),
+                cfg.getString("arena.border_cap_block", ""),
                 cfg.getInt("arena.border_height", 32),
                 cfg.getBoolean("arena.restore_terrain", true),
                 cfg.getInt("arena.margin", 16),
@@ -174,9 +204,12 @@ public record DuelSettings(
                 Math.max(0, cfg.getInt("battle.build_timeout_seconds", 300)),
                 cfg.getInt("battle.combat_seconds", 60),
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
-                startingItems(cfg),
+                cfg.getStringList("battle.starting_items"),
                 cfg.getString("battle.gamemode", "survival"),
                 cfg.getBoolean("battle.clear_inventory", true),
+                cfg.getString("battle.lock_time", "noon"),
+                cfg.getBoolean("battle.lock_weather", true),
+                cfg.getBoolean("battle.guardian_friendly_fire", true),
 
                 cfg.getInt("incident.interval_seconds", 120),
 
@@ -186,15 +219,6 @@ public record DuelSettings(
 
                 cfg.getDouble("weapon.block_hp_per_hardness", 10.0),
                 cfg.getDoubleMap("weapon.block_hp"));
-    }
-
-    /**
-     * 設定檔沒寫 starting_items 時給一份預設，而不是什麼都不發——雙方在建造階段手上是空的話
-     * 第一回合完全沒事做（建材要自己挖，但挖也需要時間）。
-     */
-    private static List<String> startingItems(YamlConfig cfg) {
-        List<String> configured = cfg.getStringList("battle.starting_items");
-        return configured.isEmpty() ? List.of("minecraft:dirt 20", "minecraft:bamboo 16") : configured;
     }
 
     /**
