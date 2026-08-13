@@ -5,6 +5,9 @@ import com.xinbow99.fortressduel.battle.Duel;
 import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
+import com.xinbow99.fortressduel.mobs.entity.MobDef;
+import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
+import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -88,6 +91,11 @@ public final class WeaponSystem {
 
     private final ConfigManager config;
     private final DuelManager duels;
+    /**
+     * 技能引擎。投放型彈藥（寶貝蛋）孵出來的怪要跟突發事件的怪走同一條路——
+     * 掛技能、登記賞金、帶上對戰標籤，見 {@link #hatch}。
+     */
+    private final SkillEngine skills;
 
     private final List<Projectile> projectiles = new ArrayList<>();
     /** 玩家 → 各武器的剩餘冷卻（tick）。 */
@@ -102,9 +110,10 @@ public final class WeaponSystem {
     /** 每一場對戰裡、每一格已經累積的傷害。 */
     private final Map<Duel, Map<BlockPos, Float>> blockDamage = new HashMap<>();
 
-    public WeaponSystem(ConfigManager config, DuelManager duels) {
+    public WeaponSystem(ConfigManager config, DuelManager duels, SkillEngine skills) {
         this.config = config;
         this.duels = duels;
+        this.skills = skills;
     }
 
     public void register() {
@@ -633,6 +642,13 @@ public final class WeaponSystem {
         level.sendParticles(ParticleTypes.EXPLOSION, true, true,
                 location.x, location.y, location.z, 1, 0, 0, 0, 0);
 
+        // 投放型彈藥：不造成傷害、不碰方塊，只把怪放下來。要排在傷害路徑前面，
+        // 因為它的傷害與濺射半徑純粹是為了讓彈道跟高爆彈一致才照抄的，不該真的生效
+        if (weapon.spawnsMobs()) {
+            hatch(projectile, level, location);
+            return;
+        }
+
         if (weapon.splashRadius() > 0) {
             splash(projectile, level, location);
             return;
@@ -643,6 +659,39 @@ public final class WeaponSystem {
             damageEntity(projectile, level, living, projectile.damage(), projectile.velocity, 1.0);
         } else if (directBlock != null) {
             damageBlock(projectile, level, directBlock, projectile.damageVsBlock());
+        }
+    }
+
+    /**
+     * 投放型彈藥落地：在命中點孵出幾隻怪。
+     *
+     * <p>走 {@link MobSpawner#spawnPack} 跟突發事件同一條路，所以牠們拿得到 mobs.yml 的數值、
+     * 掛得上技能，而且**帶著對戰標籤**——對戰結束時會跟事件生出來的怪一起被掃掉。
+     * 自己另外生一隻的話那隻會永遠留在世界上（生成時關掉了自然消失，見 MobSpawner）。
+     *
+     * <p>落在框線外就不放：那會把怪丟到不屬於這場對戰的世界裡去。
+     */
+    private void hatch(Projectile projectile, ServerLevel level, Vec3 location) {
+        Duel duel = projectile.duel;
+        BlockPos origin = BlockPos.containing(location);
+        if (!duel.arena().region().contains(origin)) return;
+
+        WeaponDef weapon = projectile.weapon;
+        int count = weapon.spawnMin() + (weapon.spawnMax() > weapon.spawnMin()
+                ? level.getRandom().nextInt(weapon.spawnMax() - weapon.spawnMin() + 1)
+                : 0);
+
+        for (int i = 0; i < count; i++) {
+            String mobId = weapon.spawnMobs().get(level.getRandom().nextInt(weapon.spawnMobs().size()));
+            MobDef def = config.mobs().byId(mobId);
+            if (def == null) {
+                FortressDuel.LOGGER.warn("Weapon {} spawns mob '{}' which is not defined in mobs.yml",
+                        weapon.id(), mobId);
+                continue;
+            }
+            // 一次放一隻：數量由武器的 spawn_min/max 決定，不是那隻怪的 pack_min/max——
+            // 一顆蛋孵出一整群的話這就不是騷擾道具而是一發清場的核彈了
+            MobSpawner.spawnOne(level, def, origin, 1, skills);
         }
     }
 

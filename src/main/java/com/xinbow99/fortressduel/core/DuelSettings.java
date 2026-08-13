@@ -125,6 +125,19 @@ public record DuelSettings(
         String lockTime,
         /** 對戰期間強制晴天。下雨會讓遠處的彈道粒子糊掉。 */
         boolean lockWeather,
+        /**
+         * 自己也打得到自己的熊貓。
+         *
+         * <p>false ＝ 只有對手的攻擊算數（原本的行為）。true ＝ 攻擊階段裡，任何一方玩家打在
+         * 熊貓身上的傷害都算，包含自己的濺射誤傷。
+         *
+         * <p>打開之後高爆彈與無人機在自家陣地變成真的危險：3.5 格的濺射從自己牆內炸出去，
+         * 波及的是自己要守的東西。那把「站在核心旁邊近距離轟」從免費變成有代價。
+         *
+         * <p>怪物、摔落、隕石造成的傷害仍然一律免疫——那些不是任何一方的操作，
+         * 因為一個你控制不了的意外而輸掉整場仍然是很糟的體驗。
+         */
+        boolean guardianFriendlyFire,
 
         // ---- 突發事件 ----
         int incidentIntervalSeconds,
@@ -196,6 +209,7 @@ public record DuelSettings(
                 cfg.getBoolean("battle.clear_inventory", true),
                 cfg.getString("battle.lock_time", "noon"),
                 cfg.getBoolean("battle.lock_weather", true),
+                cfg.getBoolean("battle.guardian_friendly_fire", true),
 
                 cfg.getInt("incident.interval_seconds", 120),
 

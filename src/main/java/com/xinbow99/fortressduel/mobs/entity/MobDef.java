@@ -33,6 +33,18 @@ public record MobDef(
         double health,
         double attackDamage,
         double movementSpeed,
+        /**
+         * 會飛的生物的飛行速度；0 ＝ 不動牠原本的值。
+         *
+         * <p>需要獨立一欄是因為**飛行生物不吃 {@code movement_speed}**：悅靈、蜜蜂、蝙蝠走的是
+         * {@code FlyingMoveControl}，速度來源是 {@code FLYING_SPEED} 這個另一個屬性。
+         * 所以在牠們身上寫 {@code movement_speed: 0.5} 是完全沒有作用的——不會報錯，
+         * 只是那隻怪照原版速度飛（悅靈是 0.1），而設定檔看起來像已經調過了。
+         *
+         * <p>預設 0（不動）而不是跟著 {@code movement_speed}：直接套用的話會連蜜蜂與蝙蝠一起改，
+         * 而牠們原版的飛行速度比設定檔裡那個數字快，等於默默把兩種怪變慢。
+         */
+        double flyingSpeed,
         /** 體型倍率，1.0 ＝ 原版大小。 */
         double scale,
         /** 一次降臨幾隻。 */
@@ -62,6 +74,7 @@ public record MobDef(
                 YamlConfig.d(section, "health", 20.0),
                 YamlConfig.d(section, "attack_damage", 3.0),
                 YamlConfig.d(section, "movement_speed", 0.25),
+                YamlConfig.d(section, "flying_speed", 0.0),
                 YamlConfig.d(section, "scale", 1.0),
                 min,
                 max,
