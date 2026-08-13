@@ -14,11 +14,9 @@ import net.minecraft.world.entity.LivingEntity;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -55,13 +53,14 @@ public final class SkillEngine {
         return duels;
     }
 
-    /** 一隻被追蹤的怪：牠的設定、連鎖深度、各技能的冷卻與「只觸發一次」的記錄。 */
+    /** 一隻被追蹤的怪：牠的設定、連鎖深度、各技能的冷卻與已經發動過幾次。 */
     private static final class Tracked {
         final MobDef def;
         final int depth;
         final Map<String, Integer> cooldowns = new HashMap<>();
         final Map<String, Integer> intervals = new HashMap<>();
-        final Set<String> firedOnce = new HashSet<>();
+        /** 各技能已經成功發動幾次，用來擋 {@code max_uses}／{@code once}。 */
+        final Map<String, Integer> uses = new HashMap<>();
 
         Tracked(MobDef def, int depth) {
             this.def = def;
@@ -173,11 +172,9 @@ public final class SkillEngine {
             if (skill.trigger() != trigger) continue;
             if (state.cooldowns.containsKey(skill.id())) continue;
 
-            // 一輩子只一次。殘血技能永遠算在內——殘血是持續狀態，不鎖的話每挨一下就再觸發
-            if ((skill.once() || trigger == SkillTrigger.ON_LOW_HEALTH)
-                    && state.firedOnce.contains(skill.id())) {
-                continue;
-            }
+            // 次數上限。殘血技能永遠是一次——殘血是持續狀態，不鎖的話每挨一下就再觸發
+            int limit = trigger == SkillTrigger.ON_LOW_HEALTH ? 1 : skill.useLimit();
+            if (limit > 0 && state.uses.getOrDefault(skill.id(), 0) >= limit) continue;
             if (trigger == SkillTrigger.ON_LOW_HEALTH
                     && entity.getHealth() > entity.getMaxHealth() * skill.healthThreshold()) {
                 continue;
@@ -194,7 +191,8 @@ public final class SkillEngine {
             SkillContext ctx = new SkillContext(level, entity, state.def, skill, attacker, state.depth);
             if (!impl.cast(ctx)) continue;
 
-            state.firedOnce.add(skill.id());
+            // 只算真的發動成功的：拆不到方塊、深度到頂那些回 false 的不該吃掉次數
+            state.uses.merge(skill.id(), 1, Integer::sum);
             if (skill.cooldownTicks() > 0) {
                 state.cooldowns.put(skill.id(), skill.cooldownTicks());
             }

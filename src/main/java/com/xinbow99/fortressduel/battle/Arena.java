@@ -87,8 +87,14 @@ public final class Arena {
                           BuildingPlacer buildings) {
         int offset = settings.coreOffset();
         penRadiusInner = Math.max(0, settings.penRadius() - 1);
-        penA = penSpot(playerA, playerB, offset);
-        penB = penSpot(playerB, playerA, offset);
+
+        // 夾進場內：框線是在**接受挑戰那一刻**就框好的（見 build），而圈是在倒數結束後才放，
+        // 中間玩家可以走動。有人跑到玻璃邊上等倒數的話，penSpot 還會再往外推 core_offset 格，
+        // 於是整片平台會蓋到框線外面去。夾的是圈的位置而不是平台的每一格，
+        // 這樣佈局只是整體往內移，不會被切掉一半
+        int margin = penFootprint(settings);
+        penA = clampPen(penSpot(playerA, playerB, offset), margin);
+        penB = clampPen(penSpot(playerB, playerA, offset), margin);
 
         // 平台要先鋪：placePen 與軍火商都靠 surfaceY 找地面，鋪完之後那個地面才是平台
         placePlatform(penA, settings);
@@ -127,11 +133,18 @@ public final class Arena {
         for (int dx = -r; dx <= r; dx++) {
             for (int dz = -r; dz <= r; dz++) {
                 BlockPos floor = new BlockPos(center.getX() + dx, surface, center.getZ() + dz);
+                // 圈心已經被 clampPen 夾進場內，所以正常情況這裡一格都不會被跳過。
+                // 留著是因為「往外鋪一片」這個動作只要有人改了半徑或偏移就可能溢出，
+                // 而溢出的後果是**改到不屬於這場對戰的世界**、或把玻璃牆蓋掉——
+                // 那兩種都不會報錯，只會變成有人事後才發現的怪事
+                if (!region.contains(floor) || region.isShell(floor)) continue;
+
                 snapshot.record(level, floor);
                 level.setBlock(floor, planks, 2);
 
-                // 平台上方淨空：地形可能是山坡，不清的話玩家會被埋在土裡
-                for (int y = surface + 1; y <= Math.min(region.maxY(), surface + 4); y++) {
+                // 平台上方淨空：地形可能是山坡，不清的話玩家會被埋在土裡。
+                // 上界收到 maxY - 1：maxY 那一層是玻璃天花板，清到它等於在自己的場地上開個天窗
+                for (int y = surface + 1; y <= Math.min(region.maxY() - 1, surface + 4); y++) {
                     BlockPos pos = new BlockPos(floor.getX(), y, floor.getZ());
                     if (level.getBlockState(pos).isAir()) continue;
                     snapshot.record(level, pos);
@@ -192,6 +205,44 @@ public final class Arena {
         // 兩座圈幾乎重疊（理論上不會，但不想留一個會 NaN 的除法）就退化成「沒有分界」
         axisDir = length < 1.0E-3 ? null : axis.scale(1.0 / length);
         neutralHalf = length * Math.clamp(settings.neutralFraction(), 0.0, 0.9) / 2.0;
+    }
+
+    /**
+     * 一座熊貓圈周圍會用掉多少格。以圈心為原點，往外長得最遠的那個東西決定它。
+     *
+     * <p>目前是三樣：平台（{@code platform_radius}）、柵欄圈本身（{@code pen_radius}）、
+     * 以及站在圈後方 {@code pen_radius + 2} 格的軍火商。
+     * 之後再加以圈為中心往外擺的東西，要記得算進來。
+     *
+     * <p>{@code arena_buildings} 沒有算進去：那些的尺寸是資料驅動的（buildings.yml），
+     * 這裡拿不到通用的邊界。它們額外靠 {@link #placePlatform} 那種逐格檢查兜底。
+     */
+    private static int penFootprint(DuelSettings settings) {
+        return Math.max(settings.platformRadius(), settings.penRadius() + 2);
+    }
+
+    /**
+     * 把圈的位置夾進場內，讓它的整片佔地都還在框線裡面。
+     *
+     * <p>夾到 {@code minX + 1}（不是 minX）：框線那一圈是實心的牆，貼著它蓋等於把牆蓋掉。
+     *
+     * <p>場地窄到連一份佔地都放不下時退回中心——那種局面下怎麼放都會超出去，
+     * 至少置中的結果是對稱的。實務上碰不到（場地有最小邊長），但這裡不該有一條會產生
+     * 反向區間的 clamp。
+     */
+    private BlockPos clampPen(BlockPos pos, int margin) {
+        int x = clampAxis(pos.getX(), region.minX(), region.maxX(), margin);
+        int z = clampAxis(pos.getZ(), region.minZ(), region.maxZ(), margin);
+
+        // 夾完之後是另一欄了，地面高度得重新問一次
+        int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 4);
+        return new BlockPos(x, y, z);
+    }
+
+    private static int clampAxis(int value, int min, int max, int margin) {
+        int lo = min + 1 + margin;
+        int hi = max - 1 - margin;
+        return lo <= hi ? Math.clamp(value, lo, hi) : (min + max) / 2;
     }
 
     /** 從 self 往「遠離 enemy」的方向退 offset 格，再貼回地面。 */
@@ -285,18 +336,18 @@ public final class Arena {
                 boolean edge = Math.abs(dx) == r || Math.abs(dz) == r;
                 int ground = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3);
 
-                if (edge) {
-                    // 柵欄疊兩格：一格高的話熊貓被推一下就跳出去了
-                    for (int y = ground; y <= ground + 1; y++) {
-                        BlockPos pos = new BlockPos(x, y, z);
+                for (int y = ground; y <= ground + 1; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    // 跟平台同一條兜底：圈心已經夾進場內了，這裡不該有東西被跳過。
+                    // 但「往外圍一圈」一樣是會溢出的動作，而溢出會靜悄悄地改到框線或場外
+                    if (!region.contains(pos) || region.isShell(pos)) continue;
+
+                    if (edge) {
+                        // 柵欄疊兩格：一格高的話熊貓被推一下就跳出去了
                         snapshot.record(level, pos);
                         level.setBlock(pos, fence, 2);
-                    }
-                } else {
-                    // 圈內淨空兩格：熊貓一生出來就卡在方塊裡的話會直接吃到窒息傷害
-                    for (int y = ground; y <= ground + 1; y++) {
-                        BlockPos pos = new BlockPos(x, y, z);
-                        if (level.getBlockState(pos).isAir()) continue;
+                    } else if (!level.getBlockState(pos).isAir()) {
+                        // 圈內淨空兩格：熊貓一生出來就卡在方塊裡的話會直接吃到窒息傷害
                         snapshot.record(level, pos);
                         level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
                     }
@@ -424,6 +475,21 @@ public final class Arena {
 
         Vec3 shifted = pos.add(axisDir.scale(target - s));
         return new Vec3(shifted.x, y, shifted.z);
+    }
+
+    /**
+     * 這個位置落在哪一區。圈還沒放好（沒有分界）時回傳 null。
+     *
+     * <p>給「這個東西本來屬於誰的半場」這種問題用——例如商人是放在哪一側的，
+     * 那要看他**被放下去的位置**，不是他現在飄到哪去了。
+     */
+    public Zone zoneAt(Vec3 pos) {
+        if (!zonesReady()) return null;
+
+        double s = offsetAlongAxis(pos.x, pos.z);
+        if (s < -neutralHalf) return Zone.A;
+        if (s > neutralHalf) return Zone.B;
+        return Zone.NEUTRAL;
     }
 
     /**

@@ -8,6 +8,7 @@ import com.xinbow99.fortressduel.util.InventoryStash;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -70,6 +71,7 @@ public final class DuelManager {
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> abortAll());
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> onJoin(handler.player));
+        ServerPlayerEvents.COPY_FROM.register(this::onRespawnCopy);
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) ->
                 onBlockBreak(level, player instanceof ServerPlayer sp ? sp : null, pos));
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
@@ -344,6 +346,24 @@ public final class DuelManager {
 
         // 對戰本身不在這裡收尾——下一個 tick 的 Duel.tick() 會發現人不見了並判給對手，
         // 這樣「離線判負」只有一條路徑
+    }
+
+    /**
+     * 對戰中死掉，重生後把背包原封不動帶回來。
+     *
+     * <p>{@code InventoryDropMixin} 已經擋掉了死亡掉落，但那只做了一半：原版重生會建一個
+     * **新的** ServerPlayer，而舊玩家身上的東西只有在 {@code keepInventory} 遊戲規則開著時
+     * 才會被複製過去。所以只擋掉落的結果不是「東西留著」，是**東西直接消失**——
+     * 對玩家來說比掉在地上還糟，至少掉在地上還撿得回來。
+     *
+     * <p>不去開 {@code keepInventory} 遊戲規則，理由跟那個 mixin 一樣：那是整個世界的設定，
+     * 會連沒在對戰的人也一起改掉。這裡只複製「死的時候正在對戰」的那個人。
+     *
+     * <p>{@code alive} 為 true 是穿越維度之類的複製，不是死亡，原版自己就會處理。
+     */
+    private void onRespawnCopy(ServerPlayer oldPlayer, ServerPlayer newPlayer, boolean alive) {
+        if (alive || duelOf(oldPlayer) == null) return;
+        newPlayer.getInventory().replaceWith(oldPlayer.getInventory());
     }
 
     /**

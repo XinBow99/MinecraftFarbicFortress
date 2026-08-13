@@ -1,6 +1,7 @@
 package com.xinbow99.fortressduel.npc;
 
 import com.xinbow99.fortressduel.FortressDuel;
+import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.economy.EconomyManager;
@@ -10,6 +11,7 @@ import com.xinbow99.fortressduel.util.Region;
 import com.xinbow99.fortressduel.util.YamlConfig;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -21,7 +23,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.item.Items;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -42,17 +46,23 @@ public final class NpcManager {
     private final ConfigManager config;
     private final EconomyManager economy;
     private final WeaponSystem weapons;
+    /** 把 NPC 關在他那一側。移動本身是原版的事，這裡只畫界線。 */
+    private final NpcBounds bounds;
 
     private volatile Map<String, NpcDef> npcs = Map.of();
     private volatile Map<String, ShopDef> shops = Map.of();
 
     /** 生出來的 NPC → 牠是哪個定義。對戰結束時要照這張表把牠們清掉。 */
     private final Map<UUID, NpcDef> spawned = new HashMap<>();
+    /** 生出來的 NPC → 他**被放下去**的位置。判斷他屬於哪一側要用這個，見 {@link NpcBounds}。 */
+    private final Map<UUID, BlockPos> homes = new HashMap<>();
 
-    public NpcManager(ConfigManager config, EconomyManager economy, WeaponSystem weapons) {
+    public NpcManager(ConfigManager config, EconomyManager economy, WeaponSystem weapons,
+                      DuelManager duels) {
         this.config = config;
         this.economy = economy;
         this.weapons = weapons;
+        this.bounds = new NpcBounds(duels);
     }
 
     public void register() {
@@ -61,6 +71,7 @@ public final class NpcManager {
         DuelEvents.END.register((duel, result) ->
                 removeIn(duel.arena().level(), duel.arena().region()));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> onNpcDeath(entity));
+        ServerTickEvents.END_SERVER_TICK.register(server -> bounds.tick(server, homes));
     }
 
     /**
@@ -71,6 +82,7 @@ public final class NpcManager {
      */
     private void onNpcDeath(LivingEntity entity) {
         NpcDef def = spawned.remove(entity.getUUID());
+        homes.remove(entity.getUUID());
         if (def == null) return;
 
         if (!(entity.level() instanceof ServerLevel level)) return;
@@ -138,15 +150,21 @@ public final class NpcManager {
         entity.snapTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, yaw, 0f);
 
         if (entity instanceof Mob mob) {
-            // 關掉 AI 才會站在原地：不然村民會自己跑去睡覺、被怪追著跑。
-            // 但**不設無敵**——軍火商是可以被打死的資產，守住他是玩家的責任
-            mob.setNoAi(true);
+            // **保留原版 AI**：他會自己走動、會被推、可以被拴繩牽走，那些都交給原版。
+            // 曾經是 setNoAi(true)（讓他站著當介面），但那同時也關掉了原版牽引所依賴的導航，
+            // 於是「牽著他走」得自己重寫一份移動邏輯——那是在跟引擎搶工作。
+            // 現在只加原版不知道的那一條規則：不能離開這場對戰的半場，見 NpcBounds。
+            //
+            // 不設無敵——軍火商是可以被打死的資產，守住他是玩家的責任
             mob.setPersistenceRequired();
             MobSpawner.setMaxHealth(mob, (float) def.health());
             mob.setHealth(mob.getMaxHealth());
         }
 
         spawned.put(entity.getUUID(), def);
+        // 記下他**被放在哪**：之後判斷他屬於哪一側要用這個，不能用他當下的位置——
+        // 一旦他自己走過中線，用當下位置就會判定他本來就屬於對面
+        homes.put(entity.getUUID(), pos.immutable());
         return entity;
     }
 
@@ -169,11 +187,16 @@ public final class NpcManager {
             if (entity == null) {
                 // 已經不在世界上了（被指令清掉、區塊卸載後消失…），記錄留著也沒用
                 it.remove();
+                homes.remove(id);
                 continue;
             }
-            if (entity.level() == level && region.contains(entity.blockPosition())) {
+            // 判準用「他被放在哪」而不是「他現在在哪」：商人有原版 AI，會自己走動也會被牽走，
+            // 用當下位置的話，剛好走到範圍邊緣的那一隻會被漏掉，然後永遠留在世界上
+            BlockPos home = homes.getOrDefault(id, entity.blockPosition());
+            if (entity.level() == level && region.contains(home)) {
                 entity.discard();
                 it.remove();
+                homes.remove(id);
             }
         }
     }
@@ -183,6 +206,19 @@ public final class NpcManager {
     private InteractionResult onInteract(ServerPlayer player, Entity entity) {
         NpcDef def = spawned.get(entity.getUUID());
         if (def == null) return InteractionResult.PASS;
+
+        // 拴繩相關的右鍵一律放行，讓**原版**去處理，我們一行都不寫。兩種情況：
+        //
+        //   手上拿著拴繩        → 要牽起他
+        //   他已經牽在這個人身上 → 要放開他
+        //
+        // 第二條不能靠「手上拿什麼」判斷：原版牽起來的那一刻就把拴繩從手上收走了，
+        // 所以要放繩時玩家的手是**空的**——而空手右鍵正好是開商店的操作。
+        // 少了這條的話繩子綁上去就解不開了，只會一直跳出商店
+        if (player.getMainHandItem().is(Items.LEAD)
+                || (entity instanceof Leashable leashable && leashable.getLeashHolder() == player)) {
+            return InteractionResult.PASS;
+        }
 
         if (def.shop().isEmpty()) {
             return InteractionResult.SUCCESS; // 純裝飾的 NPC：吃掉右鍵，但不做事
