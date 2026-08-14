@@ -585,7 +585,10 @@ public final class Duel {
      */
     public boolean allowGuardianDamage(Side owner, DamageSource source) {
         if (applyingSuffocation) return true;  // 我們自己送的窒息傷害
-        if (!state.canAttack()) return false;
+        // canFire 而不是 canAttack：停火階段也能開火了（只是打不出自己的半場），
+        // 用 canAttack 的話那個階段打自己的熊貓會完全沒有反應——看起來就是友傷壞掉了。
+        // 停火階段對面的彈丸過不了中線，所以這裡放行的實際上只有「自己打自己的」
+        if (!state.canFire()) return false;
         if (!(source.getEntity() instanceof ServerPlayer attacker)) return false;
 
         UUID shooter = attacker.getUUID();
@@ -784,7 +787,7 @@ public final class Duel {
         phaseTicks = settings.combatSeconds() * 20;
         for (ServerPlayer player : players) {
             player.sendSystemMessage(Msg.warn("攻擊階段開始（" + settings.combatSeconds()
-                    + " 秒）：不能再擺方塊，彈道不再受中線限制，開打！"));
+                    + " 秒）：彈道不再受中線限制，照樣可以補牆，開打！"));
             beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 1.5f);
         }
     }
