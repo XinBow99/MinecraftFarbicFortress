@@ -478,6 +478,22 @@ public final class Arena {
     }
 
     /**
+     * 三個區塊沿著「A 的圈 → B 的圈」那條軸各佔幾格：{@code [各自半場, 中場, 圈到圈總長]}。
+     *
+     * <p>只有圈放好之後才有意義（分界是從兩座圈的距離算出來的），還沒放好時回傳 null。
+     *
+     * <p>量的是**沿軸的距離**，不是玻璃盒的邊長——後者是開場那一刻框的、還多留了 margin，
+     * 跟「我打得到多遠」是兩個數字。
+     */
+    public double[] zoneSpans() {
+        if (axisDir == null) return null;
+
+        double total = Math.sqrt(penA.distSqr(penB));
+        double neutral = neutralHalf * 2;
+        return new double[]{(total - neutral) / 2, neutral, total};
+    }
+
+    /**
      * 這個位置落在哪一區。圈還沒放好（沒有分界）時回傳 null。
      *
      * <p>給「這個東西本來屬於誰的半場」這種問題用——例如商人是放在哪一側的，
