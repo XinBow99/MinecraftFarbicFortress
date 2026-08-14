@@ -2,6 +2,7 @@ package com.xinbow99.fortressduel.npc;
 
 import com.xinbow99.fortressduel.util.YamlConfig;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -25,10 +26,24 @@ public record ShopEntry(
         String item,
         /** 買一次給幾發／幾個。 */
         int amount,
+        /**
+         * 附在商品上的附魔（附魔 id → 等級），只有 {@code type: item} 用得到。
+         *
+         * <p>是直接寫進物品的，不經過附魔台，所以等級不受原版上限與相容性規則限制。
+         */
+        Map<String, Integer> enchantments,
         String lore
 ) {
 
     public static ShopEntry from(String id, Map<String, Object> section) {
+        Map<String, Integer> enchantments = new LinkedHashMap<>();
+        if (section.get("enchantments") instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                enchantments.put(String.valueOf(e.getKey()),
+                        e.getValue() instanceof Number n ? Math.max(1, n.intValue()) : 1);
+            }
+        }
+
         return new ShopEntry(
                 id,
                 YamlConfig.str(section, "name", id),
@@ -37,6 +52,7 @@ public record ShopEntry(
                 YamlConfig.str(section, "weapon", ""),
                 YamlConfig.str(section, "item", ""),
                 Math.max(1, YamlConfig.i(section, "amount", 1)),
+                Map.copyOf(enchantments),
                 YamlConfig.str(section, "lore", ""));
     }
 }

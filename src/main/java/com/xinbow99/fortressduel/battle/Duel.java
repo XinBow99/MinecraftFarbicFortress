@@ -196,8 +196,31 @@ public final class Duel {
                     + "那就是你要守的東西。"));
         }
 
+        duel.warnShortRangedWeapons();
         DuelEvents.START.invoker().onDuelStart(duel);
         return duel;
+    }
+
+    /**
+     * 這場的場地有多大，就有哪些武器構不到對面。
+     *
+     * <p>場地是每一場現算的（框在雙方站的位置之間），所以這件事沒辦法在載入設定時檢查完——
+     * 同一份 weapons.yml 在近距離開局完全沒問題，站遠一點就有武器打不過去。
+     *
+     * <p>要講給玩家聽而不是只寫進 log：射程不足**不會有任何回饋**，彈丸只是在半路落地，
+     * 玩家看到的是「我這把老是差一點」。這是一個他買彈藥之前就該知道的事實。
+     */
+    private void warnShortRangedWeapons() {
+        // 邊長 ＝ 從自己這側的玻璃牆打到對面那面牆的距離
+        List<String> tooShort = services.weapons().shortRangedFor(arena.region().sizeX());
+        if (tooShort.isEmpty()) return;
+
+        FortressDuel.LOGGER.warn("Arena span is {} blocks; these weapons cannot reach across: {}",
+                arena.region().sizeX(), String.join(", ", tooShort));
+        for (ServerPlayer player : onlinePlayers()) {
+            player.sendSystemMessage(Msg.warn("這場的場地有 " + arena.region().sizeX()
+                    + " 格寬，這些彈藥打不到對面：" + String.join("、", tooShort)));
+        }
     }
 
     /**
@@ -227,6 +250,7 @@ public final class Duel {
                 + "」，站好別亂跑——" + settings.countdownSeconds()
                 + " 秒後雙方的熊貓會生成，把它的熊貓全部打死就結束。想提前收場用 /duel forfeit。"));
 
+        duel.warnShortRangedWeapons();
         DuelEvents.START.invoker().onDuelStart(duel);
         return duel;
     }
@@ -652,8 +676,8 @@ public final class Duel {
                 : "（" + settings.buildSeconds() + " 秒）";
 
         for (ServerPlayer player : players) {
-            player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 建造階段開始"
-                    + howItEnds + "：可以蓋，不能攻擊。"));
+            player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 停火階段開始"
+                    + howItEnds + "：可以蓋，也可以開火，但打不出自己的半場。"));
             // 建造階段才發收入：這時你才有機會把錢花掉（蓋牆、去商店補彈藥）。
             // 第一輪不發——開局資金是 starting_money，第一輪就加一份收入的話，
             // 那個設定值講的就不是玩家實際開局拿到的錢了
@@ -689,10 +713,10 @@ public final class Duel {
      */
     public String markReady(ServerPlayer player) {
         if (state != DuelState.BUILD) {
-            return "現在不是建造階段。";
+            return "現在不是停火階段。";
         }
         if (!settings.buildUntilReady()) {
-            return "這場對戰的建造階段是計時的，不用按就緒。";
+            return "這場對戰的停火階段是計時的，不用按就緒。";
         }
         if (!ready.add(player.getUUID())) {
             return "你已經按過就緒了，正在等對手。";
@@ -731,7 +755,7 @@ public final class Duel {
         phaseTicks = settings.combatSeconds() * 20;
         for (ServerPlayer player : players) {
             player.sendSystemMessage(Msg.warn("攻擊階段開始（" + settings.combatSeconds()
-                    + " 秒）：不能再擺方塊，開打！"));
+                    + " 秒）：不能再擺方塊，彈道不再受中線限制，開打！"));
             beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 1.5f);
         }
     }
@@ -884,11 +908,11 @@ public final class Duel {
      */
     private MutableComponent buildHud(ServerPlayer player, int seconds) {
         if (!settings.buildUntilReady()) {
-            return Msg.plain("建造 " + seconds + "s", ChatFormatting.GREEN);
+            return Msg.plain("停火 " + seconds + "s", ChatFormatting.GREEN);
         }
         return ready.contains(player.getUUID())
-                ? Msg.plain("建造 — 已就緒，等對手", ChatFormatting.GRAY)
-                : Msg.plain("建造 — 蓋完打 /duel ready", ChatFormatting.GREEN);
+                ? Msg.plain("停火 — 已就緒，等對手", ChatFormatting.GRAY)
+                : Msg.plain("停火 — 蓋完打 /duel ready", ChatFormatting.GREEN);
     }
 
     /** 在玩家腳下放一個提示音。用世界的 playSound 而不是只送給他一個人——兩邊聽到的節奏會一致。 */

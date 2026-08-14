@@ -1,8 +1,11 @@
 package com.xinbow99.fortressduel.weapon;
 
 import com.xinbow99.fortressduel.FortressDuel;
+import com.xinbow99.fortressduel.battle.Arena;
 import com.xinbow99.fortressduel.battle.Duel;
 import com.xinbow99.fortressduel.battle.DuelManager;
+import com.xinbow99.fortressduel.battle.DuelState;
+import com.xinbow99.fortressduel.battle.Side;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
@@ -302,10 +305,10 @@ public final class WeaponSystem {
 
         Duel duel = duels.duelOf(player);
         if (duel == null) return true;   // 沒在對戰：吃掉這一發，但什麼都不做
-        // 這個判斷要排在連射的早退之前，不然連射武器在建造階段拉弓會完全沒有回饋——
+        // 這個判斷要排在連射的早退之前，不然連射武器在準備階段拉弓會完全沒有回饋——
         // 打不出東西又不說為什麼，比擋下來更難理解
-        if (!duel.state().canAttack()) {
-            player.sendSystemMessage(Msg.warn("建造階段不能開火。"));
+        if (!duel.state().canFire()) {
+            player.sendSystemMessage(Msg.warn("準備階段還不能開火。"));
             return true;
         }
 
@@ -344,7 +347,7 @@ public final class WeaponSystem {
             if (weapon == null || !weapon.auto()) continue;
 
             Duel duel = duels.duelOf(player);
-            if (duel == null || !duel.state().canAttack()) continue;
+            if (duel == null || !duel.state().canFire()) continue;
 
             // 力道恆滿：連射武器不蓄力（weapons.yml 給它們 affects: []），
             // 走的是跟其他武器完全相同的開火路徑，只是力道這條軸不參與
@@ -579,6 +582,14 @@ public final class WeaponSystem {
             return;
         }
 
+        // 停火階段：飛出自己的半場就消失。這是停火與攻擊唯一的差別——
+        // 你打得到自己家裡的怪，但一顆子彈都過不了中線
+        if (leftOwnZoneDuringCeasefire(projectile, to)) {
+            trail(level, projectile, from, to);
+            projectile.dead = true;
+            return;
+        }
+
         // 把射手傳進去而不是 null：原版會自動把它排除在命中對象之外，而且不必再賭
         // 「這個 API 收不收 null」——ClipContext 就是因為傳了 null 實體才讓伺服器崩過一次
         ServerPlayer shooter = level.getServer().getPlayerList().getPlayer(projectile.shooterId);
@@ -629,6 +640,48 @@ public final class WeaponSystem {
             Vec3 point = from.lerp(to, (double) i / steps);
             level.sendParticles(particle, true, true, point.x, point.y, point.z, 1, 0, 0, 0, 0);
         }
+    }
+
+    /**
+     * 哪幾把武器打不到 {@code span} 格外——也就是這場的場地它們構不到對面。
+     *
+     * <p>存在的理由跟這個專案裡好幾個 bug 是同一類：**射程不足不會報錯**。彈丸只是在半路
+     * 落地，而玩家看到的是「我的高爆彈老是差一點」，查不出原因也不會想到是設定問題。
+     * 場地大小是每一場現算的（框在雙方站的位置之間），所以這件事沒辦法在載入設定時就檢查完，
+     * 只能等場地框好才知道。
+     *
+     * @param span 要打過去的距離，實務上就是場地的邊長
+     * @return 構不到的武器顯示名稱；全部都夠的話是空的
+     */
+    public List<String> shortRangedFor(double span) {
+        List<String> tooShort = new ArrayList<>();
+        for (WeaponDef weapon : config.weapons().all()) {
+            if (weapon.maxRange() < span) {
+                tooShort.add(weapon.displayName());
+            }
+        }
+        return tooShort;
+    }
+
+    /**
+     * 停火階段裡，這一發是不是已經離開射手自己的半場。
+     *
+     * <p>只擋「越過中線」，不擋高度也不擋左右——場地的其他邊界由框線自己管。所以停火階段
+     * 仍然可以把彈道拉得又高又遠，只是它到不了對面。
+     *
+     * <p>射手屬於哪一側是問 {@link Duel#sideOf}，不是問彈丸現在在哪——後者在他站到中線附近時
+     * 會給出錯的答案。中場（{@code NEUTRAL}）也算越界：那裡是雙方要搶的地方，停火時誰都不該碰。
+     */
+    private static boolean leftOwnZoneDuringCeasefire(Projectile projectile, Vec3 to) {
+        Duel duel = projectile.duel;
+        if (duel.state() != DuelState.BUILD) return false;
+
+        Side side = duel.sideOf(projectile.shooterId);
+        if (side == null) return false;
+
+        Arena.Zone here = duel.arena().zoneAt(to);
+        // 圈還沒放好就沒有分界，那時也還不是停火階段，這只是保險
+        return here != null && here != duel.zoneOf(side);
     }
 
     // ---------- 命中 ----------

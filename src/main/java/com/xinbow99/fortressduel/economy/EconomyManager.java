@@ -135,8 +135,11 @@ public final class EconomyManager {
             return;
         }
 
-        if (!duel.state().canAttack()) {
-            duels.notify(killer, Msg.plain("建造階段不發賞金", ChatFormatting.GRAY));
+        // 停火階段照發：那個階段本來就可以開火，只是打不出自己的半場（見 DuelState.BUILD）。
+        // 不發的話會變成「清得掉家裡的老鼠，但清了沒有錢」這種說不出道理的規則。
+        // 也不會被拿來搶跑——中場那些有競爭性的怪在停火階段根本打不到
+        if (!duel.state().canFire()) {
+            duels.notify(killer, Msg.plain("準備階段不發賞金", ChatFormatting.GRAY));
             return;
         }
 
