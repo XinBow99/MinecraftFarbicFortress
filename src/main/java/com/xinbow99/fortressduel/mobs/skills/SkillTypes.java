@@ -16,6 +16,9 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.ai.navigation.PathNavigation;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -39,6 +42,43 @@ public final class SkillTypes {
         engine.registerType("teleport", SkillTypes::teleport);
         engine.registerType("effect", SkillTypes::effect);
         engine.registerType("break_blocks", ctx -> breakBlocks(engine, ctx));
+        engine.registerType("restless", SkillTypes::restless);
+    }
+
+    /**
+     * 躁動：一停下來就馬上派牠去下一個地方。
+     *
+     * <p>params：{@code radius}（下一個目的地取幾格內）、{@code vertical}（上下浮動幾格，
+     * 會飛的才有意義）、{@code speed}（導航速度倍率）。
+     *
+     * <p><b>為什麼需要這個</b>：原版沒有「發呆多久」這個設定，那個停頓是寫死在各自的 AI 裡的，
+     * 而且兩種怪還是兩套系統——蜜蜂用 goal（{@code BeeWanderGoal} 是私有內部類別，
+     * 而且要碰 {@code Mob.goalSelector} 得先開 access widener），悅靈用 brain
+     * （{@code RunOne} 裡面排著帶隨機時長的 {@code DoNothing}）。想從那兩邊改，等於為了同一個
+     * 效果寫兩份互不相干的 mixin。
+     *
+     * <p>所以這裡不去改牠們什麼時候決定停下來，而是**在牠停下來的那一刻就給牠下一個目的地**。
+     * 走的是牠自己的導航（{@code moveTo}）而不是硬塞速度，所以路徑、避障、飛行姿態全部還是
+     * 原版的——看起來就是這隻生物比較好動，不是被外力推著走。一份實作同時吃 goal 與 brain 兩種怪。
+     *
+     * <p>導航還在跑就回 false（不進冷卻）：那不是「發動了」，是牠本來就在動，不需要插手。
+     */
+    private static boolean restless(SkillContext ctx) {
+        if (!(ctx.caster() instanceof Mob mob)) return false;
+
+        PathNavigation navigation = mob.getNavigation();
+        if (!navigation.isDone()) return false;   // 還在走就別打斷牠
+
+        int radius = Math.max(1, ctx.skill().param("radius", 8));
+        int vertical = Math.max(0, ctx.skill().param("vertical", 3));
+        double speed = ctx.skill().param("speed", 1.0);
+
+        RandomSource random = ctx.level().getRandom();
+        double x = mob.getX() + random.nextInt(radius * 2 + 1) - radius;
+        double z = mob.getZ() + random.nextInt(radius * 2 + 1) - radius;
+        double y = vertical == 0 ? mob.getY() : mob.getY() + random.nextInt(vertical * 2 + 1) - vertical;
+
+        return navigation.moveTo(x, y, z, speed);
     }
 
     /**

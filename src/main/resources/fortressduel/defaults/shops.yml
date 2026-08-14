@@ -12,6 +12,8 @@
 #   weapon  type = ammo 時指向 weapons.yml 的武器 id；圖示與給出的實物都是它的 item
 #   item    type = item 時要給的物品
 #   amount  買一次給幾發／幾個
+#   enchantments  附在商品上的附魔（附魔 id → 等級），只有 type: item 用得到。
+#           直接寫進物品、不經過附魔台，所以不需要經驗值，等級也不受原版上限與相容規則限制
 #   lore    說明文字（**補充用**：血量、每元血量、幾發打得破、傷害、射速都由程式從實際數值
 #           算出來印在上面，不用也不該手寫進 lore——手寫的會跟設定漂移而且沒人會發現）
 #
@@ -80,9 +82,9 @@ shops:
       # $60 一顆，比狙擊彈（$13.75）貴四倍多——它是全場單發最貴的常規彈藥。
       #
       # 定價的依據不是傷害（它沒有傷害），是**對手要花多少時間處理**：一隻 24 血的東西
-      # 大概讓對方停下手邊的事十幾秒，而建造階段只有 60 秒。用一輪收入的六分之一
-      # 買走對手四分之一個建造階段，這個換算成立但不划算——它本來就該是「我就是想這麼做」
-      # 而不是最優解。
+      # 大概讓對方停下手邊的事十幾秒。停火階段是等雙方 /duel ready（build_until_ready: true），
+      # 所以偷走的不是固定比例的時間，是**對手的節奏**——他得放下手上的牆去處理，
+      # 而你這邊照樣在蓋。這個換算成立但不划算，它本來就該是「我就是想這麼做」而不是最優解。
       #
       # 一次賣 5 顆是刻意的：買得起一次騷擾，買不起一整場的騷擾
       ammo_egg:
@@ -117,25 +119,56 @@ shops:
       #
       # 價格都壓在一輪收入（$380）以下，湊得出來——工具是門檻不是牆，貴到買不起的話
       # 那個決定就不存在了，所有人都只剩同一條路可以走
+      # 工具一律是**獄髓 + 效率 V + 耐久 III**，不是為了帥，是為了不浪費玩家的時間。
+      #
+      # 挖方塊在這個遊戲裡不掉落東西（見 DuelManager.onBlockBreak），所以「挖」的唯一用途
+      # 就是**把自己蓋錯的地方拆掉重來**。那是修正動作，不是遊戲內容——玩家不該為了改一面牆
+      # 站在那裡敲三十秒。停火階段雖然是等 /duel ready、沒有硬性時限，但對手也在等你，
+      # 慢慢敲的代價是把整場的節奏拖住。
+      #
+      # 差距有多大（一格要幾秒）：
+      #                   鐵鎬(無附魔)   獄髓+效率V
+      #   橡木板              0.50           0.09
+      #   石頭                0.38           0.06
+      #   鐵塊                1.25           0.21
+      #   黑曜石             41.67           2.14
+      #
+      # 黑曜石那一行是換成獄髓的真正理由：**鐵鎬採不動黑曜石**（要鑽石級以上），
+      # 41 秒是「打得掉但沒有掉落」的懲罰速度。而黑曜石是商店賣的建材——
+      # 賣一種玩家買得到卻拆不掉的材料，那是個陷阱不是選擇。
+      #
+      # 附魔是直接寫進物品的（不經過附魔台），所以不需要經驗值，等級也不受原版上限限制。
+      # 這個遊戲沒有經驗值系統，工具的強度就跟其他所有東西一樣是用錢買的。
+      #
+      # 價格維持不變：工具是門檻不是牆，而它們現在只是把一件本來就該做的事做得夠快
       tool_pickaxe:
-        name: 鐵鎬
+        name: 獄髓鎬
         type: item
         price: 120
-        item: minecraft:iron_pickaxe
-        lore: 挖石頭快一截；建造階段就是跟時間賽跑
+        item: minecraft:netherite_pickaxe
+        enchantments:
+          minecraft:efficiency: 5
+          minecraft:unbreaking: 3
+        lore: 石頭一瞬、黑曜石兩秒；拆掉重蓋不該花你的時間
 
       tool_axe:
-        name: 鐵斧
+        name: 獄髓斧
         type: item
         price: 100
-        item: minecraft:iron_axe
-        lore: 砍樹，也拆得動木造工事
+        item: minecraft:netherite_axe
+        enchantments:
+          minecraft:efficiency: 5
+          minecraft:unbreaking: 3
+        lore: 砍樹，也一瞬拆掉木造工事
 
       tool_shovel:
-        name: 鐵鏟
+        name: 獄髓鏟
         type: item
         price: 80
-        item: minecraft:iron_shovel
+        item: minecraft:netherite_shovel
+        enchantments:
+          minecraft:efficiency: 5
+          minecraft:unbreaking: 3
         lore: 挖土、挖沙；地堡跟壕溝都靠它
 
       # 就是原版的拴繩，行為完全是原版的（右鍵牽起、再右鍵放開、太遠會斷）。

@@ -68,6 +68,17 @@
 #
 #                     射程的真正來源是 gravity：平射時彈丸多快落地。那條是可以靠抬高瞄準
 #                     補償的，也就是玩家的操作空間——所以限制射程要調 gravity，不要調壽命
+#
+#                     ※ **每一種彈藥都必須打得到對面的玻璃牆。**
+#                       45 度最大射程 ≈ projectile_speed² ÷ gravity（零重力的是 speed × lifetime_ticks），
+#                       而場地最大 132 格見方（見 duel.yml 的 arena.size／margin 與 challenge.max_distance）。
+#
+#                       這條不是美觀問題：射程不夠的彈藥不會報錯，只會在遠距離開局時「老是差一點」，
+#                       而玩家沒辦法知道為什麼。所以開場時程式會實際算一遍，構不到的會警告並告訴雙方
+#                       （見 WeaponSystem.shortRangedFor）。改 gravity 或 projectile_speed 之後記得看那行。
+#
+#                       目前：狙擊 2500、導彈 500、機槍 481、無人機 420、雷射 400、
+#                             穿甲 385、廢鐵 225、散彈 193、高爆／寶貝蛋 192
 #   auto              true  = 按住右鍵就一直打，射速完全由 cooldown_ticks 決定，蓄力不參與
 #                     false = 拉弓、放開，發一發（預設）
 #                     連射武器只能設 true：機槍 cooldown 3、雷射 2，也就是每秒 7~10 發，
@@ -227,7 +238,9 @@ weapons:
     recoil_recovery: 0.85
     cooldown_ticks: 24
     projectile_speed: 2.6
-    gravity: 0.05
+    # 0.05 → 0.035：45 度射程 135 → 193 格。散彈的「短距離武器」定位靠的是**散佈**
+    # （6 度，15 格外就散開三格），不是靠彈丸中途掉下來——後者只是讓遠射變成憑空消失
+    gravity: 0.035
     lifetime_ticks: 200
     breaks_blocks: true
     trail_particle: minecraft:crit
@@ -302,7 +315,10 @@ weapons:
     recoil_recovery: 0.3
     cooldown_ticks: 40
     projectile_speed: 2.4
-    gravity: 0.06
+    # 0.06 → 0.03：舊值的 45 度最大射程只有 96 格，而場地最大可以到 132 格見方，
+    # 也就是站遠一點的開局它連對面的玻璃牆都構不到——而且是靜悄悄地構不到，
+    # 玩家只會覺得「我的高爆彈老是差一點」。全場每一種彈藥都該打得到對面的牆，見檔案頭
+    gravity: 0.03
     lifetime_ticks: 200
     breaks_blocks: true
     trail_particle: minecraft:flame
@@ -398,7 +414,8 @@ weapons:
     recoil_recovery: 0.25
     cooldown_ticks: 60
     projectile_speed: 2.4
-    gravity: 0.06
+    # 跟高爆彈一起從 0.06 調到 0.03（它整組飛行參數都照抄高爆彈）
+    gravity: 0.03
     lifetime_ticks: 200
     # false：這顆不碰方塊，落在牆上就在那裡孵
     breaks_blocks: false

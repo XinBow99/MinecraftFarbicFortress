@@ -473,9 +473,12 @@ public final class DuelManager {
     }
 
     /**
-     * 建造階段雙方不能互相傷害。
+     * 停火階段玩家之間不能互相傷害。
      *
-     * <p>只擋「對手打你」這一種來源——摔傷、溺水、怪物照樣算，否則建造階段會變成無敵時間。
+     * <p>只擋「玩家打玩家」這一種來源——摔傷、溺水、怪物照樣算，否則停火階段會變成無敵時間。
+     *
+     * <p>停火階段的彈丸過不了中線，所以這條擋下的其實只剩**自己的濺射打到自己**。
+     * 那也是要擋的：你是為了清家裡的怪才開火的，不該因此把自己炸掉。
      */
     private boolean allowDamage(LivingEntity entity, DamageSource source, float amount) {
         Boolean guardian = filterGuardianDamage(entity, source);

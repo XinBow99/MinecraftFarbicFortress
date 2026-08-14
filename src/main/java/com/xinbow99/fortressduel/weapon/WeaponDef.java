@@ -253,6 +253,21 @@ public record WeaponDef(
         return damage;
     }
 
+    /**
+     * 這一發最遠打得到幾格（滿蓄力、45 度、無阻擋的理想值）。
+     *
+     * <p>有重力的走斜拋的最大射程 {@code v² / g}；零重力的（雷射、導彈、無人機）飛行是直線，
+     * 限制它的是壽命，所以是 {@code v × lifetime}。
+     *
+     * <p>用途是開場檢查「這把武器夠不夠打到對面的玻璃牆」——射程不足不會報錯，
+     * 只會讓玩家覺得「我這把老是差一點」而查不出原因。見 {@code WeaponSystem.shortRangedFor}。
+     */
+    public double maxRange() {
+        return gravity > 0
+                ? projectileSpeed * projectileSpeed / gravity
+                : projectileSpeed * lifetimeTicks;
+    }
+
     /** 這是不是一發「投放怪物」的彈藥。是的話它完全不造成傷害，見 {@link #spawnMobs}。 */
     public boolean spawnsMobs() {
         return !spawnMobs.isEmpty();

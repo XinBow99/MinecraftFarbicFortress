@@ -10,8 +10,11 @@ import com.xinbow99.fortressduel.weapon.WeaponItems;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
@@ -24,6 +27,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.MenuType;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -35,6 +39,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 商店介面。
@@ -350,12 +355,41 @@ public final class ShopMenu extends ChestMenu {
             deny("這件商品設定錯誤（找不到物品 " + entry.item() + "）");
             return false;
         }
+        ItemStack stack = new ItemStack(item, entry.amount());
+        applyEnchantments(stack, entry);
+
         // 打上「對戰發的」標記。弓與彈藥是由 WeaponItems 產生的、那裡已經標了，只有這條
         // 直接發原版物品的路要自己標——不標的話買來的建材與工具會被帶回主世界，
         // 而那正是回收機制要擋的事（見 DuelItems）
-        player.getInventory().placeItemBackInInventory(
-                DuelItems.issue(new ItemStack(item, entry.amount())));
+        player.getInventory().placeItemBackInInventory(DuelItems.issue(stack));
         return true;
+    }
+
+    /**
+     * 把 {@code enchantments} 寫進商品。
+     *
+     * <p>直接寫進物品而不是走附魔台：不需要經驗值，等級也不受原版上限限制。這個遊戲沒有
+     * 經驗值系統，工具的強度是**用錢買的**，跟其他所有東西一樣。
+     *
+     * <p>附魔是資料驅動的註冊表（資料包可以增刪），所以查不到就跳過並留一行 log，不讓整筆
+     * 購買失敗——錢已經要扣了，因為一個設定錯誤而什麼都拿不到是最糟的結果。
+     */
+    private void applyEnchantments(ItemStack stack, ShopEntry entry) {
+        if (entry.enchantments().isEmpty()) return;
+
+        Registry<Enchantment> registry = player.level().registryAccess()
+                .lookupOrThrow(Registries.ENCHANTMENT);
+
+        for (Map.Entry<String, Integer> e : entry.enchantments().entrySet()) {
+            Holder.Reference<Enchantment> enchantment =
+                    registry.get(Identifier.parse(e.getKey())).orElse(null);
+            if (enchantment == null) {
+                FortressDuel.LOGGER.warn("Shop entry {} references enchantment '{}' which does not exist",
+                        entry.id(), e.getKey());
+                continue;
+            }
+            stack.enchant(enchantment, e.getValue());
+        }
     }
 
     private void deny(String reason) {
