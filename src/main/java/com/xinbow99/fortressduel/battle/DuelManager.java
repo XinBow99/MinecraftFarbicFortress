@@ -462,7 +462,7 @@ public final class DuelManager {
         if (!(player.getItemInHand(hand).getItem() instanceof BlockItem)) return InteractionResult.PASS;
 
         if (!duel.state().canPlaceBlocks()) {
-            player.sendSystemMessage(Msg.warn("攻擊階段不能擺放方塊，等下一輪建造階段。"));
+            player.sendSystemMessage(Msg.warn("這個階段還不能擺放方塊。"));
             return InteractionResult.FAIL;
         }
         if (!duel.arena().region().contains(target)) {
