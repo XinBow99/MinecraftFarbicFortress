@@ -109,6 +109,13 @@ public final class Duel {
     /** 打到第幾輪（一輪 ＝ 一次建造 + 一次攻擊）。 */
     private int round;
     private long ticksElapsed;
+    /**
+     * 已經等離線的人等了幾 tick；0 ＝ 沒有人離線，這一場正常在跑。
+     *
+     * <p>不記「誰」離線：唯一的真相是玩家清單，每 tick 去問一次就好（見 {@link #playerOf}）。
+     * 記下來的話「離線又上線又離線」會讓這份記錄跟現況對不起來。
+     */
+    private int offlineTicks;
     private Result result;
     /**
      * 正在對熊貓送窒息傷害。{@link #allowGuardianDamage} 靠它認出「這一發是我們自己打的」。
@@ -373,6 +380,21 @@ public final class Duel {
 
     public void tick() {
         if (state == DuelState.ENDED) return;
+
+        ServerPlayer a = playerOf(north);
+        // 單人練習：南半場是靶子，本來就沒有對應的線上玩家，不能拿它的「不在線上」當離線
+        ServerPlayer b = solo ? null : playerOf(south);
+
+        // 有人不在線上就整場暫停等他回來（見 tickDisconnected）。這一段要排在
+        // ticksElapsed++ 前面：暫停期間時間不該走，不然修正效果會在沒有人打的時候過期
+        if (a == null || (!solo && b == null)) {
+            tickDisconnected(a, b);
+            return;
+        }
+        if (offlineTicks > 0) {
+            resumeAfterReconnect();
+        }
+
         ticksElapsed++;
 
         // 每秒一次就夠：封死是持續狀態，不是瞬間事件，而且掉血的單位本來就是「每秒」
@@ -381,31 +403,12 @@ public final class Duel {
             if (state == DuelState.ENDED) return;
         }
 
-        ServerPlayer a = playerOf(north);
-
-        // 單人練習：南半場是靶子，本來就沒有對應的線上玩家，不能套用離線判負
         if (solo) {
-            if (a == null) {
-                finish(Result.aborted());
-                return;
-            }
             tickModifiers(new ServerPlayer[]{a});
             tickPhase(new ServerPlayer[]{a});
             keepInside(a, north);
             enforceZones();
             DuelEvents.TICK.invoker().onDuelTick(this);
-            return;
-        }
-
-        ServerPlayer b = playerOf(south);
-
-        // 有人離線就直接判給還在的那一方；兩個都不在就中止
-        if (a == null || b == null) {
-            if (a == null && b == null) {
-                finish(Result.aborted());
-            } else {
-                finish(Result.disconnected(a == null ? south.playerId() : north.playerId()));
-            }
             return;
         }
 
@@ -417,6 +420,86 @@ public final class Duel {
         enforceZones();
 
         DuelEvents.TICK.invoker().onDuelTick(this);
+    }
+
+    /**
+     * 有人不在線上的那些 tick：整場暫停等他回來，等超過 {@code battle.reconnect_grace_seconds}
+     * 才判他放棄。
+     *
+     * <p>斷線立刻判負是很糟的敗局——輸的原因跟遊戲無關，而且蓋好的房子、買的東西、還活著的
+     * 熊貓會一起消失。網路斷一下就沒了的話，這一整場的投入都變成一場賭博。
+     *
+     * <p>暫停是整場的：這裡 return 之後，計時器、窒息、突發事件、TICK 事件全都不跑，
+     * {@code ticksElapsed} 也不前進。只暫停對手一個人是不夠的——還在線上的人可以趁這段時間
+     * 繼續蓋牆，那等於「對手斷線」變成一份免費的建造時間，反而給了拔網路線的動機。
+     *
+     * <p>寬限設 0 ＝ 回到舊行為（離線立刻判負）：{@code offlineTicks} 先加到 1，第一輪就到期。
+     *
+     * @param a 北半場的線上玩家，null ＝ 他不在線上
+     * @param b 南半場的線上玩家，null ＝ 他不在線上（單人練習恆為 null，不算離線）
+     */
+    private void tickDisconnected(ServerPlayer a, ServerPlayer b) {
+        int graceTicks = settings.reconnectGraceSeconds() * 20;
+        // 還在線上的那一個。兩個都掉線就是 null，那時沒有人可以通知
+        ServerPlayer waiting = a != null ? a : b;
+
+        offlineTicks++;
+
+        if (offlineTicks >= graceTicks) {
+            if (solo || (a == null && b == null)) {
+                finish(Result.aborted());
+            } else {
+                finish(Result.disconnected(a == null ? south.playerId() : north.playerId()));
+            }
+            return;
+        }
+
+        if (waiting == null) return;
+
+        if (offlineTicks == 1) {
+            waiting.sendSystemMessage(Msg.warn(offlineName(a) + " 斷線了。這一場暫停，最多等他 "
+                    + settings.reconnectGraceSeconds() + " 秒——時間到還沒回來就算他放棄。"));
+        }
+
+        // 暫停期間 hud 不跑，動作列這一行是唯一還在動的東西：沒有它，畫面看起來就只是卡住了
+        if (offlineTicks % 20 == 0) {
+            int left = (graceTicks - offlineTicks + 19) / 20;
+            waiting.sendSystemMessage(
+                    Msg.plain("暫停 — 等 " + offlineName(a) + " 回來（" + left + "s）",
+                            ChatFormatting.YELLOW), true);
+        }
+    }
+
+    /** 離線的是誰。只在剛好一方離線時有意義（另一方是 {@code waiting}）。 */
+    private String offlineName(ServerPlayer a) {
+        return a == null ? north.playerName() : south.playerName();
+    }
+
+    /** 人回來了，解除暫停。 */
+    private void resumeAfterReconnect() {
+        offlineTicks = 0;
+        for (ServerPlayer player : onlinePlayers()) {
+            player.sendSystemMessage(Msg.good("人都回來了，繼續打。"));
+            beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 1.5f);
+        }
+    }
+
+    /**
+     * 對戰中途斷線的人回來了（由 {@code DuelManager} 的 JOIN 處理呼叫）。
+     *
+     * <p>要做的事只有把血條掛回去：血條記的是 {@link ServerPlayer} 物件而不是 UUID，
+     * 而重連會建一個新的物件——不重掛的話他回來會看不到任何一座熊貓的血量，
+     * 而那是這場遊戲唯一的比分板。
+     *
+     * <p>**不**重跑進場手續：物資、寄放的背包都還在他身上或檔案裡，再發一次等於給他第二份；
+     * 遊戲模式也不重設，那會把 {@link Side#returnGameMode()} 記著的「他原本的模式」覆蓋成
+     * 對戰用的那個，結束就還不回去了。
+     */
+    public void onRejoin(ServerPlayer player) {
+        if (state == DuelState.ENDED) return;
+        north.showTo(player);
+        south.showTo(player);
+        player.sendSystemMessage(Msg.good("歡迎回來，你的對戰還在進行中。"));
     }
 
     /**
@@ -585,6 +668,9 @@ public final class Duel {
      */
     public boolean allowGuardianDamage(Side owner, DamageSource source) {
         if (applyingSuffocation) return true;  // 我們自己送的窒息傷害
+        // 等人重連的期間不算數：不然「趁對手斷線把他的熊貓打光」是一條穩贏的路，
+        // 而那正是這個寬限要防的事情本身
+        if (isPaused()) return false;
         // canFire 而不是 canAttack：停火階段也能開火了（只是打不出自己的半場），
         // 用 canAttack 的話那個階段打自己的熊貓會完全沒有反應——看起來就是友傷壞掉了。
         // 停火階段對面的彈丸過不了中線，所以這裡放行的實際上只有「自己打自己的」
@@ -744,6 +830,10 @@ public final class Duel {
      * @return 給玩家看的錯誤訊息；null ＝ 成功
      */
     public String markReady(ServerPlayer player) {
+        if (isPaused()) {
+            // 這裡放行的話對手一斷線就能被推進攻擊階段，而他還沒蓋完也還沒回來
+            return "這一場正在等對手重連，暫停中不能開戰。";
+        }
         if (state != DuelState.BUILD) {
             return "現在不是停火階段。";
         }
@@ -1226,6 +1316,17 @@ public final class Duel {
 
     public DuelState state() {
         return state;
+    }
+
+    /**
+     * 這一場是不是正暫停等某一方重連（見 {@link #tickDisconnected}）。
+     *
+     * <p>暫停期間還在線上的人不能蓋、不能挖、不能開火、打不動熊貓：計時器停了，但玩家的手
+     * 沒有停——不擋的話「等對手回來」會變成一段沒有人干擾的免費建造與射擊時間，
+     * 反而給了拔網路線的動機。
+     */
+    public boolean isPaused() {
+        return offlineTicks > 0;
     }
 
     public Result result() {

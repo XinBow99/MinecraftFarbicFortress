@@ -344,7 +344,8 @@ public final class DuelManager {
         challenges.remove(player.getUUID());
         challenges.values().forEach(inbox -> inbox.removeIf(c -> c.challenger().equals(player.getUUID())));
 
-        // 對戰本身不在這裡收尾——下一個 tick 的 Duel.tick() 會發現人不見了並判給對手，
+        // 對戰本身不在這裡收尾——下一個 tick 的 Duel.tick() 會發現人不見了，先把整場暫停，
+        // 等他回來；等超過 battle.reconnect_grace_seconds 才判給對手。
         // 這樣「離線判負」只有一條路徑
     }
 
@@ -375,11 +376,18 @@ public final class DuelManager {
      *
      * <p>兩件事的順序不能反：先收掉對戰發的，格子空出來，寄放的東西才回得去原本的位置。
      *
-     * <p>只在他**沒有**正在對戰時做：正常情況下上線本來就不會在對戰中（離線會判負），
-     * 這個判斷純粹是為了不去動一場真的還在進行的對戰。
+     * <p>只在他**沒有**正在對戰時做。斷線寬限（{@code battle.reconnect_grace_seconds}）之內
+     * 回來的人是在對戰中的：他的東西一件都不該動，那一場還在等他，走
+     * {@link Duel#onRejoin} 把血條掛回去就好。
      */
     private void onJoin(ServerPlayer player) {
-        if (player == null || isInDuel(player)) return;
+        if (player == null) return;
+
+        Duel duel = duelOf(player);
+        if (duel != null) {
+            duel.onRejoin(player);
+            return;
+        }
 
         int removed = DuelItems.stripFrom(player);
         if (removed > 0) {
@@ -432,6 +440,11 @@ public final class DuelManager {
             return activeDuels.stream().noneMatch(d -> d.arena().region().contains(pos));
         }
 
+        if (duel.isPaused()) {
+            player.sendSystemMessage(Msg.warn("這一場正在等對手重連，暫停中不能挖東西。"));
+            return false;
+        }
+
         Region region = duel.arena().region();
         if (!region.contains(pos)) {
             player.sendSystemMessage(Msg.warn("對戰期間不能挖競技場外面的方塊。"));
@@ -461,6 +474,10 @@ public final class DuelManager {
         if (duel == null) return InteractionResult.PASS;
         if (!(player.getItemInHand(hand).getItem() instanceof BlockItem)) return InteractionResult.PASS;
 
+        if (duel.isPaused()) {
+            player.sendSystemMessage(Msg.warn("這一場正在等對手重連，暫停中不能蓋東西。"));
+            return InteractionResult.FAIL;
+        }
         if (!duel.state().canPlaceBlocks()) {
             player.sendSystemMessage(Msg.warn("這個階段還不能擺放方塊。"));
             return InteractionResult.FAIL;
