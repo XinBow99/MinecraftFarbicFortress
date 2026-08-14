@@ -202,6 +202,33 @@ public final class Duel {
     }
 
     /**
+     * 圈放好之後公告場地尺寸：log 一行，雙方也各收到一行。
+     *
+     * <p>每一場都講，不只在有武器構不到的時候。對玩家來說這是**買彈藥之前就該知道的事**——
+     * 場地多大決定哪些武器打得到、要不要蓋那麼厚；對 log 來說它是判讀其他所有紀錄的前提，
+     * 同一份設定在 26 格與 106 格的場地是兩種遊戲。
+     *
+     * <p>量的是圈到圈的沿軸距離，不是玻璃盒的邊長。玻璃盒是開場那一刻框的、還多留了 margin，
+     * 而玩家實際要打穿的是這條。盒子的尺寸只留在 log 裡——那是給我們除錯用的，不是玩家的資訊。
+     */
+    private void announceLayout() {
+        double[] spans = arena.zoneSpans();
+        if (spans == null) return;
+
+        long side = Math.round(spans[0]);
+        long neutral = Math.round(spans[1]);
+        long total = Math.round(spans[2]);
+
+        FortressDuel.LOGGER.info("Arena layout: each side {} blocks, neutral {} blocks, total {} blocks (box {}x{})",
+                side, neutral, total, arena.region().sizeX(), arena.region().sizeZ());
+
+        for (ServerPlayer player : onlinePlayers()) {
+            player.sendSystemMessage(Msg.info("場地：雙方各 " + side + " 格、中場 "
+                    + neutral + " 格，共 " + total + " 格。"));
+        }
+    }
+
+    /**
      * 這場的場地有多大，就有哪些武器構不到對面。
      *
      * <p>場地是每一場現算的（框在雙方站的位置之間），所以這件事沒辦法在載入設定時檢查完——
@@ -437,6 +464,8 @@ public final class Duel {
     private void spawnObjectives(ServerPlayer[] players) {
         BlockPos posSouth = solo ? dummyPos : players[1].blockPosition();
         arena.placePens(players[0].blockPosition(), posSouth, settings, services.buildings());
+
+        announceLayout();
 
         north.setPen(arena.penA());
         south.setPen(arena.penB());
