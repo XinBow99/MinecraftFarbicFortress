@@ -5,6 +5,7 @@ import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.economy.EconomyManager;
+import com.xinbow99.fortressduel.jobs.JobManager;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
@@ -48,6 +49,8 @@ public final class NpcManager {
     private final WeaponSystem weapons;
     /** 把 NPC 關在他那一側。移動本身是原版的事，這裡只畫界線。 */
     private final NpcBounds bounds;
+    /** 工人（礦工、農夫）也是 NPC，但雇用與產出由它管。啟動時 {@link #attach} 進來。 */
+    private JobManager jobs;
 
     private volatile Map<String, NpcDef> npcs = Map.of();
     private volatile Map<String, ShopDef> shops = Map.of();
@@ -86,6 +89,10 @@ public final class NpcManager {
         if (def == null) return;
 
         if (!(entity.level() instanceof ServerLevel level)) return;
+
+        // 沒有店的 NPC（工人、純裝飾）不發這則訊息——它講的字面上就是「買不到東西」，
+        // 而礦工死掉跟買東西無關。工人的死訊由 JobManager 自己發，那邊才知道損失是什麼
+        if (def.shop().isEmpty()) return;
 
         // 只講給看得到的人聽：這是場上的事件，不該洗到整個伺服器
         Component text = Msg.warn(def.displayName() + " 被擊殺了！這一側再也買不到東西。");
@@ -236,8 +243,18 @@ public final class NpcManager {
             return InteractionResult.FAIL;
         }
 
-        ShopMenu.open(player, shop, economy, weapons);
+        ShopMenu.open(player, shop, economy, weapons, jobs);
         return InteractionResult.SUCCESS;
+    }
+
+    /**
+     * 啟動時把工人系統登記進來。
+     *
+     * <p>事後注入而不是建構子參數，因為兩邊互相需要：{@code JobManager} 要靠這裡生成工人，
+     * 這裡要靠它處理 {@code type: worker} 的商品。跟 {@code ConfigManager.attach} 同一個做法。
+     */
+    public void attach(JobManager jobs) {
+        this.jobs = jobs;
     }
 
     public ConfigManager config() {
