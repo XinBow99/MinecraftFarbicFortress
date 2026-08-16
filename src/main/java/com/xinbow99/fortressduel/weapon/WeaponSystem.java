@@ -436,9 +436,9 @@ public final class WeaponSystem {
      */
     private void showCooldown(ServerPlayer player, WeaponDef weapon) {
         ItemStack ammo = player.getOffhandItem();
-        if (!ammo.isEmpty()) {
-            player.getCooldowns().addCooldown(ammo, weapon.cooldownTicks());
-        }
+        if (ammo.isEmpty()) return;
+
+        player.getCooldowns().addCooldown(ammo, weapon.cooldownTicks());
     }
 
     /**
