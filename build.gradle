@@ -94,6 +94,37 @@ jar {
 	}
 }
 
+/**
+ * 伺服器資源包：把模組 assets 裡的音效打包成一個 zip，讓**沒裝模組的客戶端**也聽得到。
+ *
+ * 玩家不用手動裝——伺服器在 server.properties 填這個 zip 的網址，進來時原版就會問
+ * 「是否下載伺服器資源包」，同意之後自動套用。
+ *
+ * 音檔不另外複製一份：資料來源就是模組自己的 assets，兩邊永遠是同一個檔案。
+ * 跑 `./gradlew resourcePack` 會印出 server.properties 要填的 sha1。
+ */
+tasks.register('resourcePack', Zip) {
+	group = 'build'
+	description = '打包成伺服器資源包（server.properties 的 resource-pack）'
+
+	archiveFileName = "fortress-duel-resources-${project.version}.zip"
+	destinationDirectory = layout.buildDirectory.dir('resourcepack')
+
+	from('resourcepack') // pack.mcmeta
+	from('src/main/resources/assets') {
+		into 'assets'
+		exclude 'fortress-duel/icon.png' // 模組清單用的圖示，資源包裡沒有意義
+	}
+
+	doLast {
+		def zip = archiveFile.get().asFile
+		def sha1 = java.security.MessageDigest.getInstance('SHA-1')
+				.digest(zip.bytes).encodeHex().toString()
+		logger.lifecycle("資源包：${zip}")
+		logger.lifecycle("resource-pack-sha1=${sha1}")
+	}
+}
+
 // configure the maven publication
 publishing {
 	publications {

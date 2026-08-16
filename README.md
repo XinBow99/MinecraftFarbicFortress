@@ -62,6 +62,29 @@ Minecraft Fabric mod（1.26.2 / Fabric Loader 0.19.3）。玩家可以向任意�
 
 要測對戰至少需要兩個玩家，所以內建了第二個客戶端的啟動設定。只是要試武器、怪物、技能或商店的話不用開兩個視窗——`/duel solo` 一個人就能進場，對手是一座不會還手的靶子。
 
+## 伺服器資源包（音效）
+
+商店的點歌按鈕放的是自訂音效，音檔在模組的 `assets/` 裡——**裝了模組的客戶端**本來就聽得到。
+要讓**沒裝模組的原版客戶端**也聽到，就掛一個伺服器資源包：玩家一進來原版會問「是否下載伺服器資源包」，
+同意之後自動套用，不用手動裝任何東西。
+
+```bash
+./gradlew resourcePack   # 產出 build/resourcepack/*.zip，並印出 sha1
+```
+
+把 zip 放到任何公開網址（現成的一份在 [Release `resources-v1`](https://github.com/XinBow99/MinecraftFarbicFortress/releases/tag/resources-v1)），然後填進 `server.properties`：
+
+```properties
+resource-pack=https://github.com/XinBow99/MinecraftFarbicFortress/releases/download/resources-v1/fortress-duel-resources-1.0.0.zip
+resource-pack-sha1=783e1f9167489edda5527990a1df56e88ae3b9d0
+resource-pack-required=false
+```
+
+`sha1` 不是可選的裝飾：填了客戶端才會快取，不然每次進來都重下載一次。改了 zip 就要一起換掉這兩行——
+網址不變而內容變了的話，客戶端會拿舊的快取。
+
+`resource-pack-required=true` 則是不裝就踢出去；點歌只是好玩的東西，預設不強制。
+
 ## 發佈
 
 打上 `v` 開頭的 tag 就會自動建置並開一個 GitHub Release：
