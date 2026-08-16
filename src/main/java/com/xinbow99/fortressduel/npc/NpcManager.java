@@ -19,6 +19,7 @@ import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -189,8 +190,15 @@ public final class NpcManager {
     /**
      * 把手上的原型登記給軍火商，之後就能在店裡量產。
      *
-     * <p>**原型會被收走**：它是一份設計圖，交出去就是交出去了。留著的話玩家可以拿同一份
-     * 原型去對面的商人那裡再登記一次——而配方逐人正是這個系統的競爭點。
+     * <p>**原型不會被收走。** 這一條改過：原本是登記完就 shrink 掉，理由是「設計圖交出去
+     * 就是交出去了」，而且怕玩家拿同一份去對面的商人那裡再登記一次。
+     *
+     * <p>後面那個顧慮是不成立的——登記是記在 {@code player.getUUID()} 底下的，跟是哪一隻
+     * 商人無關，重複登記只會得到「已經登記過了」。所以收走它換不到任何東西。
+     *
+     * <p>換不到東西卻有代價：工作台一次只產出一個原型（那是守恆的要求），登記又把它吃掉，
+     * 於是「照著提示走完流程的人手上永遠沒有可以回收的設計圖」——遞迴合成在實務上等於
+     * 是關著的。留著它，量產與遞迴才不必二選一。
      */
     private boolean registerDesign(ServerPlayer player) {
         ItemStack prototype = player.getMainHandItem();
@@ -200,16 +208,15 @@ public final class NpcManager {
         String name = AmmoLook.readName(prototype)
                 .orElseGet(() -> config.designs().toWeapon(vector).displayName());
 
-        boolean fresh = designs.register(player.getUUID(), vector, name);
-        if (!fresh) {
-            player.sendSystemMessage(Msg.info("「" + name + "」已經登記過了，架上就有。"));
-            return true;
-        }
+        // 已經登記過了 → 回 false 讓右鍵照常開店。不再發「已經登記過了」那則訊息：
+        // 架上那一格本身就是更好的回答，而且玩家這一下多半就是想去買它
+        if (!designs.register(player.getUUID(), vector, name)) return false;
 
-        prototype.shrink(1);
         int price = config.materials().batchPrice(vector);
-        player.sendSystemMessage(Msg.good("軍火商收下了「" + name + "」的設計圖，開始量產——"
+        player.sendSystemMessage(Msg.good("軍火商抄下了「" + name + "」的設計圖，開始量產——"
                 + "架上多了一格，$" + price + " 一批（" + config.materials().batch() + " 發）。"));
+        player.sendSystemMessage(Msg.plain("  設計圖還在你手上，可以丟回工作台當材料再組。",
+                ChatFormatting.DARK_GRAY));
         return true;
     }
 
@@ -310,9 +317,13 @@ public final class NpcManager {
         if (def == null) return InteractionResult.PASS;
 
         // 手上拿著工作台做出來的原型 → 登記進他的軍火商，而不是開店。
-        // 「拿東西給商人看」是這個動作最直覺的表達，不需要另外一個介面
-        if (CraftingBench.isPrototype(player.getMainHandItem())) {
-            return registerDesign(player) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+        // 「拿東西給商人看」是這個動作最直覺的表達，不需要另外一個介面。
+        //
+        // **只有真的登記到新東西才攔截。** 設計圖現在登記完會留在手上（見 registerDesign），
+        // 所以「已經登記過的設計」是一個會一直存在的狀態——攔的話玩家只要手上拿著自己的
+        // 設計圖就再也打不開商店了，而他多半正是想去買那份設計量產的彈藥
+        if (CraftingBench.isPrototype(player.getMainHandItem()) && registerDesign(player)) {
+            return InteractionResult.SUCCESS;
         }
 
         // 拴繩相關的右鍵一律放行，讓**原版**去處理，我們一行都不寫。兩種情況：

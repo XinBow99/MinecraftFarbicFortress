@@ -15,6 +15,7 @@ import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.incident.IncidentDef;
 import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.AmmoVector;
+import com.xinbow99.fortressduel.craft.CraftingBench;
 import com.xinbow99.fortressduel.craft.MaterialRegistry;
 import com.xinbow99.fortressduel.incident.IncidentScheduler;
 import com.xinbow99.fortressduel.jobs.JobDef;
@@ -374,6 +375,9 @@ public final class DuelCommands {
 
         WeaponDef weapon = config.designs().toWeapon(vector);
         ItemStack stack = WeaponItems.createDesignAmmo(vector, weapon, 64);
+        // 蓋上原型標記，否則這疊東西**跟工作台做出來的長得一模一樣卻不能回收也不能登記**，
+        // 而那個差別是看不見的。這條指令是 GM 的測試入口，測到的必須跟正式流程是同一種東西
+        CraftingBench.markPrototype(stack);
         player.getInventory().placeItemBackInInventory(stack);
 
         ctx.getSource().sendSuccess(() -> Msg.good(weapon.displayName() + "（材料 "

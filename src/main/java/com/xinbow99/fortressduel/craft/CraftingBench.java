@@ -1,10 +1,13 @@
 package com.xinbow99.fortressduel.craft;
 
 import com.xinbow99.fortressduel.core.ConfigManager;
+import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponItems;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
 /**
@@ -51,6 +54,9 @@ public final class CraftingBench {
      */
     private static final java.util.Set<java.util.UUID> hinted = new java.util.HashSet<>();
 
+    /** 玩家 → 最後一次跟他講過的失敗原因。見 {@link #explain}。 */
+    private static final java.util.Map<java.util.UUID, String> lastProblem = new java.util.HashMap<>();
+
     private static ConfigManager config;
 
     private CraftingBench() {
@@ -62,13 +68,42 @@ public final class CraftingBench {
     }
 
     /**
-     * 這個格子裡的東西組得出什麼；組不出來回傳空的（讓原版的配方照常運作）。
+     * 這個格子的判定結果。
+     *
+     * <p>分成三種而不是「有／沒有」，是因為**失敗有兩種完全不同的意思**：
+     *
+     * <ul>
+     *   <li>{@link Offer#PASS} — 格子裡有我們不認得的東西，這是一次原版合成。要**安靜地**
+     *       放行，玩家在對戰之外照常做工作台、做梯子，不該被我們洗訊息。</li>
+     *   <li>{@code problem} — 全部都是我們認得的東西，但組不起來。這種一定要講：它跟成功
+     *       之間的差別玩家看不見，畫面上兩者都只是「結果格空著」。</li>
+     * </ul>
+     *
+     * <p>少了這個分別就是遞迴合成那個坑的根源——把量產彈藥丟回工作台跟把石頭丟回工作台，
+     * 在舊的寫法裡是同一個回傳值，於是「這個不能回收」看起來就跟「壞掉了」一模一樣。
+     */
+    public record Offer(ItemStack result, String problem) {
+
+        /** 交給原版，不出聲。 */
+        static final Offer PASS = new Offer(ItemStack.EMPTY, null);
+
+        static Offer made(ItemStack design) {
+            return new Offer(design, null);
+        }
+
+        static Offer problem(String message) {
+            return new Offer(ItemStack.EMPTY, message);
+        }
+    }
+
+    /**
+     * 這個格子裡的東西組得出什麼。
      *
      * <p>只要格子裡有**任何一個我們不認得的東西**就直接放行——玩家在對戰之外仍然要能
      * 正常合成，而工作台是共用的。
      */
-    public static ItemStack resultFor(Container grid) {
-        if (config == null) return ItemStack.EMPTY;
+    public static Offer offerFor(Container grid) {
+        if (config == null) return Offer.PASS;
 
         AmmoVector vector = AmmoVector.EMPTY;
         int slotsUsed = 0;
@@ -78,29 +113,56 @@ public final class CraftingBench {
             if (stack.isEmpty()) continue;
             slotsUsed++;
 
-            // 已經做好的**原型**：把它整個向量加進來。「拿成品當材料」就是這一行。
-            // 軍火商量產出來的彈藥沒有原型標記，會落到下面的材料查詢並被當成不認得的東西，
-            // 於是整個格子交還給原版——那正是我們要的，量產品不能當材料
+            // 已經做好的**原型**：把它整個向量加進來。「拿成品當材料」就是這一行
             AmmoVector existing = AmmoVector.read(stack).orElse(null);
             if (existing != null) {
-                if (!isPrototype(stack)) return ItemStack.EMPTY;
+                // 帶著向量卻沒有原型標記 ＝ 軍火商量產的那一疊。這是刻意擋掉的
+                // （見 PROTOTYPE_TAG），但它跟原型長得一模一樣，所以一定要說出來
+                if (!isPrototype(stack)) {
+                    return Offer.problem("軍火商量產的彈藥不能當材料回收——只有工作台做出來的設計圖可以。");
+                }
                 vector = vector.plus(existing);
                 continue;
             }
 
             MaterialRegistry.MaterialDef material =
                     config.materials().byItem(BuiltInRegistries.ITEM.getKey(stack.getItem()));
-            if (material == null) return ItemStack.EMPTY;   // 不認得 → 交給原版
+            if (material == null) return Offer.PASS;   // 不認得 → 交給原版
 
             vector = vector.plus(material.id(), 1);
         }
 
-        if (slotsUsed < MIN_MATERIALS || vector.total() < MIN_MATERIALS) return ItemStack.EMPTY;
+        if (slotsUsed == 0) return Offer.PASS;
+        if (slotsUsed < MIN_MATERIALS) {
+            return Offer.problem("一份設計至少要放兩格（材料，或已經做好的設計圖）。");
+        }
 
         WeaponDef weapon = config.designs().toWeapon(vector);
         ItemStack design = WeaponItems.createDesignAmmo(vector, weapon, 1);
         markPrototype(design);
-        return design;
+        return Offer.made(design);
+    }
+
+    /**
+     * 把組不起來的原因講給玩家聽，但**同一句話不連著講第二次**。
+     *
+     * <p>格子每動一下就重算一次，而玩家是一格一格擺的——不擋的話「至少要放兩格」會在擺
+     * 第一格的當下洗出一整串。只記最後講過的那一句：換成別的原因、或成功做出東西之後
+     * （見 {@link #forgetProblem}）就會重新開口。
+     */
+    public static void explain(Player player, String problem) {
+        if (!(player instanceof ServerPlayer sp)) return;
+        if (problem.equals(lastProblem.get(sp.getUUID()))) return;
+
+        lastProblem.put(sp.getUUID(), problem);
+        sp.sendSystemMessage(Msg.warn(problem));
+    }
+
+    /** 成功做出東西了；下次再撞到同樣的問題要重新講一次。 */
+    public static void forgetProblem(Player player) {
+        if (player instanceof ServerPlayer sp) {
+            lastProblem.remove(sp.getUUID());
+        }
     }
 
     /** 把這疊東西標成原型（可以當材料再組）。 */
@@ -137,7 +199,8 @@ public final class CraftingBench {
         sp.sendSystemMessage(com.xinbow99.fortressduel.util.Msg.info(
                 "  2. 拿著它右鍵軍火商登記，他就會開始量產，架上會多一格"));
         sp.sendSystemMessage(com.xinbow99.fortressduel.util.Msg.plain(
-                "  設計圖交出去就收走了，而量產出來的彈藥不能再當材料回收。",
+                "  設計圖登記完還留在你手上，可以丟回工作台當材料再組；"
+                        + "但量產出來的彈藥不能回收。",
                 net.minecraft.ChatFormatting.DARK_GRAY));
     }
 
