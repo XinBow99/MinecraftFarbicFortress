@@ -42,11 +42,17 @@ public final class IncidentScheduler {
     /** 結束時清怪的範圍要比競技場往外放寬幾格。見 {@link #clearMobs}。 */
     private static final double MOB_SWEEP_MARGIN = 16.0;
 
+    /** 幾 tick 檢查一次怪物數量上限。見 {@link #capMobs}。 */
+    private static final int MOB_CAP_INTERVAL = 10;
+
     private final ConfigManager config;
     private final SkillEngine skills;
 
     /** 每一場對戰各自的倒數，key 用 Duel 物件本身（一場對戰的生命週期內都是同一個實例）。 */
     private final Map<Duel, Integer> countdowns = new HashMap<>();
+
+    /** {@link #capMobs} 的節流計數器。全場共用一個就夠——它只是決定「這一 tick 要不要數」。 */
+    private int mobCapTicks;
 
     public IncidentScheduler(ConfigManager config, SkillEngine skills) {
         this.config = config;
@@ -72,6 +78,8 @@ public final class IncidentScheduler {
         Integer remaining = countdowns.get(duel);
         if (remaining == null) return;
 
+        capMobs(duel);
+
         if (remaining > 0) {
             countdowns.put(duel, remaining - 1);
             return;
@@ -83,6 +91,27 @@ public final class IncidentScheduler {
 
         announce(duel, incident);
         execute(duel, incident);
+    }
+
+    /**
+     * 把場上的怪壓回 mobs.yml 的上限以內。
+     *
+     * <p>掛在事件的 tick 上，但它管的**不只是事件生的怪**：寶貝蛋、還有會召喚與會分裂的技能
+     * 同樣在加怪，而它們吃的是同一份效能預算。之所以住在這裡，是因為事件是量最大的來源，
+     * 而這裡已經是逐場、逐 tick 在跑的地方（見 {@code MobSpawner.enforceCap}）。
+     *
+     * <p>每 {@link #MOB_CAP_INTERVAL} tick 才數一次：這是一次範圍實體查詢，每 tick 跑等於
+     * 為了省效能而花效能。半秒的延遲在「怪太多了」這件事上完全無感。
+     */
+    private void capMobs(Duel duel) {
+        if (++mobCapTicks < MOB_CAP_INTERVAL) return;
+        mobCapTicks = 0;
+
+        int max = config.mobs().maxAlive();
+        int culled = MobSpawner.enforceCap(duel.arena().level(), boxOf(duel), max);
+        if (culled > 0) {
+            FortressDuel.LOGGER.info("Mob cap ({}) exceeded, removed {} of the oldest", max, culled);
+        }
     }
 
     /**

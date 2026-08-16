@@ -13,7 +13,21 @@ public final class MobRegistry {
 
     private volatile Map<String, MobDef> byId = Map.of();
 
+    /**
+     * 一場對戰的場上最多同時幾隻怪；0 ＝ 不限制。見 {@code MobSpawner.enforceCap}。
+     *
+     * <p>放在 mobs.yml 而不是 incidents.yml：突發事件只是來源之一，寶貝蛋與會召喚、
+     * 會分裂的技能同樣在加怪，而它們吃的是同一份效能預算。
+     */
+    private volatile int maxAlive = 30;
+
+    public int maxAlive() {
+        return maxAlive;
+    }
+
     public void load(YamlConfig cfg) {
+        this.maxAlive = Math.max(0, cfg.getInt("limits.max_alive", 30));
+
         Map<String, MobDef> ids = new LinkedHashMap<>();
         for (Map.Entry<String, Map<String, Object>> e : cfg.getSections("mobs").entrySet()) {
             MobDef def = MobDef.from(e.getKey(), e.getValue());
