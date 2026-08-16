@@ -75,8 +75,8 @@ public record DuelSettings(
         /** 熊貓圈外再往外幾格的木製平台。0 ＝ 不鋪，沿用原本的地形。 */
         int platformRadius,
         String platformBlock,
-        /** 開場放在平台上的商人 NPC（對應 npcs.yml）。留空 ＝ 不放。 */
-        String dealerNpc,
+        /** 開場放在平台上的商人 NPC（對應 npcs.yml），依序左右排開。空的 ＝ 一個都不放。 */
+        List<String> dealerNpcs,
         /**
          * 熊貓周圍至少要有幾格可站的空間（3×3×3 共 27 格裡算）。低於這個值就持續掉血。
          *
@@ -106,6 +106,16 @@ public record DuelSettings(
         /** 攻擊階段長度（秒）。這段時間不能擺方塊、可以攻擊。 */
         int combatSeconds,
         int outOfBoundsGraceTicks,
+        /**
+         * 有人離線之後最多等他幾秒才判他放棄。0 ＝ 不等，離線立刻判負（舊的行為）。
+         *
+         * <p>斷線不等於投降。網路斷一下就輸掉整場，輸的原因跟遊戲本身無關，而這一場的
+         * 進度（蓋好的房子、買的東西、剩下的熊貓）也一起沒了——那是最沒有價值的敗局。
+         *
+         * <p>等待期間整場**暫停**：階段計時器不走、窒息不算、突發事件不發，還在線上的人
+         * 也不會在這段時間繼續蓋牆。否則「等對手回來」就變成單方面的免費建造時間。
+         */
+        int reconnectGraceSeconds,
         /** 開場發給雙方的物資，每一項寫成 {@code "minecraft:dirt 20"}。 */
         List<String> startingItems,
         /** 開場把玩家切成哪個模式，結束還原成他原本的。名稱同原版：survival／adventure／… */
@@ -194,7 +204,7 @@ public record DuelSettings(
                 cfg.getString("objective.pen_block", "minecraft:oak_fence"),
                 Math.max(0, cfg.getInt("arena.platform_radius", 5)),
                 cfg.getString("arena.platform_block", "minecraft:oak_planks"),
-                cfg.getString("arena.dealer_npc", "arms_dealer"),
+                dealerNpcs(cfg),
                 cfg.getInt("objective.suffocation_min_space", 6),
                 cfg.getDouble("objective.suffocation_damage", 2.0),
 
@@ -204,6 +214,7 @@ public record DuelSettings(
                 Math.max(0, cfg.getInt("battle.build_timeout_seconds", 300)),
                 cfg.getInt("battle.combat_seconds", 60),
                 cfg.getInt("battle.out_of_bounds_grace_ticks", 40),
+                Math.max(0, cfg.getInt("battle.reconnect_grace_seconds", 600)),
                 cfg.getStringList("battle.starting_items"),
                 cfg.getString("battle.gamemode", "survival"),
                 cfg.getBoolean("battle.clear_inventory", true),
@@ -231,6 +242,22 @@ public record DuelSettings(
     private static List<String> pandaPersonalities(YamlConfig cfg) {
         List<String> configured = cfg.getStringList("objective.personalities");
         return configured.isEmpty() ? List.of("normal", "normal", "normal", "lazy") : configured;
+    }
+
+    /**
+     * 開場要放哪幾個商人。
+     *
+     * <p>舊設定檔寫的是單數的 {@code arena.dealer_npc}，那些檔案還在玩家的 config 資料夾裡，
+     * 所以複數的沒寫時退回去讀它——不然升級之後場上會一個商人都沒有，而那是「補不到子彈」。
+     */
+    private static List<String> dealerNpcs(YamlConfig cfg) {
+        List<String> configured = cfg.getStringList("arena.dealer_npcs");
+        if (!configured.isEmpty()) return List.copyOf(configured);
+
+        String single = cfg.getString("arena.dealer_npc", "");
+        if (!single.isBlank()) return List.of(single);
+
+        return List.of("arms_dealer", "musician");
     }
 
     /** 全部用預設值，設定檔還沒讀進來時的退路。 */

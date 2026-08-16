@@ -1,5 +1,7 @@
 package com.xinbow99.fortressduel.weapon;
 
+import com.xinbow99.fortressduel.craft.AmmoLook;
+import com.xinbow99.fortressduel.craft.AmmoVector;
 import com.xinbow99.fortressduel.util.DuelItems;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
@@ -39,6 +41,21 @@ public final class WeaponItems {
      * {@code item:} 反查（見 {@code WeaponSystem.byAmmoStack}）。這樣玩家從別處撿到的
      * 同一種物品也能用，不會出現「長得一樣卻射不出去」。
      */
+    /**
+     * 做一疊**玩家自己組出來的**彈藥。
+     *
+     * <p>跟 {@link #createAmmo} 的差別是身分的來源：預設那十把靠物品 id 反查，
+     * 組合出來的靠身上帶的材料向量（{@code WeaponSystem.byAmmoStack} 先看向量）。
+     * 組合是無界的，不可能一種對一個物品——外觀因此改由 {@link AmmoLook} 從向量算出來。
+     */
+    public static ItemStack createDesignAmmo(AmmoVector vector, WeaponDef weapon, int count) {
+        ItemStack stack = new ItemStack(
+                BuiltInRegistries.ITEM.getOptional(AmmoLook.baseItem()).orElse(Items.STICK), count);
+        vector.write(stack);
+        AmmoLook.apply(stack, vector, weapon);
+        return DuelItems.issue(stack);
+    }
+
     public static ItemStack createAmmo(WeaponDef weapon, int count) {
         ItemStack stack = new ItemStack(
                 BuiltInRegistries.ITEM.getOptional(weapon.item()).orElse(Items.STICK), count);

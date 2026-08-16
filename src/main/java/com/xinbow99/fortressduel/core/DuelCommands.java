@@ -13,7 +13,12 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.xinbow99.fortressduel.battle.Duel;
 import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.incident.IncidentDef;
+import com.xinbow99.fortressduel.craft.AmmoLook;
+import com.xinbow99.fortressduel.craft.AmmoVector;
+import com.xinbow99.fortressduel.craft.MaterialRegistry;
 import com.xinbow99.fortressduel.incident.IncidentScheduler;
+import com.xinbow99.fortressduel.jobs.JobDef;
+import com.xinbow99.fortressduel.jobs.JobManager;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
@@ -46,6 +51,7 @@ import net.minecraft.world.phys.AABB;
  * /duel ready               建造階段蓋完了，雙方都按了就開戰
  * /duel forfeit             投降，判對手獲勝
  * /duel reload              重讀 YAML 設定（需要 OP）
+ * /duel hire     &lt;job&gt;      直接雇一名工人，不用付錢（需要 OP）
  * </pre>
  */
 public final class DuelCommands {
@@ -60,14 +66,17 @@ public final class DuelCommands {
     private final WeaponSystem weapons;
     /** /duel incident 要能立刻觸發一個事件。 */
     private final IncidentScheduler incidents;
+    /** /duel hire 要能直接雇一名工人，不用先湊錢走到商人面前。 */
+    private final JobManager jobs;
 
     public DuelCommands(DuelManager duels, ConfigManager config, SkillEngine skills,
-                        WeaponSystem weapons, IncidentScheduler incidents) {
+                        WeaponSystem weapons, IncidentScheduler incidents, JobManager jobs) {
         this.duels = duels;
         this.config = config;
         this.skills = skills;
         this.weapons = weapons;
         this.incidents = incidents;
+        this.jobs = jobs;
     }
 
     public void register() {
@@ -122,6 +131,27 @@ public final class DuelCommands {
                                 .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
                                         config.incidents().all().stream().map(IncidentDef::id), builder))
                                 .executes(this::incident)))
+                .then(Commands.literal("craft")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .then(Commands.argument("recipe", StringArgumentType.greedyString())
+                                .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                        config.materials().all().stream()
+                                                .map(m -> m.id() + "=3"), builder))
+                                .executes(this::craft)))
+                .then(Commands.literal("name")
+                        .then(Commands.argument("name", StringArgumentType.greedyString())
+                                .executes(this::nameAmmo)))
+                .then(Commands.literal("testfire")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(this::testfire))
+                .then(Commands.literal("hire")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .then(Commands.argument("job", StringArgumentType.word())
+                                .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                        config.jobs().allJobs().stream().map(JobDef::id), builder))
+                                .executes(ctx -> run(ctx.getSource(), jobs.hire(
+                                        ctx.getSource().getPlayerOrException(),
+                                        StringArgumentType.getString(ctx, "job"))))))
                 .then(Commands.literal("cleanup")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .executes(ctx -> cleanup(ctx, 64))
@@ -239,6 +269,128 @@ public final class DuelCommands {
             ctx.getSource().sendFailure(Msg.warn(error));
             return 0;
         }
+        return 1;
+    }
+
+    /**
+     * 給手上那疊自製彈藥取名字。
+     *
+     * <p>為什麼是指令而不是鐵砧：鐵砧改名要消耗經驗等級，而這個遊戲沒有經驗系統——
+     * 開場清空背包、場內也沒有經驗來源，所以鐵砧那條路對多數玩家是走不通的。
+     *
+     * <p>名字存在物品的 CUSTOM_DATA 裡而不是只設 CUSTOM_NAME，這樣它會**跟著設計走**：
+     * 之後軍火商量產同一份配方時讀得到它，複製出來的每一疊都叫同一個名字。
+     *
+     * <p>名字不影響設計的身分——同樣的材料取不同名字仍然是同一份設計，數值與外觀都一樣。
+     * 那是刻意的，見 {@link AmmoLook} 的說明。
+     */
+    private int nameAmmo(CommandContext<CommandSourceStack> ctx) {
+        ServerPlayer player = ctx.getSource().getPlayer();
+        if (player == null) {
+            ctx.getSource().sendFailure(Msg.warn("這個指令要由玩家執行。"));
+            return 0;
+        }
+
+        ItemStack stack = player.getMainHandItem();
+        AmmoVector vector = AmmoVector.read(stack).orElse(null);
+        if (vector == null) {
+            ctx.getSource().sendFailure(Msg.warn("主手要拿著一疊自己組出來的彈藥才能取名。"));
+            return 0;
+        }
+
+        String name = StringArgumentType.getString(ctx, "name").strip();
+        AmmoLook.writeName(stack, name);
+        AmmoLook.apply(stack, vector, config.designs().toWeapon(vector));
+
+        ctx.getSource().sendSuccess(() -> name.isEmpty()
+                ? Msg.info("改回預設名稱。")
+                : Msg.good("改名為「" + stack.getHoverName().getString() + "」。"), false);
+        return 1;
+    }
+
+    /**
+     * 開／關試射模式：不用開一場對戰也能開火。
+     *
+     * <p>武器跟對戰本來就該是解耦的——要調一條彈道、看一組散佈、比較兩個組合的手感，
+     * 不該先框一座競技場出來。
+     *
+     * <p>試射的那一發跟對戰中完全一樣（散佈、後座力、冷卻、濺射、擊退、軌跡都照算），
+     * 只少三件事：**打不壞方塊、不孵怪、飛超過 256 格就消失**。前兩件是因為真實世界
+     * 沒有快照可以還原，第三件是因為沒有框線可以收尾。
+     */
+    private int testfire(CommandContext<CommandSourceStack> ctx) {
+        ServerPlayer player = ctx.getSource().getPlayer();
+        if (player == null) {
+            ctx.getSource().sendFailure(Msg.warn("這個指令要由玩家執行。"));
+            return 0;
+        }
+
+        boolean on = weapons.toggleTestFire(player);
+        ctx.getSource().sendSuccess(() -> on
+                ? Msg.good("試射開啟：主手拿弓、副手放彈藥就能開火。方塊打不壞、也不會孵怪。")
+                : Msg.info("試射關閉。"), false);
+        return 1;
+    }
+
+    /**
+     * 測試用：直接用材料清單組一份彈藥出來，不經過工作台。
+     *
+     * <p>格式 {@code /duel craft powder=9 propellant=3}。工作台還沒接上之前，這是唯一能
+     * 驗證數值模型的入口——而數值模型錯的話，工作台做得再漂亮也沒有意義，所以它先做。
+     *
+     * <p>發到手上的那疊身上帶著材料向量，所以照樣可以真的射出去：{@code byAmmoStack}
+     * 先看向量、查不到才退回 weapons.yml 那張固定表。
+     */
+    private int craft(CommandContext<CommandSourceStack> ctx) {
+        ServerPlayer player = ctx.getSource().getPlayer();
+        if (player == null) {
+            ctx.getSource().sendFailure(Msg.warn("這個指令要由玩家執行。"));
+            return 0;
+        }
+
+        AmmoVector building = AmmoVector.EMPTY;
+        for (String token : StringArgumentType.getString(ctx, "recipe").trim().split("\s+")) {
+            String[] parts = token.split("=", 2);
+            MaterialRegistry.MaterialDef material = config.materials().byId(parts[0]);
+            if (material == null) {
+                ctx.getSource().sendFailure(Msg.warn("materials.yml 裡沒有 '" + parts[0] + "' 這種材料。"));
+                return 0;
+            }
+            int n;
+            try {
+                n = parts.length > 1 ? Integer.parseInt(parts[1]) : 1;
+            } catch (NumberFormatException e) {
+                ctx.getSource().sendFailure(Msg.warn("'" + token + "' 的數量看不懂，格式是 powder=9。"));
+                return 0;
+            }
+            building = building.plus(material.id(), n);
+        }
+
+        AmmoVector vector = building;
+        if (vector.isEmpty()) {
+            ctx.getSource().sendFailure(Msg.warn("至少要放一種材料。"));
+            return 0;
+        }
+
+        WeaponDef weapon = config.designs().toWeapon(vector);
+        ItemStack stack = WeaponItems.createDesignAmmo(vector, weapon, 64);
+        player.getInventory().placeItemBackInInventory(stack);
+
+        ctx.getSource().sendSuccess(() -> Msg.good(weapon.displayName() + "（材料 "
+                + vector.total() + " 個）"), false);
+        ctx.getSource().sendSuccess(() -> Msg.plain(String.format(
+                "傷害 %.1f ×%d顆   初速 %.2f   重力 %.4f   散佈 %.2f°   濺射 %.2f",
+                weapon.damage(), weapon.pellets(), weapon.projectileSpeed(),
+                weapon.gravity(), weapon.spreadDegrees(), weapon.splashRadius()),
+                ChatFormatting.GRAY), false);
+        ctx.getSource().sendSuccess(() -> Msg.plain(String.format(
+                "冷卻 %d tick（每秒 %.1f 發）   後座 %.2f/發，回復 %.2f°/秒   45°射程 %.0f 格",
+                weapon.cooldownTicks(), 20.0 / weapon.cooldownTicks(),
+                weapon.recoil(), weapon.recoilRecovery(), weapon.maxRange()),
+                ChatFormatting.GRAY), false);
+        // 做出來的當下才講：取名這件事沒有任何視覺入口（不像商店有櫃子、工作台有格子），
+        // 不在這裡提一句的話玩家不會知道它存在
+        ctx.getSource().sendSuccess(() -> Msg.info("拿在主手用 /duel name <名稱> 可以自己取名。"), false);
         return 1;
     }
 

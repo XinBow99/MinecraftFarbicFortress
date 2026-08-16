@@ -4,9 +4,11 @@
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
 		"BowItemMixin",
+		"CraftingMenuMixin",
 		"ExampleMixin",
 		"ExplosionMixin",
-		"InventoryDropMixin"
+		"InventoryDropMixin",
+		"ResultSlotMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -11,8 +11,10 @@ import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -109,6 +111,15 @@ public final class Duel {
     /** 打到第幾輪（一輪 ＝ 一次建造 + 一次攻擊）。 */
     private int round;
     private long ticksElapsed;
+    /** 商店點的那首歌放完的時間；在這之前不接受下一次點歌，見 {@link #playMusic}。 */
+    private long musicUntilTick;
+    /**
+     * 已經等離線的人等了幾 tick；0 ＝ 沒有人離線，這一場正常在跑。
+     *
+     * <p>不記「誰」離線：唯一的真相是玩家清單，每 tick 去問一次就好（見 {@link #playerOf}）。
+     * 記下來的話「離線又上線又離線」會讓這份記錄跟現況對不起來。
+     */
+    private int offlineTicks;
     private Result result;
     /**
      * 正在對熊貓送窒息傷害。{@link #allowGuardianDamage} 靠它認出「這一發是我們自己打的」。
@@ -196,8 +207,58 @@ public final class Duel {
                     + "那就是你要守的東西。"));
         }
 
+        duel.warnShortRangedWeapons();
         DuelEvents.START.invoker().onDuelStart(duel);
         return duel;
+    }
+
+    /**
+     * 圈放好之後公告場地尺寸：log 一行，雙方也各收到一行。
+     *
+     * <p>每一場都講，不只在有武器構不到的時候。對玩家來說這是**買彈藥之前就該知道的事**——
+     * 場地多大決定哪些武器打得到、要不要蓋那麼厚；對 log 來說它是判讀其他所有紀錄的前提，
+     * 同一份設定在 26 格與 106 格的場地是兩種遊戲。
+     *
+     * <p>量的是圈到圈的沿軸距離，不是玻璃盒的邊長。玻璃盒是開場那一刻框的、還多留了 margin，
+     * 而玩家實際要打穿的是這條。盒子的尺寸只留在 log 裡——那是給我們除錯用的，不是玩家的資訊。
+     */
+    private void announceLayout() {
+        double[] spans = arena.zoneSpans();
+        if (spans == null) return;
+
+        long side = Math.round(spans[0]);
+        long neutral = Math.round(spans[1]);
+        long total = Math.round(spans[2]);
+
+        FortressDuel.LOGGER.info("Arena layout: each side {} blocks, neutral {} blocks, total {} blocks (box {}x{})",
+                side, neutral, total, arena.region().sizeX(), arena.region().sizeZ());
+
+        for (ServerPlayer player : onlinePlayers()) {
+            player.sendSystemMessage(Msg.info("場地：雙方各 " + side + " 格、中場 "
+                    + neutral + " 格，共 " + total + " 格。"));
+        }
+    }
+
+    /**
+     * 這場的場地有多大，就有哪些武器構不到對面。
+     *
+     * <p>場地是每一場現算的（框在雙方站的位置之間），所以這件事沒辦法在載入設定時檢查完——
+     * 同一份 weapons.yml 在近距離開局完全沒問題，站遠一點就有武器打不過去。
+     *
+     * <p>要講給玩家聽而不是只寫進 log：射程不足**不會有任何回饋**，彈丸只是在半路落地，
+     * 玩家看到的是「我這把老是差一點」。這是一個他買彈藥之前就該知道的事實。
+     */
+    private void warnShortRangedWeapons() {
+        // 邊長 ＝ 從自己這側的玻璃牆打到對面那面牆的距離
+        List<String> tooShort = services.weapons().shortRangedFor(arena.region().sizeX());
+        if (tooShort.isEmpty()) return;
+
+        FortressDuel.LOGGER.warn("Arena span is {} blocks; these weapons cannot reach across: {}",
+                arena.region().sizeX(), String.join(", ", tooShort));
+        for (ServerPlayer player : onlinePlayers()) {
+            player.sendSystemMessage(Msg.warn("這場的場地有 " + arena.region().sizeX()
+                    + " 格寬，這些彈藥打不到對面：" + String.join("、", tooShort)));
+        }
     }
 
     /**
@@ -227,6 +288,7 @@ public final class Duel {
                 + "」，站好別亂跑——" + settings.countdownSeconds()
                 + " 秒後雙方的熊貓會生成，把它的熊貓全部打死就結束。想提前收場用 /duel forfeit。"));
 
+        duel.warnShortRangedWeapons();
         DuelEvents.START.invoker().onDuelStart(duel);
         return duel;
     }
@@ -322,6 +384,21 @@ public final class Duel {
 
     public void tick() {
         if (state == DuelState.ENDED) return;
+
+        ServerPlayer a = playerOf(north);
+        // 單人練習：南半場是靶子，本來就沒有對應的線上玩家，不能拿它的「不在線上」當離線
+        ServerPlayer b = solo ? null : playerOf(south);
+
+        // 有人不在線上就整場暫停等他回來（見 tickDisconnected）。這一段要排在
+        // ticksElapsed++ 前面：暫停期間時間不該走，不然修正效果會在沒有人打的時候過期
+        if (a == null || (!solo && b == null)) {
+            tickDisconnected(a, b);
+            return;
+        }
+        if (offlineTicks > 0) {
+            resumeAfterReconnect();
+        }
+
         ticksElapsed++;
 
         // 每秒一次就夠：封死是持續狀態，不是瞬間事件，而且掉血的單位本來就是「每秒」
@@ -330,31 +407,12 @@ public final class Duel {
             if (state == DuelState.ENDED) return;
         }
 
-        ServerPlayer a = playerOf(north);
-
-        // 單人練習：南半場是靶子，本來就沒有對應的線上玩家，不能套用離線判負
         if (solo) {
-            if (a == null) {
-                finish(Result.aborted());
-                return;
-            }
             tickModifiers(new ServerPlayer[]{a});
             tickPhase(new ServerPlayer[]{a});
             keepInside(a, north);
             enforceZones();
             DuelEvents.TICK.invoker().onDuelTick(this);
-            return;
-        }
-
-        ServerPlayer b = playerOf(south);
-
-        // 有人離線就直接判給還在的那一方；兩個都不在就中止
-        if (a == null || b == null) {
-            if (a == null && b == null) {
-                finish(Result.aborted());
-            } else {
-                finish(Result.disconnected(a == null ? south.playerId() : north.playerId()));
-            }
             return;
         }
 
@@ -366,6 +424,86 @@ public final class Duel {
         enforceZones();
 
         DuelEvents.TICK.invoker().onDuelTick(this);
+    }
+
+    /**
+     * 有人不在線上的那些 tick：整場暫停等他回來，等超過 {@code battle.reconnect_grace_seconds}
+     * 才判他放棄。
+     *
+     * <p>斷線立刻判負是很糟的敗局——輸的原因跟遊戲無關，而且蓋好的房子、買的東西、還活著的
+     * 熊貓會一起消失。網路斷一下就沒了的話，這一整場的投入都變成一場賭博。
+     *
+     * <p>暫停是整場的：這裡 return 之後，計時器、窒息、突發事件、TICK 事件全都不跑，
+     * {@code ticksElapsed} 也不前進。只暫停對手一個人是不夠的——還在線上的人可以趁這段時間
+     * 繼續蓋牆，那等於「對手斷線」變成一份免費的建造時間，反而給了拔網路線的動機。
+     *
+     * <p>寬限設 0 ＝ 回到舊行為（離線立刻判負）：{@code offlineTicks} 先加到 1，第一輪就到期。
+     *
+     * @param a 北半場的線上玩家，null ＝ 他不在線上
+     * @param b 南半場的線上玩家，null ＝ 他不在線上（單人練習恆為 null，不算離線）
+     */
+    private void tickDisconnected(ServerPlayer a, ServerPlayer b) {
+        int graceTicks = settings.reconnectGraceSeconds() * 20;
+        // 還在線上的那一個。兩個都掉線就是 null，那時沒有人可以通知
+        ServerPlayer waiting = a != null ? a : b;
+
+        offlineTicks++;
+
+        if (offlineTicks >= graceTicks) {
+            if (solo || (a == null && b == null)) {
+                finish(Result.aborted());
+            } else {
+                finish(Result.disconnected(a == null ? south.playerId() : north.playerId()));
+            }
+            return;
+        }
+
+        if (waiting == null) return;
+
+        if (offlineTicks == 1) {
+            waiting.sendSystemMessage(Msg.warn(offlineName(a) + " 斷線了。這一場暫停，最多等他 "
+                    + settings.reconnectGraceSeconds() + " 秒——時間到還沒回來就算他放棄。"));
+        }
+
+        // 暫停期間 hud 不跑，動作列這一行是唯一還在動的東西：沒有它，畫面看起來就只是卡住了
+        if (offlineTicks % 20 == 0) {
+            int left = (graceTicks - offlineTicks + 19) / 20;
+            waiting.sendSystemMessage(
+                    Msg.plain("暫停 — 等 " + offlineName(a) + " 回來（" + left + "s）",
+                            ChatFormatting.YELLOW), true);
+        }
+    }
+
+    /** 離線的是誰。只在剛好一方離線時有意義（另一方是 {@code waiting}）。 */
+    private String offlineName(ServerPlayer a) {
+        return a == null ? north.playerName() : south.playerName();
+    }
+
+    /** 人回來了，解除暫停。 */
+    private void resumeAfterReconnect() {
+        offlineTicks = 0;
+        for (ServerPlayer player : onlinePlayers()) {
+            player.sendSystemMessage(Msg.good("人都回來了，繼續打。"));
+            beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 1.5f);
+        }
+    }
+
+    /**
+     * 對戰中途斷線的人回來了（由 {@code DuelManager} 的 JOIN 處理呼叫）。
+     *
+     * <p>要做的事只有把血條掛回去：血條記的是 {@link ServerPlayer} 物件而不是 UUID，
+     * 而重連會建一個新的物件——不重掛的話他回來會看不到任何一座熊貓的血量，
+     * 而那是這場遊戲唯一的比分板。
+     *
+     * <p>**不**重跑進場手續：物資、寄放的背包都還在他身上或檔案裡，再發一次等於給他第二份；
+     * 遊戲模式也不重設，那會把 {@link Side#returnGameMode()} 記著的「他原本的模式」覆蓋成
+     * 對戰用的那個，結束就還不回去了。
+     */
+    public void onRejoin(ServerPlayer player) {
+        if (state == DuelState.ENDED) return;
+        north.showTo(player);
+        south.showTo(player);
+        player.sendSystemMessage(Msg.good("歡迎回來，你的對戰還在進行中。"));
     }
 
     /**
@@ -413,6 +551,8 @@ public final class Duel {
     private void spawnObjectives(ServerPlayer[] players) {
         BlockPos posSouth = solo ? dummyPos : players[1].blockPosition();
         arena.placePens(players[0].blockPosition(), posSouth, settings, services.buildings());
+
+        announceLayout();
 
         north.setPen(arena.penA());
         south.setPen(arena.penB());
@@ -532,7 +672,13 @@ public final class Duel {
      */
     public boolean allowGuardianDamage(Side owner, DamageSource source) {
         if (applyingSuffocation) return true;  // 我們自己送的窒息傷害
-        if (!state.canAttack()) return false;
+        // 等人重連的期間不算數：不然「趁對手斷線把他的熊貓打光」是一條穩贏的路，
+        // 而那正是這個寬限要防的事情本身
+        if (isPaused()) return false;
+        // canFire 而不是 canAttack：停火階段也能開火了（只是打不出自己的半場），
+        // 用 canAttack 的話那個階段打自己的熊貓會完全沒有反應——看起來就是友傷壞掉了。
+        // 停火階段對面的彈丸過不了中線，所以這裡放行的實際上只有「自己打自己的」
+        if (!state.canFire()) return false;
         if (!(source.getEntity() instanceof ServerPlayer attacker)) return false;
 
         UUID shooter = attacker.getUUID();
@@ -652,8 +798,8 @@ public final class Duel {
                 : "（" + settings.buildSeconds() + " 秒）";
 
         for (ServerPlayer player : players) {
-            player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 建造階段開始"
-                    + howItEnds + "：可以蓋，不能攻擊。"));
+            player.sendSystemMessage(Msg.good("第 " + round + " 輪 — 停火階段開始"
+                    + howItEnds + "：可以蓋，也可以開火，但打不出自己的半場。"));
             // 建造階段才發收入：這時你才有機會把錢花掉（蓋牆、去商店補彈藥）。
             // 第一輪不發——開局資金是 starting_money，第一輪就加一份收入的話，
             // 那個設定值講的就不是玩家實際開局拿到的錢了
@@ -662,6 +808,10 @@ public final class Duel {
             }
             beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 0.8f);
         }
+
+        // 工人：報告上一輪的產出，並在雙方陣地補上這一輪的礦脈與稻田。
+        // 排在固定收入之後，玩家看到的順序才是「本輪收入 → 工人賺了多少 → 場上多了什麼」
+        services.jobs().onRoundStart(this, players);
     }
 
     /**
@@ -688,11 +838,15 @@ public final class Duel {
      * @return 給玩家看的錯誤訊息；null ＝ 成功
      */
     public String markReady(ServerPlayer player) {
+        if (isPaused()) {
+            // 這裡放行的話對手一斷線就能被推進攻擊階段，而他還沒蓋完也還沒回來
+            return "這一場正在等對手重連，暫停中不能開戰。";
+        }
         if (state != DuelState.BUILD) {
-            return "現在不是建造階段。";
+            return "現在不是停火階段。";
         }
         if (!settings.buildUntilReady()) {
-            return "這場對戰的建造階段是計時的，不用按就緒。";
+            return "這場對戰的停火階段是計時的，不用按就緒。";
         }
         if (!ready.add(player.getUUID())) {
             return "你已經按過就緒了，正在等對手。";
@@ -731,7 +885,7 @@ public final class Duel {
         phaseTicks = settings.combatSeconds() * 20;
         for (ServerPlayer player : players) {
             player.sendSystemMessage(Msg.warn("攻擊階段開始（" + settings.combatSeconds()
-                    + " 秒）：不能再擺方塊，開打！"));
+                    + " 秒）：彈道不再受中線限制，照樣可以補牆，開打！"));
             beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 1.5f);
         }
     }
@@ -744,6 +898,30 @@ public final class Duel {
      */
     public void notify(ServerPlayer player, Component text) {
         notices.put(player.getUUID(), new Notice(text, ticksElapsed + NOTICE_TICKS));
+    }
+
+    /**
+     * 放一首歌給場上所有人聽——**包含對手**。
+     *
+     * <p>是直接送音效封包給每個人、位置放在他自己身上，不是 {@code level().playSound}：
+     * 後者會隨距離衰減，而競技場的兩端遠得聽不到；點歌的意思就是兩邊都要聽到。
+     *
+     * <p>同一時間只放一首：還在放的時候再點一次不會有任何效果（回傳 {@code false}）。
+     * 不擋的話連點就會疊出好幾軌同一首歌，那是原版音效系統的行為，不是我們要的。
+     *
+     * @param lengthTicks 這首歌多長；在這之前不接受下一次點歌
+     * @return 有沒有真的放出去
+     */
+    public boolean playMusic(Holder<SoundEvent> sound, int lengthTicks) {
+        if (ticksElapsed < musicUntilTick) return false;
+
+        musicUntilTick = ticksElapsed + lengthTicks;
+        for (ServerPlayer player : onlinePlayers()) {
+            player.connection.send(new ClientboundSoundPacket(sound, SoundSource.RECORDS,
+                    player.getX(), player.getY(), player.getZ(), 1.0f, 1.0f,
+                    player.level().getRandom().nextLong()));
+        }
+        return true;
     }
 
     // ---------- 全域修正（突發事件用） ----------
@@ -884,11 +1062,11 @@ public final class Duel {
      */
     private MutableComponent buildHud(ServerPlayer player, int seconds) {
         if (!settings.buildUntilReady()) {
-            return Msg.plain("建造 " + seconds + "s", ChatFormatting.GREEN);
+            return Msg.plain("停火 " + seconds + "s", ChatFormatting.GREEN);
         }
         return ready.contains(player.getUUID())
-                ? Msg.plain("建造 — 已就緒，等對手", ChatFormatting.GRAY)
-                : Msg.plain("建造 — 蓋完打 /duel ready", ChatFormatting.GREEN);
+                ? Msg.plain("停火 — 已就緒，等對手", ChatFormatting.GRAY)
+                : Msg.plain("停火 — 蓋完打 /duel ready", ChatFormatting.GREEN);
     }
 
     /** 在玩家腳下放一個提示音。用世界的 playSound 而不是只送給他一個人——兩邊聽到的節奏會一致。 */
@@ -1170,6 +1348,17 @@ public final class Duel {
 
     public DuelState state() {
         return state;
+    }
+
+    /**
+     * 這一場是不是正暫停等某一方重連（見 {@link #tickDisconnected}）。
+     *
+     * <p>暫停期間還在線上的人不能蓋、不能挖、不能開火、打不動熊貓：計時器停了，但玩家的手
+     * 沒有停——不擋的話「等對手回來」會變成一段沒有人干擾的免費建造與射擊時間，
+     * 反而給了拔網路線的動機。
+     */
+    public boolean isPaused() {
+        return offlineTicks > 0;
     }
 
     public Result result() {

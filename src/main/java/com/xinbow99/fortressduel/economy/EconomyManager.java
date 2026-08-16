@@ -135,8 +135,11 @@ public final class EconomyManager {
             return;
         }
 
-        if (!duel.state().canAttack()) {
-            duels.notify(killer, Msg.plain("建造階段不發賞金", ChatFormatting.GRAY));
+        // 停火階段照發：那個階段本來就可以開火，只是打不出自己的半場（見 DuelState.BUILD）。
+        // 不發的話會變成「清得掉家裡的老鼠，但清了沒有錢」這種說不出道理的規則。
+        // 也不會被拿來搶跑——中場那些有競爭性的怪在停火階段根本打不到
+        if (!duel.state().canFire()) {
+            duels.notify(killer, Msg.plain("準備階段不發賞金", ChatFormatting.GRAY));
             return;
         }
 
@@ -145,6 +148,24 @@ public final class EconomyManager {
                 + "  （$" + wallet.balance() + "）", ChatFormatting.GOLD));
         killer.level().playSound(null, killer.blockPosition(),
                 SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.6f, 1.4f);
+    }
+
+    /**
+     * 直接入帳，不發訊息。
+     *
+     * <p>給工人那條收入用（見 {@code jobs.JobManager}）：那邊是一格一格採、一筆一筆進帳的，
+     * 每次都講一句的話一場下來上百行，會把其他提示全部洗掉。訊息由呼叫端自己湊成一輪一次。
+     *
+     * @return true ＝ 真的入帳了（金額為正且這個人有錢包）
+     */
+    public boolean pay(ServerPlayer player, int amount) {
+        if (amount <= 0) return false;
+
+        Wallet wallet = wallets.get(player.getUUID());
+        if (wallet == null) return false;
+
+        wallet.earn(amount);
+        return true;
     }
 
     // ---------- 查詢 ----------

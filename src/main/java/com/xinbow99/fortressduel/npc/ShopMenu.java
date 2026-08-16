@@ -1,20 +1,33 @@
 package com.xinbow99.fortressduel.npc;
 
 import com.xinbow99.fortressduel.FortressDuel;
+import com.xinbow99.fortressduel.battle.Duel;
+import com.xinbow99.fortressduel.battle.DuelManager;
+import com.xinbow99.fortressduel.core.ConfigManager;
+import com.xinbow99.fortressduel.craft.AmmoLook;
+import com.xinbow99.fortressduel.craft.DesignRegistry;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
+import com.xinbow99.fortressduel.jobs.JobDef;
+import com.xinbow99.fortressduel.jobs.JobManager;
+import com.xinbow99.fortressduel.jobs.NodeDef;
 import com.xinbow99.fortressduel.util.DuelItems;
+import com.xinbow99.fortressduel.util.DuelSounds;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponItems;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.SimpleContainer;
@@ -24,6 +37,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.MenuType;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -35,6 +49,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 商店介面。
@@ -52,40 +67,94 @@ public final class ShopMenu extends ChestMenu {
     private final ServerPlayer player;
     private final EconomyManager economy;
     private final WeaponSystem weapons;
+    private final ConfigManager config;
+    private final DesignRegistry designs;
+    /** {@code type: worker} 的商品要靠它雇人，也要靠它算「現在幾個工人」。 */
+    private final JobManager jobs;
+    /** {@code type: music} 的按鈕要靠它找到這一場，才放得到對手耳朵裡。 */
+    private final DuelManager duels;
 
     private ShopMenu(int syncId, Inventory inventory, SimpleContainer container, ShopDef shop,
                      List<ShopEntry> slotEntries, ServerPlayer player,
-                     EconomyManager economy, WeaponSystem weapons) {
+                     EconomyManager economy, WeaponSystem weapons, JobManager jobs,
+                     ConfigManager config, DesignRegistry designs, DuelManager duels) {
         super(MenuType.GENERIC_9x6, syncId, inventory, container, ROWS);
         this.shop = shop;
         this.slotEntries = slotEntries;
         this.player = player;
         this.economy = economy;
         this.weapons = weapons;
+        this.config = config;
+        this.designs = designs;
+        this.jobs = jobs;
+        this.duels = duels;
     }
 
     /** 開一間店給某個玩家看。 */
-    public static void open(ServerPlayer player, ShopDef shop, EconomyManager economy, WeaponSystem weapons) {
+    public static void open(ServerPlayer player, ShopDef shop, EconomyManager economy,
+                            WeaponSystem weapons, JobManager jobs,
+                            ConfigManager config, DesignRegistry designs, DuelManager duels) {
         player.openMenu(new SimpleMenuProvider((syncId, inventory, owner) -> {
             SimpleContainer container = new SimpleContainer(SIZE);
             List<ShopEntry> slots = new ArrayList<>(java.util.Collections.nCopies(SIZE, null));
 
             int slot = 0;
-            for (ShopEntry entry : shop.entries()) {
+            // 玩家自己登記的設計排在固定商品後面：架上前段永遠是同一批東西，
+            // 位置不會因為研發進度而跳來跳去
+            List<ShopEntry> all = new ArrayList<>(shop.entries());
+            for (DesignRegistry.Design design : designs.designsOf(player.getUUID())) {
+                all.add(designEntry(design, config));
+            }
+
+            for (ShopEntry entry : all) {
                 if (slot >= SIZE) break;
-                container.setItem(slot, icon(entry, player, economy, weapons));
+                container.setItem(slot, icon(entry, player, economy, weapons, jobs, config, designs));
                 slots.set(slot, entry);
                 slot++;
             }
 
-            return new ShopMenu(syncId, inventory, container, shop, slots, player, economy, weapons);
+            return new ShopMenu(syncId, inventory, container, shop, slots, player, economy, weapons,
+                    jobs, config, designs, duels);
         }, Component.literal(shop.title()).withStyle(ChatFormatting.DARK_GREEN)));
+    }
+
+    /**
+     * 玩家登記過的設計在架上的那一格。
+     *
+     * <p>{@code weapon} 欄位借來放設計的 key——那是這份設計的身分，買的時候靠它回頭
+     * 從登記表把向量找出來。價格是算的不是填的（見 {@code MaterialRegistry.batchPrice}）。
+     */
+    private static ShopEntry designEntry(DesignRegistry.Design design, ConfigManager config) {
+        return new ShopEntry(
+                "design_" + design.vector().key(),
+                design.name(),
+                "design",
+                config.materials().batchPrice(design.vector()),
+                design.vector().key(),
+                "",
+                "",
+                "",
+                1,
+                config.materials().batch(),
+                java.util.Map.<String, Integer>of(),
+                "你自己的設計");
     }
 
     /** 商品的展示物品：圖示 + 名稱 + 價格與現況。 */
     private static ItemStack icon(ShopEntry entry, ServerPlayer player,
-                                  EconomyManager economy, WeaponSystem weapons) {
-        ItemStack stack = new ItemStack(resolveIcon(entry, weapons));
+                                  EconomyManager economy, WeaponSystem weapons, JobManager jobs,
+                                  ConfigManager config, DesignRegistry designs) {
+        ItemStack stack;
+        if ("design".equals(entry.type())) {
+            DesignRegistry.Design design = designs.byKey(player.getUUID(), entry.weapon());
+            // 架上那格就長成它本人的樣子——玩家記住的是那顆蛋，不是名字
+            stack = design == null
+                    ? new ItemStack(Items.PAPER)
+                    : WeaponItems.createDesignAmmo(design.vector(),
+                            config.designs().toWeapon(design.vector()), 1);
+        } else {
+            stack = new ItemStack(resolveIcon(entry, weapons));
+        }
         stack.set(DataComponents.CUSTOM_NAME,
                 Component.literal(entry.displayName()).withStyle(ChatFormatting.YELLOW));
 
@@ -106,6 +175,17 @@ public final class ShopMenu extends ChestMenu {
                     describeWeapon(lore, weapon, player, weapons);
                 }
             }
+            case "music" -> lore.add(Component.literal("全場都聽得到，包含對手")
+                    .withStyle(ChatFormatting.GRAY));
+            case "design" -> {
+                lore.add(Component.literal("量產 " + entry.amount() + " 發")
+                        .withStyle(ChatFormatting.GRAY));
+                DesignRegistry.Design design = designs.byKey(player.getUUID(), entry.weapon());
+                if (design != null) {
+                    describeWeapon(lore, config.designs().toWeapon(design.vector()), player, weapons);
+                }
+            }
+            case "worker" -> describeWorker(lore, entry, player, jobs);
             default -> {
                 lore.add(Component.literal("數量 " + entry.amount())
                         .withStyle(ChatFormatting.GRAY));
@@ -116,7 +196,8 @@ public final class ShopMenu extends ChestMenu {
         if (!entry.lore().isEmpty()) {
             lore.add(Component.literal(entry.lore()).withStyle(ChatFormatting.DARK_GRAY));
         }
-        lore.add(Component.literal("點擊購買").withStyle(ChatFormatting.GREEN));
+        lore.add(Component.literal(entry.type().equals("music") ? "點擊播放" : "點擊購買")
+                .withStyle(ChatFormatting.GREEN));
 
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
@@ -167,6 +248,44 @@ public final class ShopMenu extends ChestMenu {
         if (!shots.isEmpty()) {
             lore.add(Component.literal(shots).withStyle(ChatFormatting.DARK_AQUA));
         }
+    }
+
+    /**
+     * 工人的說明：產出速率、回本時間、現在雇了幾個。
+     *
+     * <p>跟建材的說明同一個原則——**全部從 jobs.yml 的實際數值算出來**。工人是一筆投資，
+     * 而「幾輪回本」是玩家唯一真正要判斷的事；手寫在 lore 裡的話，改一次 {@code income}
+     * 說明就對不上了，而且沒有任何機制會提醒。
+     */
+    private static void describeWorker(List<Component> lore, ShopEntry entry,
+                                       ServerPlayer player, JobManager jobs) {
+        JobDef job = jobs.job(entry.job());
+        if (job == null) return;
+
+        lore.add(Component.literal("每採收一次 +$" + job.income()
+                        + "   間隔 " + String.format("%.1f", job.workTicks() / 20.0) + " 秒")
+                .withStyle(ChatFormatting.AQUA));
+
+        // 滿載＝一直站在節點旁邊採。實際會低一些，因為他要走路，而且節點採光之後要換一個
+        int perMinute = (int) Math.round(job.income() * 1200.0 / job.workTicks());
+        lore.add(Component.literal("滿載約 $" + perMinute + " / 分鐘")
+                .withStyle(ChatFormatting.AQUA));
+        if (entry.price() > 0 && perMinute > 0) {
+            lore.add(Component.literal(
+                            String.format("回本約 %.1f 分鐘", entry.price() / (double) perMinute))
+                    .withStyle(ChatFormatting.AQUA));
+        }
+
+        NodeDef node = jobs.node(job.node());
+        if (node != null) {
+            lore.add(Component.literal("他會自己走去" + node.displayName() + "工作")
+                    .withStyle(ChatFormatting.DARK_AQUA));
+        }
+        lore.add(Component.literal("目前 " + jobs.countWorkers(player.getUUID())
+                        + " / " + jobs.maxWorkers() + " 個工人")
+                .withStyle(ChatFormatting.GRAY));
+        lore.add(Component.literal("打得死，死了不會回來")
+                .withStyle(ChatFormatting.DARK_GRAY));
     }
 
     /** 武器的說明：傷害、射速，以及打石頭與黑曜石各要幾發。 */
@@ -283,6 +402,13 @@ public final class ShopMenu extends ChestMenu {
     }
 
     private void buy(ShopEntry entry) {
+        // 音樂按鈕不是商品：不用錢包、不扣錢，也不放購買音效（那會蓋在歌上面），
+        // 所以在錢包檢查之前就結束
+        if (entry.type().equals("music")) {
+            playMusic(entry);
+            return;
+        }
+
         Wallet wallet = economy.walletOf(player);
         if (wallet == null) {
             player.sendSystemMessage(Msg.warn("你目前沒有在對戰中，沒有錢包。"));
@@ -298,6 +424,8 @@ public final class ShopMenu extends ChestMenu {
             case "launcher" -> giveLauncher();
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
+            case "design" -> giveDesign(entry);
+            case "worker" -> hireWorker(entry);
             default -> {
                 FortressDuel.LOGGER.warn("Shop entry {} uses unknown type '{}'", entry.id(), entry.type());
                 yield false;
@@ -344,17 +472,115 @@ public final class ShopMenu extends ChestMenu {
         return true;
     }
 
+    /**
+     * 量產一批自己登記過的設計。
+     *
+     * <p>發出去的那疊**沒有原型標記**——它是消耗品，不能再丟回工作台當材料。
+     * 少了這條分界的話，玩家可以買便宜的成品拆回去當高階材料，繞過材料本身的成本。
+     */
+    private boolean giveDesign(ShopEntry entry) {
+        DesignRegistry.Design design = designs.byKey(player.getUUID(), entry.weapon());
+        if (design == null) {
+            deny("這份設計已經不在你的名單上了");
+            return false;
+        }
+
+        ItemStack stack = WeaponItems.createDesignAmmo(design.vector(),
+                config.designs().toWeapon(design.vector()), entry.amount());
+        AmmoLook.writeName(stack, design.name());
+        AmmoLook.apply(stack, design.vector(), config.designs().toWeapon(design.vector()));
+        player.getInventory().placeItemBackInInventory(stack);
+        return true;
+    }
+
     private boolean giveItem(ShopEntry entry) {
         Item item = BuiltInRegistries.ITEM.getOptional(Identifier.parse(entry.item())).orElse(null);
         if (item == null) {
             deny("這件商品設定錯誤（找不到物品 " + entry.item() + "）");
             return false;
         }
+        ItemStack stack = new ItemStack(item, entry.amount());
+        applyEnchantments(stack, entry);
+
         // 打上「對戰發的」標記。弓與彈藥是由 WeaponItems 產生的、那裡已經標了，只有這條
         // 直接發原版物品的路要自己標——不標的話買來的建材與工具會被帶回主世界，
         // 而那正是回收機制要擋的事（見 DuelItems）
-        player.getInventory().placeItemBackInInventory(
-                DuelItems.issue(new ItemStack(item, entry.amount())));
+        player.getInventory().placeItemBackInInventory(DuelItems.issue(stack));
+        return true;
+    }
+
+    /**
+     * 把 {@code enchantments} 寫進商品。
+     *
+     * <p>直接寫進物品而不是走附魔台：不需要經驗值，等級也不受原版上限限制。這個遊戲沒有
+     * 經驗值系統，工具的強度是**用錢買的**，跟其他所有東西一樣。
+     *
+     * <p>附魔是資料驅動的註冊表（資料包可以增刪），所以查不到就跳過並留一行 log，不讓整筆
+     * 購買失敗——錢已經要扣了，因為一個設定錯誤而什麼都拿不到是最糟的結果。
+     */
+    private void applyEnchantments(ItemStack stack, ShopEntry entry) {
+        if (entry.enchantments().isEmpty()) return;
+
+        Registry<Enchantment> registry = player.level().registryAccess()
+                .lookupOrThrow(Registries.ENCHANTMENT);
+
+        for (Map.Entry<String, Integer> e : entry.enchantments().entrySet()) {
+            Holder.Reference<Enchantment> enchantment =
+                    registry.get(Identifier.parse(e.getKey())).orElse(null);
+            if (enchantment == null) {
+                FortressDuel.LOGGER.warn("Shop entry {} references enchantment '{}' which does not exist",
+                        entry.id(), e.getKey());
+                continue;
+            }
+            stack.enchant(enchantment, e.getValue());
+        }
+    }
+
+    /**
+     * 點一首歌，**場上所有人都聽得到**（見 {@link Duel#playMusic}）。
+     *
+     * <p>走的是原版的音效系統：音效 id 直接寫在封包裡送出去（見 {@link DuelSounds}——**不註冊**
+     * 進音效登記表，那會害沒裝模組的人連不進來）。客戶端在自己的資源包裡找得到那個 id 就播，
+     * 找不到就安靜；音檔在模組的 assets 裡，所以裝了模組的人聽得到。
+     *
+     * <p>一次只放一首：還在放的時候再點沒有作用，不然連點會疊出好幾軌同一首歌。
+     */
+    private void playMusic(ShopEntry entry) {
+        Holder<SoundEvent> sound = DuelSounds.byId(entry.sound());
+        if (sound == null) {
+            deny("這件商品設定錯誤（音效 id 不合法：" + entry.sound() + "）");
+            return;
+        }
+
+        Duel duel = duels.duelOf(player);
+        if (duel == null) {
+            deny("你目前沒有在對戰中。");
+            return;
+        }
+
+        if (!duel.playMusic(sound, entry.lengthSeconds() * 20)) {
+            deny("這首還沒放完。");
+            return;
+        }
+        player.sendSystemMessage(
+                Msg.plain("♪ " + entry.displayName(), ChatFormatting.LIGHT_PURPLE), true);
+    }
+
+    /**
+     * 雇一名工人。
+     *
+     * <p>買到的不是物品而是一個站在你腳邊的 NPC，所以這條路不經過背包，也不用打
+     * {@link DuelItems} 那個「對戰發的」標記——沒有東西會被帶回主世界。
+     *
+     * <p>會被拒絕的理由（工人滿了、設定錯誤）由 {@code JobManager} 回傳訊息，這裡照原樣
+     * 顯示並讓整筆購買不成立——錢還沒扣，見 {@link #buy}。
+     */
+    private boolean hireWorker(ShopEntry entry) {
+        String error = jobs.hire(player, entry.job());
+        if (error != null) {
+            deny(error);
+            return false;
+        }
         return true;
     }
 
@@ -369,7 +595,7 @@ public final class ShopMenu extends ChestMenu {
         for (int slot = 0; slot < SIZE; slot++) {
             ShopEntry entry = slotEntries.get(slot);
             if (entry != null) {
-                getSlot(slot).set(icon(entry, player, economy, weapons));
+                getSlot(slot).set(icon(entry, player, economy, weapons, jobs, config, designs));
             }
         }
         broadcastChanges();

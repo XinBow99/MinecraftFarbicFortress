@@ -103,8 +103,8 @@ public final class Arena {
         placePen(penA, settings);
         placePen(penB, settings);
 
-        placeDealer(penA, penB, settings, buildings);
-        placeDealer(penB, penA, settings, buildings);
+        placeDealers(penA, penB, settings, buildings);
+        placeDealers(penB, penA, settings, buildings);
 
         placeBuildings(settings, buildings, penA, penB);
         placeBuildings(settings, buildings, penB, penA);
@@ -160,30 +160,35 @@ public final class Arena {
      * <p>不再包在一棟建築裡——極簡開場沒有建築，但商人仍然是這一側的資產：他被打死那一方
      * 就補不到子彈，所以「先做掉對方的商人」還是一條有效的戰術（見 npcs.yml）。
      */
-    private void placeDealer(BlockPos pen, BlockPos enemyPen, DuelSettings settings,
-                             BuildingPlacer buildings) {
-        if (settings.dealerNpc().isBlank()) return;
-
-        NpcDef def = buildings.npcs().npc(settings.dealerNpc());
-        if (def == null) {
-            FortressDuel.LOGGER.warn("arena.dealer_npc '{}' is not defined in npcs.yml, no shop this duel",
-                    settings.dealerNpc());
-            return;
-        }
-
+    private void placeDealers(BlockPos pen, BlockPos enemyPen, DuelSettings settings,
+                              BuildingPlacer buildings) {
         // 站在圈後方一格半徑處，臉朝中場——玩家從自己這側走過來就直接面對他
         int back = settings.penRadius() + 2;
         int dx = pen.getX() - enemyPen.getX();
         int dz = pen.getZ() - enemyPen.getZ();
         boolean alongX = Math.abs(dx) >= Math.abs(dz);
-        int x = pen.getX() + (alongX ? Integer.signum(dx) * back : 0);
-        int z = pen.getZ() + (alongX ? 0 : Integer.signum(dz) * back);
-
-        int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3);
         float yaw = alongX
                 ? (dx > 0 ? 90f : 270f)
                 : (dz > 0 ? 0f : 180f);
-        buildings.npcs().spawn(level, def, new BlockPos(x, y, z), yaw);
+
+        int slot = 0;
+        for (String id : settings.dealerNpcs()) {
+            NpcDef def = buildings.npcs().npc(id);
+            if (def == null) {
+                FortressDuel.LOGGER.warn("arena.dealer_npcs lists '{}' which is not defined in npcs.yml, skipping", id);
+                continue;
+            }
+
+            // 幾個商人沿著「面向中場」那條線的左右排開：0、+3、-3、+6……
+            // 疊在同一格的話原版的推擠會把他們慢慢擠散，玩家會看到商人自己在飄
+            int spread = (slot % 2 == 0 ? 1 : -1) * ((slot + 1) / 2) * 3;
+            int x = pen.getX() + (alongX ? Integer.signum(dx) * back : spread);
+            int z = pen.getZ() + (alongX ? spread : Integer.signum(dz) * back);
+
+            int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3);
+            buildings.npcs().spawn(level, def, new BlockPos(x, y, z), yaw);
+            slot++;
+        }
     }
 
     /**
@@ -418,6 +423,19 @@ public final class Arena {
         return !snapshot.isUntouched(level, pos);
     }
 
+    /**
+     * 在覆寫場內某一格之前先記進還原快照。
+     *
+     * <p>給**對戰開始之後**才往場內放東西的子系統用（工人的礦脈與稻田就是這樣長出來的）。
+     * 開場的框線、熊貓圈、建築都走各自的私有路徑，它們不需要這個。
+     *
+     * <p>{@code restore_terrain: true} 時快照是整包模式、這裡是空操作；但 incremental 模式下
+     * 它是那些方塊唯一的還原保證，少呼叫一次就會在世界上留下永久痕跡。
+     */
+    public void recordBefore(BlockPos pos) {
+        snapshot.record(level, pos);
+    }
+
     /** 拆掉一格並記進快照的還原路徑。不掉落物品——理由同玩家自己挖（見 DuelManager）。 */
     public void breakBuilt(BlockPos pos) {
         snapshot.record(level, pos);
@@ -475,6 +493,22 @@ public final class Arena {
 
         Vec3 shifted = pos.add(axisDir.scale(target - s));
         return new Vec3(shifted.x, y, shifted.z);
+    }
+
+    /**
+     * 三個區塊沿著「A 的圈 → B 的圈」那條軸各佔幾格：{@code [各自半場, 中場, 圈到圈總長]}。
+     *
+     * <p>只有圈放好之後才有意義（分界是從兩座圈的距離算出來的），還沒放好時回傳 null。
+     *
+     * <p>量的是**沿軸的距離**，不是玻璃盒的邊長——後者是開場那一刻框的、還多留了 margin，
+     * 跟「我打得到多遠」是兩個數字。
+     */
+    public double[] zoneSpans() {
+        if (axisDir == null) return null;
+
+        double total = Math.sqrt(penA.distSqr(penB));
+        double neutral = neutralHalf * 2;
+        return new double[]{(total - neutral) / 2, neutral, total};
     }
 
     /**

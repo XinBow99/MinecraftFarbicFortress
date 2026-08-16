@@ -1,6 +1,7 @@
 package com.xinbow99.fortressduel.weapon;
 
 import com.xinbow99.fortressduel.battle.Duel;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
 
@@ -18,7 +19,18 @@ import java.util.UUID;
 final class Projectile {
 
     final WeaponDef weapon;
+    /**
+     * 這一發屬於哪一場對戰；**null ＝ 試射**（{@code /duel testfire}，沒有競技場）。
+     *
+     * <p>試射的那一發少掉三件事：不受框線限制（改用固定的最大飛行距離收尾）、
+     * 打不壞方塊、也不孵怪。那三件事都需要一個能還原的場地，而試射沒有——
+     * 在真實世界上留一個永久的洞不是「測試」，是災情。
+     */
     final Duel duel;
+    /** 彈丸飛在哪個世界。試射沒有競技場可以問，所以自己記著。 */
+    final ServerLevel level;
+    /** 起點。試射時用來算「飛多遠了」——沒有框線可以收尾，總得有個東西讓它停下來。 */
+    final Vec3 origin;
     final UUID shooterId;
     final String shooterName;
 
@@ -42,10 +54,13 @@ final class Projectile {
     final double gravityScale;
     final double damageBoost;
 
-    Projectile(WeaponDef weapon, Duel duel, ServerPlayer shooter, Vec3 pos, Vec3 velocity,
+    Projectile(WeaponDef weapon, Duel duel, ServerLevel level, ServerPlayer shooter,
+               Vec3 pos, Vec3 velocity,
                double damageScale, double gravityScale, double damageBoost) {
         this.weapon = weapon;
         this.duel = duel;
+        this.level = level;
+        this.origin = pos;
         this.shooterId = shooter.getUUID();
         this.shooterName = shooter.getGameProfile().name();
         this.pos = pos;
