@@ -17,6 +17,8 @@ import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.AmmoVector;
 import com.xinbow99.fortressduel.craft.MaterialRegistry;
 import com.xinbow99.fortressduel.incident.IncidentScheduler;
+import com.xinbow99.fortressduel.jobs.JobDef;
+import com.xinbow99.fortressduel.jobs.JobManager;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
@@ -49,6 +51,7 @@ import net.minecraft.world.phys.AABB;
  * /duel ready               建造階段蓋完了，雙方都按了就開戰
  * /duel forfeit             投降，判對手獲勝
  * /duel reload              重讀 YAML 設定（需要 OP）
+ * /duel hire     &lt;job&gt;      直接雇一名工人，不用付錢（需要 OP）
  * </pre>
  */
 public final class DuelCommands {
@@ -63,14 +66,17 @@ public final class DuelCommands {
     private final WeaponSystem weapons;
     /** /duel incident 要能立刻觸發一個事件。 */
     private final IncidentScheduler incidents;
+    /** /duel hire 要能直接雇一名工人，不用先湊錢走到商人面前。 */
+    private final JobManager jobs;
 
     public DuelCommands(DuelManager duels, ConfigManager config, SkillEngine skills,
-                        WeaponSystem weapons, IncidentScheduler incidents) {
+                        WeaponSystem weapons, IncidentScheduler incidents, JobManager jobs) {
         this.duels = duels;
         this.config = config;
         this.skills = skills;
         this.weapons = weapons;
         this.incidents = incidents;
+        this.jobs = jobs;
     }
 
     public void register() {
@@ -138,6 +144,14 @@ public final class DuelCommands {
                 .then(Commands.literal("testfire")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .executes(this::testfire))
+                .then(Commands.literal("hire")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .then(Commands.argument("job", StringArgumentType.word())
+                                .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                        config.jobs().allJobs().stream().map(JobDef::id), builder))
+                                .executes(ctx -> run(ctx.getSource(), jobs.hire(
+                                        ctx.getSource().getPlayerOrException(),
+                                        StringArgumentType.getString(ctx, "job"))))))
                 .then(Commands.literal("cleanup")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .executes(ctx -> cleanup(ctx, 64))

@@ -346,6 +346,11 @@ public final class WeaponSystem {
         Duel duel = duels.duelOf(player);
         // 這個判斷要排在連射的早退之前，不然連射武器在準備階段拉弓會完全沒有回饋——
         // 打不出東西又不說為什麼，比擋下來更難理解
+        // duel 為 null ＝ 試射（/duel testfire），那時沒有階段也沒有暫停可言
+        if (duel != null && duel.isPaused()) {
+            player.sendSystemMessage(Msg.warn("這一場正在等對手重連，暫停中不能開火。"));
+            return true;
+        }
         if (duel != null && !duel.state().canFire()) {
             player.sendSystemMessage(Msg.warn("準備階段還不能開火。"));
             return true;
@@ -386,7 +391,10 @@ public final class WeaponSystem {
             if (weapon == null || !weapon.auto()) continue;
 
             Duel duel = duels.duelOf(player);
-            if (duel == null ? !isTestFiring(player) : !duel.state().canFire()) continue;
+            // 沒有對戰時只有試射模式打得出來；有對戰就照原本的暫停與階段判斷
+            if (duel == null
+                    ? !isTestFiring(player)
+                    : duel.isPaused() || !duel.state().canFire()) continue;
 
             // 力道恆滿：連射武器不蓄力（weapons.yml 給它們 affects: []），
             // 走的是跟其他武器完全相同的開火路徑，只是力道這條軸不參與

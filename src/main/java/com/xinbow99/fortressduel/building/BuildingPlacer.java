@@ -10,6 +10,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -114,12 +115,62 @@ public final class BuildingPlacer {
         npcs.spawn(level, npcDef, pos, mirrorZ ? 0f : 180f);
     }
 
+    /**
+     * 調色盤的一格 → 方塊狀態。支援 {@code minecraft:wheat[age=7]} 這種帶屬性的寫法。
+     *
+     * <p>屬性是必要的而不是裝飾：{@code minecraft:wheat} 的預設狀態是**剛發芽的秧苗**，
+     * 一整片稻田長那樣看起來像沒種成功。而藍圖是設定檔，「成熟的麥子」不該需要改 Java 才寫得出來。
+     *
+     * <p>認不得的屬性或值只跳過那一項、保留其餘的——藍圖是手寫的，一個打錯的屬性
+     * 讓整格消失的話，玩家看到的是「牆破了一個洞」而不是「我打錯字了」。
+     */
     private BlockState state(String id) {
-        Block block = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(id)).orElse(null);
+        String blockId = id;
+        String properties = null;
+
+        int bracket = id.indexOf('[');
+        if (bracket >= 0 && id.endsWith("]")) {
+            blockId = id.substring(0, bracket);
+            properties = id.substring(bracket + 1, id.length() - 1);
+        }
+
+        Block block = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(blockId)).orElse(null);
         if (block == null) {
             FortressDuel.LOGGER.warn("Block '{}' in the blueprint does not exist, leaving that cell untouched", id);
             return null;
         }
-        return block.defaultBlockState();
+
+        BlockState state = block.defaultBlockState();
+        if (properties == null || properties.isBlank()) return state;
+
+        for (String pair : properties.split(",")) {
+            int eq = pair.indexOf('=');
+            if (eq < 0) {
+                FortressDuel.LOGGER.warn("Blueprint block '{}' has property '{}' without a value, skipping it", id, pair);
+                continue;
+            }
+            String key = pair.substring(0, eq).trim();
+            String value = pair.substring(eq + 1).trim();
+
+            Property<?> property = block.getStateDefinition().getProperty(key);
+            if (property == null) {
+                FortressDuel.LOGGER.warn("Blueprint block '{}' has no property '{}', skipping it", blockId, key);
+                continue;
+            }
+            state = withValue(state, property, value, id);
+        }
+        return state;
+    }
+
+    /** 把字串套進一個屬性。獨立成泛型方法，才有辦法讓值的型別跟屬性對上。 */
+    private static <T extends Comparable<T>> BlockState withValue(BlockState state, Property<T> property,
+                                                                 String value, String id) {
+        return property.getValue(value)
+                .map(parsed -> state.setValue(property, parsed))
+                .orElseGet(() -> {
+                    FortressDuel.LOGGER.warn("Blueprint block '{}' cannot take '{}' for property '{}', skipping it",
+                            id, value, property.getName());
+                    return state;
+                });
     }
 }

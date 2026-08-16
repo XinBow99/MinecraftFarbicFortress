@@ -6,6 +6,9 @@ import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.DesignRegistry;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
+import com.xinbow99.fortressduel.jobs.JobDef;
+import com.xinbow99.fortressduel.jobs.JobManager;
+import com.xinbow99.fortressduel.jobs.NodeDef;
 import com.xinbow99.fortressduel.util.DuelItems;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
@@ -62,10 +65,12 @@ public final class ShopMenu extends ChestMenu {
     private final WeaponSystem weapons;
     private final ConfigManager config;
     private final DesignRegistry designs;
+    /** {@code type: worker} 的商品要靠它雇人，也要靠它算「現在幾個工人」。 */
+    private final JobManager jobs;
 
     private ShopMenu(int syncId, Inventory inventory, SimpleContainer container, ShopDef shop,
                      List<ShopEntry> slotEntries, ServerPlayer player,
-                     EconomyManager economy, WeaponSystem weapons,
+                     EconomyManager economy, WeaponSystem weapons, JobManager jobs,
                      ConfigManager config, DesignRegistry designs) {
         super(MenuType.GENERIC_9x6, syncId, inventory, container, ROWS);
         this.shop = shop;
@@ -75,11 +80,13 @@ public final class ShopMenu extends ChestMenu {
         this.weapons = weapons;
         this.config = config;
         this.designs = designs;
+        this.jobs = jobs;
     }
 
     /** 開一間店給某個玩家看。 */
     public static void open(ServerPlayer player, ShopDef shop, EconomyManager economy,
-                            WeaponSystem weapons, ConfigManager config, DesignRegistry designs) {
+                            WeaponSystem weapons, JobManager jobs,
+                            ConfigManager config, DesignRegistry designs) {
         player.openMenu(new SimpleMenuProvider((syncId, inventory, owner) -> {
             SimpleContainer container = new SimpleContainer(SIZE);
             List<ShopEntry> slots = new ArrayList<>(java.util.Collections.nCopies(SIZE, null));
@@ -94,13 +101,13 @@ public final class ShopMenu extends ChestMenu {
 
             for (ShopEntry entry : all) {
                 if (slot >= SIZE) break;
-                container.setItem(slot, icon(entry, player, economy, weapons, config, designs));
+                container.setItem(slot, icon(entry, player, economy, weapons, jobs, config, designs));
                 slots.set(slot, entry);
                 slot++;
             }
 
             return new ShopMenu(syncId, inventory, container, shop, slots, player, economy, weapons,
-                    config, designs);
+                    jobs, config, designs);
         }, Component.literal(shop.title()).withStyle(ChatFormatting.DARK_GREEN)));
     }
 
@@ -118,14 +125,15 @@ public final class ShopMenu extends ChestMenu {
                 config.materials().batchPrice(design.vector()),
                 design.vector().key(),
                 "",
+                "",
                 config.materials().batch(),
-                java.util.Map.of(),
+                java.util.Map.<String, Integer>of(),
                 "你自己的設計");
     }
 
     /** 商品的展示物品：圖示 + 名稱 + 價格與現況。 */
     private static ItemStack icon(ShopEntry entry, ServerPlayer player,
-                                  EconomyManager economy, WeaponSystem weapons,
+                                  EconomyManager economy, WeaponSystem weapons, JobManager jobs,
                                   ConfigManager config, DesignRegistry designs) {
         ItemStack stack;
         if ("design".equals(entry.type())) {
@@ -166,6 +174,7 @@ public final class ShopMenu extends ChestMenu {
                     describeWeapon(lore, config.designs().toWeapon(design.vector()), player, weapons);
                 }
             }
+            case "worker" -> describeWorker(lore, entry, player, jobs);
             default -> {
                 lore.add(Component.literal("數量 " + entry.amount())
                         .withStyle(ChatFormatting.GRAY));
@@ -227,6 +236,44 @@ public final class ShopMenu extends ChestMenu {
         if (!shots.isEmpty()) {
             lore.add(Component.literal(shots).withStyle(ChatFormatting.DARK_AQUA));
         }
+    }
+
+    /**
+     * 工人的說明：產出速率、回本時間、現在雇了幾個。
+     *
+     * <p>跟建材的說明同一個原則——**全部從 jobs.yml 的實際數值算出來**。工人是一筆投資，
+     * 而「幾輪回本」是玩家唯一真正要判斷的事；手寫在 lore 裡的話，改一次 {@code income}
+     * 說明就對不上了，而且沒有任何機制會提醒。
+     */
+    private static void describeWorker(List<Component> lore, ShopEntry entry,
+                                       ServerPlayer player, JobManager jobs) {
+        JobDef job = jobs.job(entry.job());
+        if (job == null) return;
+
+        lore.add(Component.literal("每採收一次 +$" + job.income()
+                        + "   間隔 " + String.format("%.1f", job.workTicks() / 20.0) + " 秒")
+                .withStyle(ChatFormatting.AQUA));
+
+        // 滿載＝一直站在節點旁邊採。實際會低一些，因為他要走路，而且節點採光之後要換一個
+        int perMinute = (int) Math.round(job.income() * 1200.0 / job.workTicks());
+        lore.add(Component.literal("滿載約 $" + perMinute + " / 分鐘")
+                .withStyle(ChatFormatting.AQUA));
+        if (entry.price() > 0 && perMinute > 0) {
+            lore.add(Component.literal(
+                            String.format("回本約 %.1f 分鐘", entry.price() / (double) perMinute))
+                    .withStyle(ChatFormatting.AQUA));
+        }
+
+        NodeDef node = jobs.node(job.node());
+        if (node != null) {
+            lore.add(Component.literal("他會自己走去" + node.displayName() + "工作")
+                    .withStyle(ChatFormatting.DARK_AQUA));
+        }
+        lore.add(Component.literal("目前 " + jobs.countWorkers(player.getUUID())
+                        + " / " + jobs.maxWorkers() + " 個工人")
+                .withStyle(ChatFormatting.GRAY));
+        lore.add(Component.literal("打得死，死了不會回來")
+                .withStyle(ChatFormatting.DARK_GRAY));
     }
 
     /** 武器的說明：傷害、射速，以及打石頭與黑曜石各要幾發。 */
@@ -359,6 +406,7 @@ public final class ShopMenu extends ChestMenu {
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
             case "design" -> giveDesign(entry);
+            case "worker" -> hireWorker(entry);
             default -> {
                 FortressDuel.LOGGER.warn("Shop entry {} uses unknown type '{}'", entry.id(), entry.type());
                 yield false;
@@ -469,6 +517,24 @@ public final class ShopMenu extends ChestMenu {
         }
     }
 
+    /**
+     * 雇一名工人。
+     *
+     * <p>買到的不是物品而是一個站在你腳邊的 NPC，所以這條路不經過背包，也不用打
+     * {@link DuelItems} 那個「對戰發的」標記——沒有東西會被帶回主世界。
+     *
+     * <p>會被拒絕的理由（工人滿了、設定錯誤）由 {@code JobManager} 回傳訊息，這裡照原樣
+     * 顯示並讓整筆購買不成立——錢還沒扣，見 {@link #buy}。
+     */
+    private boolean hireWorker(ShopEntry entry) {
+        String error = jobs.hire(player, entry.job());
+        if (error != null) {
+            deny(error);
+            return false;
+        }
+        return true;
+    }
+
     private void deny(String reason) {
         player.sendSystemMessage(Msg.plain(reason, ChatFormatting.RED), true);
         player.level().playSound(null, player.blockPosition(),
@@ -480,7 +546,7 @@ public final class ShopMenu extends ChestMenu {
         for (int slot = 0; slot < SIZE; slot++) {
             ShopEntry entry = slotEntries.get(slot);
             if (entry != null) {
-                getSlot(slot).set(icon(entry, player, economy, weapons, config, designs));
+                getSlot(slot).set(icon(entry, player, economy, weapons, jobs, config, designs));
             }
         }
         broadcastChanges();

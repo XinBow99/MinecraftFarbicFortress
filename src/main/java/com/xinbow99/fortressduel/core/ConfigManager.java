@@ -3,6 +3,7 @@ package com.xinbow99.fortressduel.core;
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.incident.IncidentRegistry;
+import com.xinbow99.fortressduel.jobs.JobRegistry;
 import com.xinbow99.fortressduel.npc.NpcManager;
 import com.xinbow99.fortressduel.mobs.entity.MobRegistry;
 import com.xinbow99.fortressduel.mobs.skills.SkillRegistry;
@@ -32,6 +33,7 @@ public final class ConfigManager {
     private final MaterialRegistry materials = new MaterialRegistry();
     /** 材料向量 → 武器。快取在裡面，所以要跟著 reload 一起清掉。 */
     private final AmmoDesign designs = new AmmoDesign(materials);
+    private final JobRegistry jobs = new JobRegistry();
 
     private volatile DuelSettings settings = DuelSettings.defaults();
 
@@ -58,6 +60,7 @@ public final class ConfigManager {
         // 曲線換了就等於每一份設計的數值都變了，快取留著會發出舊的武器
         designs.clearCache();
         checkMaterialItems();
+        jobs.load(YamlConfig.load(configDir, "jobs.yml"));
         if (npcs != null) {
             npcs.loadNpcs(YamlConfig.load(configDir, "npcs.yml"));
             npcs.loadShops(YamlConfig.load(configDir, "shops.yml"), materials);
@@ -67,11 +70,12 @@ public final class ConfigManager {
         }
 
         FortressDuel.LOGGER.info(
-                "Config loaded: {} weapons, {} mobs, {} skills, {} incidents, {} NPCs, {} shops, {} buildings",
+                "Config loaded: {} weapons, {} mobs, {} skills, {} incidents, {} NPCs, {} shops, {} buildings, {} jobs",
                 weapons.size(), mobs.size(), skills.size(), incidents.size(),
                 npcs == null ? 0 : npcs.npcCount(),
                 npcs == null ? 0 : npcs.shopCount(),
-                buildings == null ? 0 : buildings.size());
+                buildings == null ? 0 : buildings.size(),
+                jobs.size());
     }
 
     /** 啟動時把兩個子系統登記進來，之後每次 reload 都會一併重讀它們的表。 */
@@ -130,5 +134,9 @@ public final class ConfigManager {
 
     public IncidentRegistry incidents() {
         return incidents;
+    }
+
+    public JobRegistry jobs() {
+        return jobs;
     }
 }
