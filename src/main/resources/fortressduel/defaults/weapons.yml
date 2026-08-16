@@ -94,7 +94,12 @@
 #                     trail_particle 只吃得下一個 id，塞不進顏色，所以是兩個欄位
 #                     寫法三種都吃：#A020F0 / A020F0 / 0xA020F0
 #   trail_scale       粒子大小倍率，預設 1.4。只有指定 trail_color 時有意義（dust 才吃得到）
-#   fire_sound        開火音效
+#   fire_sound        開火音效。原版的 id 直接寫（minecraft:...），**自訂的也可以**——
+#                     把 ogg 丟進 assets/fortress-duel/sounds/，id 就是檔名（見 README 的
+#                     「音樂家與加歌」，資源包與曲目是同一套機制）。
+#                     兩個實務上的注意事項：
+#                       - 音檔要**單聲道**。立體聲在原版不做距離衰減，會變成全場一樣大聲
+#                       - 長度要短於 cooldown_ticks，不然連射時同一個音會疊在一起
 #   ammo_per_shot     一次擊發消耗幾發（散彈打六七顆但只算 1 發，跟 pellets 是兩回事）
 #                     只從**副手那一疊**扣，不會去背包裡湊——副手就是上膛的彈匣
 #   starting_ammo     開場就配給的量。預設全部 0——開場不發任何東西，所有補給都要跟軍火商買，
@@ -323,7 +328,7 @@ weapons:
     breaks_blocks: true
     trail_particle: minecraft:flame
     trail_color: "#FF5A2A"
-    fire_sound: minecraft:entity.generic.explode
+    fire_sound: fortress-duel:cannon_shot_6153
 
   laser:
     name: 雷射

@@ -12,6 +12,7 @@ import com.xinbow99.fortressduel.craft.AmmoVector;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
+import com.xinbow99.fortressduel.util.DuelSounds;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -512,10 +513,11 @@ public final class WeaponSystem {
                     direction.scale(speed), damageScale, gravityScale, damageBoost));
         }
 
-        SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(weapon.fireSound());
-        if (sound != null) {
-            level.playSound(null, player.blockPosition(), sound, SoundSource.PLAYERS, 1f, 1f);
-        }
+        // 不查音效登記表：自訂音效沒有註冊在裡面（註冊會讓沒裝模組的人連不進來，見 DuelSounds），
+        // 查表的話 weapons.yml 只寫得了原版音效，而且寫錯的症狀是**安靜且沒有訊息**。
+        // 直接把 id 送出去，客戶端在自己的資源包裡找得到就播——原版 id 一樣有效
+        level.playSound(null, player.getX(), player.getY(), player.getZ(),
+                DuelSounds.of(weapon.fireSound()), SoundSource.PLAYERS, 1f, 1f);
     }
 
     /**

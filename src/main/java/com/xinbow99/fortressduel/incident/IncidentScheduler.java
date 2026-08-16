@@ -8,6 +8,7 @@ import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
+import com.xinbow99.fortressduel.util.DuelSounds;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
@@ -16,6 +17,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.Holder;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.RandomSource;
@@ -107,7 +109,7 @@ public final class IncidentScheduler {
     private void announce(Duel duel, IncidentDef incident) {
         Component title = Component.literal("突發事件：" + incident.displayName())
                 .withStyle(ChatFormatting.LIGHT_PURPLE);
-        SoundEvent music = music(incident);
+        Holder<SoundEvent> music = music(incident);
 
         for (ServerPlayer player : playersOf(duel)) {
             player.sendSystemMessage(title);
@@ -118,20 +120,21 @@ public final class IncidentScheduler {
                 // 在每個人自己的位置放一次，而不是在場中央放一次——不然離得遠的那一方
                 // 會因為距離衰減而聽不到自己這場的事件音樂。
                 // 走 MUSIC 頻道，玩家調音樂音量就管得到它
-                player.level().playSound(null, player.blockPosition(), music, SoundSource.MUSIC,
+                player.level().playSound(null, player.getX(), player.getY(), player.getZ(),
+                        music, SoundSource.MUSIC,
                         (float) incident.musicVolume(), (float) incident.musicPitch());
             }
         }
     }
 
-    private SoundEvent music(IncidentDef incident) {
-        if (incident.music() == null) return null;
-
-        SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(incident.music());
-        if (sound == null) {
-            FortressDuel.LOGGER.warn("Incident {} references sound '{}' which does not exist", incident.id(), incident.music());
-        }
-        return sound;
+    /**
+     * 事件音樂。
+     *
+     * <p>不查音效登記表——自訂音效沒有註冊在裡面（見 {@link DuelSounds}），查表的話
+     * incidents.yml 就只寫得了原版音效。id 直接送給客戶端，它在自己的資源包裡找得到就播。
+     */
+    private Holder<SoundEvent> music(IncidentDef incident) {
+        return incident.music() == null ? null : DuelSounds.of(incident.music());
     }
 
     private void execute(Duel duel, IncidentDef incident) {

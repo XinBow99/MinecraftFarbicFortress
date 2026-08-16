@@ -32,6 +32,17 @@ public final class DuelSounds {
      */
     public static Holder<SoundEvent> byId(String id) {
         Identifier parsed = Identifier.tryParse(id);
-        return parsed == null ? null : Holder.direct(SoundEvent.createVariableRangeEvent(parsed));
+        return parsed == null ? null : of(parsed);
+    }
+
+    /**
+     * 同上，但 id 已經解析過了。
+     *
+     * <p>**原版的音效 id 走這條路一樣會響**：客戶端是拿 id 去自己的音效表裡找，
+     * 跟這個 id 有沒有登記在伺服器的登記表裡無關。所以設定檔可以混著寫
+     * {@code minecraft:entity.arrow.shoot} 與 {@code fortress-duel:某某}，兩種都成立。
+     */
+    public static Holder<SoundEvent> of(Identifier id) {
+        return Holder.direct(SoundEvent.createVariableRangeEvent(id));
     }
 }
