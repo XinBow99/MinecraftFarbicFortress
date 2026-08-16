@@ -4,6 +4,8 @@ import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.battle.DuelServices;
 import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.core.ConfigManager;
+import com.xinbow99.fortressduel.craft.AmmoLook;
+import com.xinbow99.fortressduel.craft.CraftingBench;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.npc.NpcManager;
 import com.xinbow99.fortressduel.core.DuelCommands;
@@ -54,6 +56,8 @@ public class FortressDuel implements ModInitializer {
         duels.attach(new DuelServices(buildings, economy, weapons));
         config.reload();
 
+        CraftingBench.install(config);
+        AmmoLook.install(config.materials());
         duels.register();
         skills.register();
         // 經濟要比技能引擎晚註冊沒關係——兩邊都掛在 AFTER_DEATH，但誰都不會刪掉對方要用的登記

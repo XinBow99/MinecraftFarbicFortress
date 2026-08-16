@@ -8,6 +8,7 @@ import com.xinbow99.fortressduel.battle.DuelState;
 import com.xinbow99.fortressduel.battle.Side;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
+import com.xinbow99.fortressduel.craft.AmmoVector;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
@@ -91,6 +92,13 @@ public final class WeaponSystem {
      * <p>其餘八把武器一 tick 都飛不到 12 格，所以這條上限只作用在雷射身上。
      */
     private static final int TRAIL_MAX_STEPS = 12;
+    /**
+     * 試射時彈丸最遠飛多少格。
+     *
+     * <p>對戰中收尾的是框線，試射沒有框線就得有別的東西——不然一發平直的彈丸會飛進
+     * 沒有載入的區塊裡跑完壽命。256 格比任何一種彈藥的實用射程都遠，不會影響測試。
+     */
+    private static final double TEST_FIRE_RANGE = 256;
 
     private final ConfigManager config;
     private final DuelManager duels;
@@ -112,11 +120,34 @@ public final class WeaponSystem {
     private final Map<UUID, Map<String, Double>> recoil = new HashMap<>();
     /** 每一場對戰裡、每一格已經累積的傷害。 */
     private final Map<Duel, Map<BlockPos, Float>> blockDamage = new HashMap<>();
+    /**
+     * 開著試射的玩家（{@code /duel testfire}）。
+     *
+     * <p>存在的理由是**武器跟對戰本來就該是解耦的**：要調一條彈道、看一組散佈、比較兩個
+     * 組合的手感，不該先開一場對戰。名單是白名單而不是全開，因為彈藥綁的是鐵粒、燧石、
+     * 煙火這些原版常見物品——預設就攔的話，整個伺服器的普通玩家都會發現手上的東西怪怪的。
+     */
+    private final java.util.Set<UUID> testFire = new java.util.HashSet<>();
 
     public WeaponSystem(ConfigManager config, DuelManager duels, SkillEngine skills) {
         this.config = config;
         this.duels = duels;
         this.skills = skills;
+    }
+
+    /** 切換試射模式。@return 切換後是開還是關 */
+    public boolean toggleTestFire(ServerPlayer player) {
+        UUID id = player.getUUID();
+        if (!testFire.remove(id)) {
+            testFire.add(id);
+            return true;
+        }
+        return false;
+    }
+
+    /** 這個人現在可不可以在沒有對戰的情況下開火。 */
+    private boolean isTestFiring(ServerPlayer player) {
+        return testFire.contains(player.getUUID());
     }
 
     public void register() {
@@ -190,7 +221,7 @@ public final class WeaponSystem {
         Duel duel = duels.duelOf(player);
         // 沒在對戰就完全不插手：彈藥綁的是鐵錠、燧石、TNT、煙火這類原版常見物品，
         // 攔下來的話等於把整個伺服器的普通物品弄壞
-        if (duel == null) return InteractionResult.PASS;
+        if (duel == null && !isTestFiring(player)) return InteractionResult.PASS;
         if (byAmmoStack(player.getOffhandItem()) == null) return InteractionResult.PASS;
 
         return InteractionResult.FAIL;
@@ -207,8 +238,7 @@ public final class WeaponSystem {
     public WeaponDef armedWeaponOf(ServerPlayer player) {
         if (!player.getMainHandItem().is(Items.BOW)) return null;
 
-        Duel duel = duels.duelOf(player);
-        if (duel == null) return null;
+        if (duels.duelOf(player) == null && !isTestFiring(player)) return null;
 
         return byAmmoStack(player.getOffhandItem());
     }
@@ -218,9 +248,19 @@ public final class WeaponSystem {
         return duels.duelOf(player) != null;
     }
 
-    /** 這疊物品是哪一種彈藥；不是彈藥回傳 null。 */
+    /**
+     * 這疊物品是哪一種彈藥；不是彈藥回傳 null。
+     *
+     * <p>先看身上有沒有**材料向量**：玩家自己組出來的彈藥是無界的，不可能一種對一個物品，
+     * 所以它們的身分記在 CUSTOM_DATA 裡（見 {@link AmmoVector}）。查不到才退回 weapons.yml
+     * 那張以物品 id 為鍵的固定表——那十把預設武器仍然照舊運作。
+     */
     public WeaponDef byAmmoStack(ItemStack stack) {
         if (stack.isEmpty()) return null;
+
+        AmmoVector vector = AmmoVector.read(stack).orElse(null);
+        if (vector != null) return config.designs().toWeapon(vector);
+
         return config.weapons().byItem(BuiltInRegistries.ITEM.getKey(stack.getItem()));
     }
 
@@ -304,10 +344,9 @@ public final class WeaponSystem {
         if (weapon == null) return false;
 
         Duel duel = duels.duelOf(player);
-        if (duel == null) return true;   // 沒在對戰：吃掉這一發，但什麼都不做
         // 這個判斷要排在連射的早退之前，不然連射武器在準備階段拉弓會完全沒有回饋——
         // 打不出東西又不說為什麼，比擋下來更難理解
-        if (!duel.state().canFire()) {
+        if (duel != null && !duel.state().canFire()) {
             player.sendSystemMessage(Msg.warn("準備階段還不能開火。"));
             return true;
         }
@@ -347,7 +386,7 @@ public final class WeaponSystem {
             if (weapon == null || !weapon.auto()) continue;
 
             Duel duel = duels.duelOf(player);
-            if (duel == null || !duel.state().canFire()) continue;
+            if (duel == null ? !isTestFiring(player) : !duel.state().canFire()) continue;
 
             // 力道恆滿：連射武器不蓄力（weapons.yml 給它們 affects: []），
             // 走的是跟其他武器完全相同的開火路徑，只是力道這條軸不參與
@@ -450,8 +489,9 @@ public final class WeaponSystem {
                 : 1.0;
 
         // 開火那一刻的全域修正（低重力、火力全開）寫進彈丸，見 Projectile.gravityScale
-        double gravityScale = duel.modifierFactor(Duel.MOD_GRAVITY);
-        double damageBoost = duel.modifierFactor(Duel.MOD_WEAPON_DAMAGE);
+        // 試射沒有對戰，也就沒有全域修正
+        double gravityScale = duel == null ? 1.0 : duel.modifierFactor(Duel.MOD_GRAVITY);
+        double damageBoost = duel == null ? 1.0 : duel.modifierFactor(Duel.MOD_WEAPON_DAMAGE);
 
         // 顆數每一發重抽：散彈的手感有一半來自「這一發到底打出去多少」不是固定的
         int pellets = weapon.pellets() + (weapon.pelletsMax() > weapon.pellets()
@@ -460,7 +500,7 @@ public final class WeaponSystem {
 
         for (int i = 0; i < pellets; i++) {
             Vec3 direction = applySpread(level, look, spread);
-            projectiles.add(new Projectile(weapon, duel, player, origin,
+            projectiles.add(new Projectile(weapon, duel, level, player, origin,
                     direction.scale(speed), damageScale, gravityScale, damageBoost));
         }
 
@@ -570,13 +610,13 @@ public final class WeaponSystem {
 
     /** 推進一顆彈丸：先檢查這一步會不會打到東西，沒有的話才真的往前移動。 */
     private void step(Projectile projectile) {
-        ServerLevel level = projectile.duel.arena().level();
+        ServerLevel level = projectile.level;
         Vec3 from = projectile.pos;
         Vec3 to = projectile.nextPos();
 
         // 飛出競技場就消失。用終點判斷而不是起點——擦過框線的那一發不該還打得到外面。
         // 軌跡照畫：看到自己那一發飛出界，比它憑空消失好懂
-        if (!projectile.duel.arena().region().contains(to.x, to.y, to.z)) {
+        if (outOfPlay(projectile, to)) {
             trail(level, projectile, from, to);
             projectile.dead = true;
             return;
@@ -643,6 +683,19 @@ public final class WeaponSystem {
     }
 
     /**
+     * 這一發是不是該收掉了。
+     *
+     * <p>對戰中是「飛出框線」；試射沒有框線，改用**離起點的距離**收尾（{@link #TEST_FIRE_RANGE}）。
+     * 一定要有一條，不然一發低重力的彈丸會一路飛進沒有載入的區塊，然後在那裡默默跑完壽命。
+     */
+    private static boolean outOfPlay(Projectile projectile, Vec3 to) {
+        if (projectile.duel == null) {
+            return to.distanceToSqr(projectile.origin) > TEST_FIRE_RANGE * TEST_FIRE_RANGE;
+        }
+        return !projectile.duel.arena().region().contains(to.x, to.y, to.z);
+    }
+
+    /**
      * 哪幾把武器打不到 {@code span} 格外——也就是這場的場地它們構不到對面。
      *
      * <p>存在的理由跟這個專案裡好幾個 bug 是同一類：**射程不足不會報錯**。彈丸只是在半路
@@ -674,7 +727,7 @@ public final class WeaponSystem {
      */
     private static boolean leftOwnZoneDuringCeasefire(Projectile projectile, Vec3 to) {
         Duel duel = projectile.duel;
-        if (duel.state() != DuelState.BUILD) return false;
+        if (duel == null || duel.state() != DuelState.BUILD) return false;
 
         Side side = duel.sideOf(projectile.shooterId);
         if (side == null) return false;
@@ -726,6 +779,9 @@ public final class WeaponSystem {
      */
     private void hatch(Projectile projectile, ServerLevel level, Vec3 location) {
         Duel duel = projectile.duel;
+        // 試射不孵怪：生出來的怪是 setPersistenceRequired 的，沒有對戰結束那一步收拾，
+        // 牠們會永遠留在世界上
+        if (duel == null) return;
         BlockPos origin = BlockPos.containing(location);
         if (!duel.arena().region().contains(origin)) return;
 
@@ -836,14 +892,19 @@ public final class WeaponSystem {
         if (damage <= 0 || !projectile.weapon.breaksBlocks()) return false;
 
         Duel duel = projectile.duel;
-        // 銅牆鐵壁：在命中這一刻才查，因為它是「這面牆現在多耐打」而不是「這一發多用力」
-        damage *= duel.modifierFactor(Duel.MOD_BLOCK_DAMAGE);
-        if (damage <= 0) return false;
-        Region region = duel.arena().region();
-        if (!region.contains(pos)) return false;
+        if (duel != null) {
+            // 銅牆鐵壁：在命中這一刻才查，因為它是「這面牆現在多耐打」而不是「這一發多用力」
+            damage *= duel.modifierFactor(Duel.MOD_BLOCK_DAMAGE);
+            if (damage <= 0) return false;
 
-        // 框線是場地的一部分，任何武器都拆不掉
-        if (region.isShell(pos)) return false;
+            Region region = duel.arena().region();
+            if (!region.contains(pos)) return false;
+            // 框線是場地的一部分，任何武器都拆不掉
+            if (region.isShell(pos)) return false;
+        }
+        // 試射也照樣打得壞方塊——不然「幾發破一格」只能看數字，感覺不到。
+        // 代價是真實世界沒有快照可以還原，破壞是永久的：那是測試場地該有的樣子，
+        // 不是要拿去正式伺服器開著的東西（指令本來就是 gamemaster 權限）
 
         BlockState state = level.getBlockState(pos);
         if (state.isAir() || state.liquid()) return false;
@@ -853,6 +914,9 @@ public final class WeaponSystem {
 
         Identifier blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
         float maxHp = blockHp(blockId, hardness, effectivePierce(projectile.weapon, blockId));
+        // duel 為 null（試射）時共用一個桶。HashMap 吃得下 null 鍵，而試射的累積傷害
+        // 沒有「對戰結束」可以清，所以它會一直留著——那正是我們要的：打到一半停下來
+        // 換一種彈再打，前面累積的傷害還在
         Map<BlockPos, Float> damageMap = blockDamage.computeIfAbsent(duel, k -> new HashMap<>());
         float accumulated = damageMap.merge(pos, (float) damage, Float::sum);
 
