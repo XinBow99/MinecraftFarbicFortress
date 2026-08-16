@@ -68,7 +68,11 @@ Minecraft Fabric mod（1.26.2 / Fabric Loader 0.19.3）。玩家可以向任意�
 不用錢，**場上兩邊都聽得到**，放完之前再點沒有作用。他的貨架不寫在 `shops.yml` 裡——
 是從 `songs.yml` 的曲目表生出來的。
 
-加一首歌就兩步：
+**懶得手動做的話**：[設定工作台](https://xinbow99.github.io/fortress-duel-editor/)把整套流程收成一個拖放——
+丟音檔進去，它幫你轉檔、量長度、產出 `songs.yml` 與資源包 zip，連 sha1 都算好。純瀏覽器端，
+檔案不會上傳到任何地方。
+
+手動的話就兩步：
 
 ```bash
 # 1. 轉成 OGG 丟進去，檔名 = 音效 id（只能用小寫英數與底線）
