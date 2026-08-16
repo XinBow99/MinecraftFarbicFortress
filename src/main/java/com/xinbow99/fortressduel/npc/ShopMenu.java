@@ -177,6 +177,16 @@ public final class ShopMenu extends ChestMenu {
             }
             case "music" -> lore.add(Component.literal("全場都聽得到，包含對手")
                     .withStyle(ChatFormatting.GRAY));
+            case "disc" -> {
+                lore.add(Component.literal("買一張光碟，右鍵播放")
+                        .withStyle(ChatFormatting.GRAY));
+                lore.add(Component.literal("全場都聽得到，包含對手")
+                        .withStyle(ChatFormatting.GRAY));
+                // 買過的那格直接寫出來——它不會用掉，買第二張是純浪費
+                if (SongDisc.owns(player, entry.sound())) {
+                    lore.add(Component.literal("你已經有這張了").withStyle(ChatFormatting.DARK_GRAY));
+                }
+            }
             case "design" -> {
                 lore.add(Component.literal("量產 " + entry.amount() + " 發")
                         .withStyle(ChatFormatting.GRAY));
@@ -424,6 +434,7 @@ public final class ShopMenu extends ChestMenu {
             case "launcher" -> giveLauncher();
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
+            case "disc" -> giveDisc(entry);
             case "design" -> giveDesign(entry);
             case "worker" -> hireWorker(entry);
             default -> {
@@ -490,6 +501,26 @@ public final class ShopMenu extends ChestMenu {
         AmmoLook.writeName(stack, design.name());
         AmmoLook.apply(stack, design.vector(), config.designs().toWeapon(design.vector()));
         player.getInventory().placeItemBackInInventory(stack);
+        return true;
+    }
+
+    /**
+     * 賣一張光碟。
+     *
+     * <p>**不打「對戰發的」標記**：光碟是買斷的，對戰結束不收回（見 {@link SongDisc}）。
+     * 這是唯一一件跨場留著的東西，而它給不了任何戰鬥優勢——留著的是一段記憶，不是資源。
+     */
+    private boolean giveDisc(ShopEntry entry) {
+        if (SongDisc.owns(player, entry.sound())) {
+            deny("你已經有這張了，它不會用掉。");
+            return false;
+        }
+        if (DuelSounds.byId(entry.sound()) == null) {
+            deny("這件商品設定錯誤（音效 id 不合法：" + entry.sound() + "）");
+            return false;
+        }
+
+        player.getInventory().placeItemBackInInventory(SongDisc.create(entry));
         return true;
     }
 

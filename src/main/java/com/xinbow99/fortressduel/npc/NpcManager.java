@@ -98,6 +98,8 @@ public final class NpcManager {
             designs.forget(duel.south().playerId());
             removeIn(duel.arena().level(), duel.arena().region());
         });
+        // 光碟是音樂家賣出去的東西，右鍵播放的那條路跟著他一起登記
+        SongDisc.register(duels);
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> onNpcDeath(entity));
         ServerTickEvents.END_SERVER_TICK.register(server -> bounds.tick(server, homes));
     }
