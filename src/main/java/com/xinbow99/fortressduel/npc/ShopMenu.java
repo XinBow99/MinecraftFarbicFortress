@@ -413,17 +413,16 @@ public final class ShopMenu extends ChestMenu {
     /**
      * 點一首歌，**場上所有人都聽得到**（見 {@link Duel#playMusic}）。
      *
-     * <p>走的是原版的音效系統：音檔在模組的 assets 裡（見 {@link DuelSounds}），這裡只是把
-     * 註冊好的音效 id 交給 {@link Duel} 去送封包，跟原版播 note block 完全同一條路——
-     * 客戶端不需要任何額外程式碼，也不用把音檔傳過去（但要裝這個模組才聽得到）。
+     * <p>走的是原版的音效系統：音效 id 直接寫在封包裡送出去（見 {@link DuelSounds}——**不註冊**
+     * 進音效登記表，那會害沒裝模組的人連不進來）。客戶端在自己的資源包裡找得到那個 id 就播，
+     * 找不到就安靜；音檔在模組的 assets 裡，所以裝了模組的人聽得到。
      *
      * <p>一次只放一首：還在放的時候再點沒有作用，不然連點會疊出好幾軌同一首歌。
      */
     private void playMusic(ShopEntry entry) {
-        Holder.Reference<SoundEvent> sound = BuiltInRegistries.SOUND_EVENT
-                .get(Identifier.parse(entry.sound())).orElse(null);
+        Holder<SoundEvent> sound = DuelSounds.byId(entry.sound());
         if (sound == null) {
-            deny("這件商品設定錯誤（找不到音效 " + entry.sound() + "）");
+            deny("這件商品設定錯誤（音效 id 不合法：" + entry.sound() + "）");
             return;
         }
 

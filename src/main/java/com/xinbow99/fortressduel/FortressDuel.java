@@ -9,7 +9,6 @@ import com.xinbow99.fortressduel.npc.NpcManager;
 import com.xinbow99.fortressduel.core.DuelCommands;
 import com.xinbow99.fortressduel.incident.IncidentScheduler;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
-import com.xinbow99.fortressduel.util.DuelSounds;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.resources.Identifier;
@@ -41,9 +40,6 @@ public class FortressDuel implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        // 註冊表在世界載入前就會被凍結，所以自訂音效要在這裡先登記好
-        DuelSounds.register();
-
         ConfigManager config = new ConfigManager();
 
         DuelManager duels = new DuelManager(config);
