@@ -8,6 +8,7 @@ import com.xinbow99.fortressduel.battle.DuelState;
 import com.xinbow99.fortressduel.battle.Side;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
+import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.AmmoVector;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
@@ -414,6 +415,9 @@ public final class WeaponSystem {
         Map<String, Integer> playerCooldowns = cooldowns.computeIfAbsent(player.getUUID(), k -> new HashMap<>());
         if (playerCooldowns.containsKey(weapon.id())) return false;
 
+        // 要在扣彈之前讀：打完最後一發時副手已經空了，那時候問不到名字
+        String ammoName = ammoNameOf(player, weapon);
+
         if (!consumeAmmo(player, weapon)) {
             duels.notify(player, Msg.plain(weapon.displayName() + " 用完了！去軍火商補貨", ChatFormatting.RED));
             player.level().playSound(null, player.blockPosition(),
@@ -424,8 +428,18 @@ public final class WeaponSystem {
         }
         playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
 
-        fire(player, duel, weapon, power);
+        fire(player, duel, weapon, ammoName, power);
         return true;
+    }
+
+    /**
+     * 這疊彈藥在玩家眼裡叫什麼。
+     *
+     * <p>玩家自己取的名字優先（{@code /duel name}）——死亡訊息報的該是他手上那疊的名字，
+     * 而不是程式從材料推出來的那個。沒取過名字、或副手已經空了就退回武器的顯示名稱。
+     */
+    private String ammoNameOf(ServerPlayer player, WeaponDef weapon) {
+        return AmmoLook.readName(player.getOffhandItem()).orElseGet(weapon::displayName);
     }
 
     /**
@@ -474,7 +488,7 @@ public final class WeaponSystem {
      * @param power 蓄力程度 0~1。即發武器永遠傳 1.0——它們沒有蓄力這條軸，
      *              所以走的是完全相同的路徑、只是力道恆滿
      */
-    private void fire(ServerPlayer player, Duel duel, WeaponDef weapon, double power) {
+    private void fire(ServerPlayer player, Duel duel, WeaponDef weapon, String ammoName, double power) {
         ServerLevel level = player.level();
         Vec3 origin = player.getEyePosition();
         Vec3 look = player.getLookAngle();
@@ -508,7 +522,7 @@ public final class WeaponSystem {
 
         for (int i = 0; i < pellets; i++) {
             Vec3 direction = applySpread(level, look, spread);
-            projectiles.add(new Projectile(weapon, duel, level, player, origin,
+            projectiles.add(new Projectile(weapon, duel, level, player, ammoName, origin,
                     direction.scale(speed), damageScale, gravityScale, damageBoost));
         }
 
@@ -763,16 +777,21 @@ public final class WeaponSystem {
             return;
         }
 
-        if (weapon.splashRadius() > 0) {
-            splash(projectile, level, location);
-            return;
-        }
-
-        if (directEntity instanceof LivingEntity living) {
+        // 直擊永遠先照直擊算，**即使這一發有濺射**。濺射的距離是拿實體腳下的座標去量的，
+        // 而命中點在對方胸口——兩者差一格以上，所以半徑小的時候被正面打中的那個人會落在
+        // 球外，整發變成零傷害。自製設計最容易踩到：一顆炸藥只有 0.5 格，九顆也才 1.87 格
+        // （見 materials.yml 的 splash 曲線），等於「配方裡有炸藥」就是「打人不會痛」。
+        // 直擊比擦邊痛也是本來就該有的樣子——濺射只負責它周圍那一圈
+        LivingEntity direct = directEntity instanceof LivingEntity living ? living : null;
+        if (direct != null) {
             // 直擊：順著彈丸飛的方向推
-            damageEntity(projectile, level, living, projectile.damage(), projectile.velocity, 1.0);
+            damageEntity(projectile, level, direct, projectile.damage(), projectile.velocity, 1.0);
         } else if (directBlock != null) {
             damageBlock(projectile, level, directBlock, projectile.damageVsBlock());
+        }
+
+        if (weapon.splashRadius() > 0) {
+            splash(projectile, level, location, direct, directBlock);
         }
     }
 
@@ -812,8 +831,17 @@ public final class WeaponSystem {
         }
     }
 
-    /** 濺射：範圍內的方塊與生物都吃傷害，離爆心越遠越低。 */
-    private void splash(Projectile projectile, ServerLevel level, Vec3 center) {
+    /**
+     * 濺射：範圍內的方塊與生物都吃傷害，離爆心越遠越低。
+     *
+     * <p>被直擊的那一個已經在 {@link #onHit} 拿過整份傷害了，所以要跳過——不跳的話它會被
+     * 算兩次，而那是「貼臉開一發等於兩發」的後門。
+     *
+     * @param hitEntity 已經直擊過的生物；null ＝ 這一發打在方塊上或空中
+     * @param hitBlock  已經直擊過的方塊；同上
+     */
+    private void splash(Projectile projectile, ServerLevel level, Vec3 center,
+                        LivingEntity hitEntity, BlockPos hitBlock) {
         double radius = projectile.weapon.splashRadius();
         int r = (int) Math.ceil(radius);
         BlockPos origin = BlockPos.containing(center);
@@ -821,12 +849,14 @@ public final class WeaponSystem {
         for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-r, -r, -r), origin.offset(r, r, r))) {
             double distance = Math.sqrt(pos.distToCenterSqr(center));
             if (distance > radius) continue;
+            if (pos.equals(hitBlock)) continue;
             damageBlock(projectile, level, pos.immutable(),
                     projectile.damageVsBlock() * falloff(distance, radius));
         }
 
         AABB box = new AABB(center, center).inflate(radius);
         for (Entity entity : level.getEntities((Entity) null, box, e -> e instanceof LivingEntity && e.isAlive())) {
+            if (entity == hitEntity) continue;
             double distance = entity.position().distanceTo(center);
             if (distance > radius) continue;
             // 濺射：從爆心往外推，而不是順著彈丸的方向——爆炸該把人推開，不是把人推著走
@@ -860,7 +890,17 @@ public final class WeaponSystem {
         var source = shooter != null
                 ? level.damageSources().playerAttack(shooter)
                 : level.damageSources().generic();
-        if (!target.hurtServer(level, source, (float) damage)) return;
+        // 記在扣血之前：致命的那一發會在 hurtServer 裡面一路走到死亡訊息，
+        // 等它回來才記就來不及了（見 KillCredit）
+        if (shooter != null) {
+            KillCredit.record(target, shooter, projectile.ammoName);
+        }
+        if (!target.hurtServer(level, source, (float) damage)) {
+            // 傷害被擋掉了（停火階段的互毆、打到自己人的濺射）——那就不算命中，
+            // 不然同一 tick 內因為別的原因死掉的話會被誤記在這一發頭上
+            KillCredit.forget(target);
+            return;
+        }
 
         knockBack(target, direction, projectile.weapon.knockback() * scale);
     }

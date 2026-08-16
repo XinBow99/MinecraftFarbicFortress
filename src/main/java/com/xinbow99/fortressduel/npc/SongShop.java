@@ -19,6 +19,10 @@ import java.util.Map;
  *     length: 5
  * }</pre>
  *
+ * <p>櫃子上那一格賣的是**一張光碟**（{@code type: disc}），不是當場播放：買回去拿在手上
+ * 右鍵才放，而且放得完就能再放（見 {@link SongDisc}）。點播與放歌拆開之後，「什麼時候放」
+ * 才是玩家的決定，而不是「你人必須站在音樂家面前」。
+ *
  * <p>兩個省略規則讓那三行變成真的三行：
  * <ul>
  *   <li>{@code sound} 省略就是 {@code fortress-duel:<id>}——音檔叫 {@code wow.ogg}，id 就是 {@code wow}</li>
@@ -70,7 +74,7 @@ public final class SongShop {
             entries.add(new ShopEntry(
                     id,
                     YamlConfig.str(section, "name", id),
-                    "music",
+                    "disc",
                     Math.max(0, YamlConfig.i(section, "price", 0)),
                     "",
                     "",

@@ -4,6 +4,7 @@
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
 		"BowItemMixin",
+		"CombatTrackerMixin",
 		"CraftingMenuMixin",
 		"ExampleMixin",
 		"ExplosionMixin",
