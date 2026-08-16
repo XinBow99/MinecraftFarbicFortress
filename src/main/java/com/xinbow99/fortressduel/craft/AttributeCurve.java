@@ -20,13 +20,6 @@ import java.util.Map;
 public record AttributeCurve(
         /** 這條軸叫什麼（給玩家看的）。材料的說明文字靠它，沒有的話架上只會出現 id。 */
         String label,
-        /**
-         * 數值的單位後綴（度、格、顆…）。空字串 ＝ 沒有單位。
-         *
-         * <p>叫 suffix 不叫 unit 是因為 {@link #unit} 已經被曲線的係數用掉了——那兩個東西
-         * 名字撞在一起，而它們一個是給玩家看的字、一個是數學。
-         */
-        String suffix,
         /** 投入 0 個時的值。刻意是「很差但能用」而不是 0，見 materials.yml。 */
         double base,
         double unit,
@@ -38,39 +31,19 @@ public record AttributeCurve(
         /** 上限；{@link Double#MAX_VALUE} ＝ 不限。顆數與濺射的上限是效能不是平衡。 */
         double max,
         /** 取整數（顆數用）。 */
-        boolean round,
-        /**
-         * true ＝ 這條軸的 {@code base} 是**執行時算出來的**，不是設定值（目前只有射速）。
-         *
-         * <p>只影響說明文字：沒有固定的基準就印不出「投 3 個變成多少」，所以那種軸改成印
-         * **倍率**。不標的話玩家會看到一串從 base 0 推出來的負數。
-         */
-        boolean derivedBase
+        boolean round
 ) {
 
     public static AttributeCurve from(String id, Map<String, Object> section) {
         return new AttributeCurve(
                 YamlConfig.str(section, "label", id),
-                YamlConfig.str(section, "suffix", ""),
                 YamlConfig.d(section, "base", 0.0),
                 YamlConfig.d(section, "unit", 1.0),
                 YamlConfig.d(section, "exponent", 0.6),
                 "down".equalsIgnoreCase(YamlConfig.str(section, "direction", "up")),
                 YamlConfig.d(section, "floor", 0.0),
                 YamlConfig.d(section, "max", Double.MAX_VALUE),
-                YamlConfig.bool(section, "round", false),
-                YamlConfig.bool(section, "derived_base", false));
-    }
-
-    /**
-     * 投入 {@code n} 個之後，值變成原本的幾倍（只對 {@code down} 的軸有意義）。
-     *
-     * <p>給 {@link #derivedBase()} 那種軸的說明文字用：它沒有固定的基準，印不出絕對值，
-     * 但「打了對折」是講得清楚的。忽略 {@code floor}——基準遠高於下限時那條不影響，
-     * 而說明本來就只是給人抓量級的。
-     */
-    public double factorAt(int n) {
-        return n <= 0 ? 1.0 : 1.0 / (1 + unit * Math.pow(n, exponent));
+                YamlConfig.bool(section, "round", false));
     }
 
     /** 投入 {@code n} 個材料之後這條軸的值。 */

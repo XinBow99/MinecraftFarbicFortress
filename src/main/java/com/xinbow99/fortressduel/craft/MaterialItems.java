@@ -19,11 +19,12 @@ import java.util.List;
  * 跟一般的火藥沒有任何差別——他不會知道它是幹嘛的，更不會知道它推的是哪一條軸。
  * 而這套系統的全部樂趣就建立在「知道每種材料換到什麼」上面。
  *
- * <h2>為什麼數字是算出來的</h2>
+ * <h2>只講屬性，不列數字</h2>
  *
- * <p>說明裡的每一個數字都從 {@link AttributeCurve} 現算，一個字都不手寫——跟 shops.yml
- * 那條「血量與幾發打得破由程式印上去」是同一條規矩。手寫的數字會跟設定漂移，
- * 而漂掉的那天沒有人會發現。改 materials.yml 的曲線，架上與背包裡的說明會一起跟著動。
+ * <p>玩家在架前要決定的是「這次買哪一種」，而那只需要知道每一種管什麼。曾經在這裡印過
+ * 「投 1／3／9 個各換到多少」想把邊際遞減攤開來，結果是四行小字換一個他當下用不到的答案。
+ * 實際的數值在做出彈藥之後就寫在那疊彈藥上了（見 {@link AmmoLook#apply}）——那才是它
+ * 有意義的時候，而且那一份是從曲線現算的。
  *
  * <h2>順帶得到的一個性質</h2>
  *
@@ -31,9 +32,6 @@ import java.util.List;
  * （原版的堆疊條件包含元件必須相同）。那正好是我們要的：對戰結束時要收回的是前者。
  */
 public final class MaterialItems {
-
-    /** 說明裡示範幾個投入量。挑 1／3／9 是因為 9 正好是一次合成的上限（3×3 每格 1 個）。 */
-    private static final int[] SAMPLES = {1, 3, 9};
 
     private MaterialItems() {
     }
@@ -50,11 +48,12 @@ public final class MaterialItems {
     }
 
     /**
-     * 這種材料在做什麼，以及投進去換到多少。
+     * 這種材料推的是哪一條軸。
      *
-     * <p>直接把曲線攤開給玩家看，而不是寫「大幅提升傷害」那種形容詞——邊際遞減是這套系統
-     * 唯一需要玩家理解的規則（九倍的材料換不到三倍的效果），而它用三個數字就講完了。
-     * 講不清楚的話玩家會一路把錢押在同一條軸上，然後不知道自己為什麼一直虧。
+     * <p>**只講屬性，不列數字。** 曾經在這裡印過「投 1／3／9 個各換到多少」，想把邊際遞減
+     * 攤給玩家看，但那是四行小字換一個他當下不需要的答案——他要決定的是「這次買哪一種」，
+     * 而那只需要知道每一種管什麼。真正的數值在做出彈藥之後就寫在那疊彈藥上了
+     * （見 {@link AmmoLook#apply}），那才是它有意義的時候。
      */
     public static List<Component> describe(MaterialRegistry.MaterialDef def, MaterialRegistry materials) {
         List<Component> lore = new ArrayList<>();
@@ -67,38 +66,11 @@ public final class MaterialItems {
         lore.add(line("屬性：" + curve.label() + (curve.down() ? "（越低越好）" : ""),
                 ChatFormatting.GREEN));
 
-        StringBuilder steps = new StringBuilder();
-        if (curve.derivedBase()) {
-            // 沒有固定的基準（射速是從這一發的重量推出來的），所以印倍率而不是絕對值
-            lore.add(line("基準看這一發有多重，投料把它往下壓：", ChatFormatting.GRAY));
-            for (int n : SAMPLES) {
-                if (!steps.isEmpty()) steps.append("   ");
-                steps.append(n).append(" 個 ×")
-                        .append(String.format("%.2f", curve.factorAt(n)));
-            }
-        } else {
-            lore.add(line("不投入 " + number(curve, curve.valueAt(0)), ChatFormatting.GRAY));
-            for (int n : SAMPLES) {
-                if (!steps.isEmpty()) steps.append("   ");
-                steps.append(n).append(" 個 ").append(number(curve, curve.valueAt(n)));
-            }
-        }
-        lore.add(line(steps.toString(), ChatFormatting.GRAY));
-
+        // 唯一留下的例外：連發機構會改變**操作方式**，那件事屬性名稱講不出來
         if (!def.note().isEmpty()) {
             lore.add(line(def.note(), ChatFormatting.YELLOW));
         }
-        lore.add(line("投九倍換不到三倍——攤開來點比押同一條划算", ChatFormatting.DARK_GRAY));
-        lore.add(line("放進工作台，兩格以上就組得出一份彈藥設計", ChatFormatting.DARK_GRAY));
         return lore;
-    }
-
-    /** 顆數那條要印成整數，其他的印兩位小數——「3.00 顆」看起來像壞掉。 */
-    private static String number(AttributeCurve curve, double value) {
-        String text = curve.round()
-                ? String.valueOf((int) value)
-                : String.format(value >= 1 ? "%.2f" : "%.4f", value);
-        return text + curve.suffix();
     }
 
     private static Component line(String text, ChatFormatting color) {
