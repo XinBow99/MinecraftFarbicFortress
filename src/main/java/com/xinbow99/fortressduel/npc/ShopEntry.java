@@ -25,10 +25,10 @@ public record ShopEntry(
         String weapon,
         /** type = item 時要給的物品，type = weapon 時當作展示圖示（省略就用武器綁的物品）。 */
         String item,
-        /** type = music 時要放的音效 id（例如 {@code fortress-duel:chinese}）。 */
-        String sound,
-        /** type = music 時這首歌有多長（秒）；放完之前不接受下一次點歌。 */
-        int lengthSeconds,
+        /** type = music 時用哪個音符盒音色（bell、harp、bit……）。 */
+        String instrument,
+        /** type = music 時的曲子，寫法是 {@code tick:音名}，見 {@link com.xinbow99.fortressduel.util.NoteSong}。 */
+        String notes,
         /** 買一次給幾發／幾個。 */
         int amount,
         /**
@@ -56,8 +56,8 @@ public record ShopEntry(
                 Math.max(0, YamlConfig.i(section, "price", 0)),
                 YamlConfig.str(section, "weapon", ""),
                 YamlConfig.str(section, "item", ""),
-                YamlConfig.str(section, "sound", ""),
-                Math.max(1, YamlConfig.i(section, "length", 10)),
+                YamlConfig.str(section, "instrument", "harp"),
+                YamlConfig.str(section, "notes", ""),
                 Math.max(1, YamlConfig.i(section, "amount", 1)),
                 Map.copyOf(enchantments),
                 YamlConfig.str(section, "lore", ""));

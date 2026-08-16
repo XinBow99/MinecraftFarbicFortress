@@ -12,8 +12,9 @@
 #   price   價格
 #   weapon  type = ammo 時指向 weapons.yml 的武器 id；圖示與給出的實物都是它的 item
 #   item    type = item 時要給的物品；type = music 時只當櫃子上的圖示
-#   sound   type = music 時要放的音效 id（模組內建的在 assets/fortress-duel/sounds.json）
-#   length  type = music 時這首歌有多長（秒）；放完之前再點沒有作用，避免疊軌
+#   instrument  type = music 時用哪個音符盒音色（bell、harp、bit、guitar、flute……）
+#   notes   type = music 時的曲子，寫法是 `tick:音名`（20 tick ＝ 1 秒），用原版音符盒的音色彈，
+#           所以純原版客戶端也聽得到；放完之前再點沒有作用，避免兩首疊在一起
 #   amount  買一次給幾發／幾個
 #   enchantments  附在商品上的附魔（附魔 id → 等級），只有 type: item 用得到。
 #           直接寫進物品、不經過附魔台，所以不需要經驗值，等級也不受原版上限與相容規則限制
@@ -315,17 +316,27 @@ shops:
       # 所以聽得到的前提是**客戶端也裝了這個模組**（模組的 assets 就是它的資源包）。
       # 沒裝的人收到一個查不到的音效 id，不會出錯，只是安靜。
       #
+      # 曲子是**用原版音符盒的音色彈出來的**，不是播音檔。這是刻意的：塞音檔要嘛得把音效
+      # 註冊進登記表（沒裝模組的人會被登記表同步擋在門外），要嘛得每個人裝資源包。
+      # 音符盒的音色是原版就有的，調 pitch 就有音高——**純原版客戶端什麼都不用裝就聽得到**。
+      #
       # **場上所有人都聽得到，包含對手**——封包是分別送到每個人身上的，不是在按的人腳邊
       # 放一個會隨距離衰減的音效（競技場兩端遠得聽不到，那就不叫點歌了）。
       #
-      # length 是這首歌的長度（秒），放完之前再點沒有作用：不擋的話連點會疊出好幾軌同一首歌。
+      # 寫法：instrument 是音色（bell、harp、bit、guitar、flute、xylophone、pling……），
+      # notes 是 `tick:音名`，tick 從歌的開頭算起（20 tick ＝ 1 秒），同一個 tick 兩個音就是和弦。
+      # 音域是音符盒的 F#3～F#5，寫超出去會自動移八度進來。放完之前再點沒有作用。
       #
-      # 分類是唱片機（RECORDS），嫌吵可以用原版音量設定關掉
+      # 下面這段是從那個「中式警報」音效抓出來的旋律（自動抓的，所以是像不是一樣）
       jukebox_chinese:
         name: 點一首歌
         type: music
         price: 0
         item: minecraft:jukebox
-        sound: fortress-duel:chinese
-        length: 8
+        instrument: bell
+        notes: >-
+          5:D5 10:E4 18:F#5 22:E4 26:G4 31:E5 35:C5 40:D#5
+          52:E5 58:C5 63:E5 65:F5 67:C5
+          75:D5 78:A4 83:D5 85:A4
+          92:D5 96:E5 100:F5 102:C5 109:A4 127:A4 138:C5
         lore: 全場都聽得到；嫌吵就把音量設定裡的唱片機關掉
