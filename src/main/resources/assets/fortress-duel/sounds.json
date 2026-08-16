@@ -1,0 +1,12 @@
+{
+  "chinese": {
+    "category": "record",
+    "subtitle": "subtitles.fortress-duel.chinese",
+    "sounds": [
+      {
+        "name": "fortress-duel:chinese",
+        "stream": true
+      }
+    ]
+  }
+}

@@ -1,9 +1,12 @@
 package com.xinbow99.fortressduel.npc;
 
 import com.xinbow99.fortressduel.FortressDuel;
+import com.xinbow99.fortressduel.battle.Duel;
+import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
 import com.xinbow99.fortressduel.util.DuelItems;
+import com.xinbow99.fortressduel.util.DuelSounds;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponItems;
@@ -18,6 +21,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.SimpleContainer;
@@ -57,20 +61,24 @@ public final class ShopMenu extends ChestMenu {
     private final ServerPlayer player;
     private final EconomyManager economy;
     private final WeaponSystem weapons;
+    /** {@code type: music} 的按鈕要靠它找到這一場，才放得到對手耳朵裡。 */
+    private final DuelManager duels;
 
     private ShopMenu(int syncId, Inventory inventory, SimpleContainer container, ShopDef shop,
                      List<ShopEntry> slotEntries, ServerPlayer player,
-                     EconomyManager economy, WeaponSystem weapons) {
+                     EconomyManager economy, WeaponSystem weapons, DuelManager duels) {
         super(MenuType.GENERIC_9x6, syncId, inventory, container, ROWS);
         this.shop = shop;
         this.slotEntries = slotEntries;
         this.player = player;
         this.economy = economy;
         this.weapons = weapons;
+        this.duels = duels;
     }
 
     /** 開一間店給某個玩家看。 */
-    public static void open(ServerPlayer player, ShopDef shop, EconomyManager economy, WeaponSystem weapons) {
+    public static void open(ServerPlayer player, ShopDef shop, EconomyManager economy,
+                            WeaponSystem weapons, DuelManager duels) {
         player.openMenu(new SimpleMenuProvider((syncId, inventory, owner) -> {
             SimpleContainer container = new SimpleContainer(SIZE);
             List<ShopEntry> slots = new ArrayList<>(java.util.Collections.nCopies(SIZE, null));
@@ -83,7 +91,7 @@ public final class ShopMenu extends ChestMenu {
                 slot++;
             }
 
-            return new ShopMenu(syncId, inventory, container, shop, slots, player, economy, weapons);
+            return new ShopMenu(syncId, inventory, container, shop, slots, player, economy, weapons, duels);
         }, Component.literal(shop.title()).withStyle(ChatFormatting.DARK_GREEN)));
     }
 
@@ -111,6 +119,8 @@ public final class ShopMenu extends ChestMenu {
                     describeWeapon(lore, weapon, player, weapons);
                 }
             }
+            case "music" -> lore.add(Component.literal("全場都聽得到，包含對手")
+                    .withStyle(ChatFormatting.GRAY));
             default -> {
                 lore.add(Component.literal("數量 " + entry.amount())
                         .withStyle(ChatFormatting.GRAY));
@@ -121,7 +131,8 @@ public final class ShopMenu extends ChestMenu {
         if (!entry.lore().isEmpty()) {
             lore.add(Component.literal(entry.lore()).withStyle(ChatFormatting.DARK_GRAY));
         }
-        lore.add(Component.literal("點擊購買").withStyle(ChatFormatting.GREEN));
+        lore.add(Component.literal(entry.type().equals("music") ? "點擊播放" : "點擊購買")
+                .withStyle(ChatFormatting.GREEN));
 
         stack.set(DataComponents.LORE, new ItemLore(lore));
         return stack;
@@ -288,6 +299,13 @@ public final class ShopMenu extends ChestMenu {
     }
 
     private void buy(ShopEntry entry) {
+        // 音樂按鈕不是商品：不用錢包、不扣錢，也不放購買音效（那會蓋在歌上面），
+        // 所以在錢包檢查之前就結束
+        if (entry.type().equals("music")) {
+            playMusic(entry);
+            return;
+        }
+
         Wallet wallet = economy.walletOf(player);
         if (wallet == null) {
             player.sendSystemMessage(Msg.warn("你目前沒有在對戰中，沒有錢包。"));
@@ -390,6 +408,37 @@ public final class ShopMenu extends ChestMenu {
             }
             stack.enchant(enchantment, e.getValue());
         }
+    }
+
+    /**
+     * 點一首歌，**場上所有人都聽得到**（見 {@link Duel#playMusic}）。
+     *
+     * <p>走的是原版的音效系統：音檔在模組的 assets 裡（見 {@link DuelSounds}），這裡只是把
+     * 註冊好的音效 id 交給 {@link Duel} 去送封包，跟原版播 note block 完全同一條路——
+     * 客戶端不需要任何額外程式碼，也不用把音檔傳過去（但要裝這個模組才聽得到）。
+     *
+     * <p>一次只放一首：還在放的時候再點沒有作用，不然連點會疊出好幾軌同一首歌。
+     */
+    private void playMusic(ShopEntry entry) {
+        Holder.Reference<SoundEvent> sound = BuiltInRegistries.SOUND_EVENT
+                .get(Identifier.parse(entry.sound())).orElse(null);
+        if (sound == null) {
+            deny("這件商品設定錯誤（找不到音效 " + entry.sound() + "）");
+            return;
+        }
+
+        Duel duel = duels.duelOf(player);
+        if (duel == null) {
+            deny("你目前沒有在對戰中。");
+            return;
+        }
+
+        if (!duel.playMusic(sound, entry.lengthSeconds() * 20)) {
+            deny("這首還沒放完。");
+            return;
+        }
+        player.sendSystemMessage(
+                Msg.plain("♪ " + entry.displayName(), ChatFormatting.LIGHT_PURPLE), true);
     }
 
     private void deny(String reason) {

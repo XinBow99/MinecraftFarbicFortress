@@ -46,6 +46,8 @@ public final class NpcManager {
     private final ConfigManager config;
     private final EconomyManager economy;
     private final WeaponSystem weapons;
+    /** 商店的點歌按鈕要靠它找到那一場，才放得到對手耳朵裡。 */
+    private final DuelManager duels;
     /** 把 NPC 關在他那一側。移動本身是原版的事，這裡只畫界線。 */
     private final NpcBounds bounds;
 
@@ -62,6 +64,7 @@ public final class NpcManager {
         this.config = config;
         this.economy = economy;
         this.weapons = weapons;
+        this.duels = duels;
         this.bounds = new NpcBounds(duels);
     }
 
@@ -236,7 +239,7 @@ public final class NpcManager {
             return InteractionResult.FAIL;
         }
 
-        ShopMenu.open(player, shop, economy, weapons);
+        ShopMenu.open(player, shop, economy, weapons, duels);
         return InteractionResult.SUCCESS;
     }
 
