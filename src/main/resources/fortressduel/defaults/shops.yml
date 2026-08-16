@@ -9,6 +9,8 @@
 #           ammo     = 給彈藥實物（放副手就是用那把武器）
 #           item     = 給一般物品（建材之類），直接發原版物品
 #           worker   = 雇一名工人（礦工、農夫），生在你腳邊；買到的不是物品而是一個 NPC
+#           music    = 放一首歌給場上所有人聽（包含對手）。**曲目寫在 songs.yml**，
+#                      音樂家那間店是從那張表生出來的，這裡不用也不該手寫歌
 #   price   價格
 #   weapon  type = ammo 時指向 weapons.yml 的武器 id；圖示與給出的實物都是它的 item
 #   job     type = worker 時指向 jobs.yml 的職業 id
@@ -341,3 +343,4 @@ shops:
       #   item: minecraft:obsidian
       #   amount: 16
       #   lore: 血量最高、佔得最少；隕石炸不穿的只有它
+

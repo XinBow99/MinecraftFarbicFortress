@@ -55,6 +55,8 @@ public final class NpcManager {
     private final ConfigManager config;
     private final EconomyManager economy;
     private final WeaponSystem weapons;
+    /** 商店的點歌按鈕要靠它找到那一場，才放得到對手耳朵裡。 */
+    private final DuelManager duels;
     /**
      * 材料一次賣幾個。
      *
@@ -83,6 +85,7 @@ public final class NpcManager {
         this.config = config;
         this.economy = economy;
         this.weapons = weapons;
+        this.duels = duels;
         this.bounds = new NpcBounds(duels);
     }
 
@@ -146,6 +149,18 @@ public final class NpcManager {
         this.shops = Map.copyOf(loaded);
     }
 
+    /**
+     * 把 songs.yml 的曲目掛成音樂家那間店。
+     *
+     * <p>**要排在 {@link #loadShops} 後面**：它是併進同一張表的，先跑會被 loadShops 整個蓋掉。
+     */
+    public void loadSongs(YamlConfig cfg) {
+        ShopDef songs = SongShop.from(cfg);
+        Map<String, ShopDef> merged = new LinkedHashMap<>(shops);
+        merged.put(songs.id(), songs);
+        this.shops = Map.copyOf(merged);
+    }
+
     /** 把六種材料掛到軍火商的架上。其他商店（之後可能會有）不受影響。 */
     private static ShopDef withMaterials(ShopDef shop, MaterialRegistry materials) {
         if (!"arms_dealer".equals(shop.id()) || materials.size() == 0) return shop;
@@ -160,6 +175,8 @@ public final class NpcManager {
                     "",
                     "",
                     material.item().toString(),
+                    "",
+                    1,
                     MATERIAL_PACK,
                     Map.<String, Integer>of(),
                     "彈藥材料：放進工作台組成自己的彈藥"));
@@ -325,7 +342,7 @@ public final class NpcManager {
             return InteractionResult.FAIL;
         }
 
-        ShopMenu.open(player, shop, economy, weapons, jobs, config, designs);
+        ShopMenu.open(player, shop, economy, weapons, jobs, config, designs, duels);
         return InteractionResult.SUCCESS;
     }
 

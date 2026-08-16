@@ -11,8 +11,10 @@ import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -109,6 +111,8 @@ public final class Duel {
     /** 打到第幾輪（一輪 ＝ 一次建造 + 一次攻擊）。 */
     private int round;
     private long ticksElapsed;
+    /** 商店點的那首歌放完的時間；在這之前不接受下一次點歌，見 {@link #playMusic}。 */
+    private long musicUntilTick;
     /**
      * 已經等離線的人等了幾 tick；0 ＝ 沒有人離線，這一場正常在跑。
      *
@@ -894,6 +898,30 @@ public final class Duel {
      */
     public void notify(ServerPlayer player, Component text) {
         notices.put(player.getUUID(), new Notice(text, ticksElapsed + NOTICE_TICKS));
+    }
+
+    /**
+     * 放一首歌給場上所有人聽——**包含對手**。
+     *
+     * <p>是直接送音效封包給每個人、位置放在他自己身上，不是 {@code level().playSound}：
+     * 後者會隨距離衰減，而競技場的兩端遠得聽不到；點歌的意思就是兩邊都要聽到。
+     *
+     * <p>同一時間只放一首：還在放的時候再點一次不會有任何效果（回傳 {@code false}）。
+     * 不擋的話連點就會疊出好幾軌同一首歌，那是原版音效系統的行為，不是我們要的。
+     *
+     * @param lengthTicks 這首歌多長；在這之前不接受下一次點歌
+     * @return 有沒有真的放出去
+     */
+    public boolean playMusic(Holder<SoundEvent> sound, int lengthTicks) {
+        if (ticksElapsed < musicUntilTick) return false;
+
+        musicUntilTick = ticksElapsed + lengthTicks;
+        for (ServerPlayer player : onlinePlayers()) {
+            player.connection.send(new ClientboundSoundPacket(sound, SoundSource.RECORDS,
+                    player.getX(), player.getY(), player.getZ(), 1.0f, 1.0f,
+                    player.level().getRandom().nextLong()));
+        }
+        return true;
     }
 
     // ---------- 全域修正（突發事件用） ----------
