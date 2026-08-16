@@ -6,7 +6,7 @@ import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
 import com.xinbow99.fortressduel.util.DuelItems;
-import com.xinbow99.fortressduel.util.NoteSong;
+import com.xinbow99.fortressduel.util.DuelSounds;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponItems;
@@ -413,16 +413,16 @@ public final class ShopMenu extends ChestMenu {
     /**
      * 點一首歌，**場上所有人都聽得到**（見 {@link Duel#playMusic}）。
      *
-     * <p>曲子是用**原版音符盒的音色**彈出來的（見 {@link NoteSong}），不是播音檔：音檔要嘛得
-     * 註冊音效（沒裝模組的人會被登記表同步擋在門外），要嘛得每個人裝資源包。音符盒的音色是
-     * 原版就有的，純原版客戶端一樣聽得到。
+     * <p>走的是原版的音效系統：音效 id 直接寫在封包裡送出去（見 {@link DuelSounds}——**不註冊**
+     * 進音效登記表，那會害沒裝模組的人連不進來）。客戶端在自己的資源包裡找得到那個 id 就播，
+     * 找不到就安靜；音檔在模組的 assets 裡，所以裝了模組的人聽得到。
      *
-     * <p>一次只放一首：還在放的時候再點沒有作用，不然兩首疊在一起只是噪音。
+     * <p>一次只放一首：還在放的時候再點沒有作用，不然連點會疊出好幾軌同一首歌。
      */
     private void playMusic(ShopEntry entry) {
-        NoteSong song = NoteSong.parse(entry.instrument(), entry.notes());
-        if (song == null) {
-            deny("這件商品設定錯誤（這首歌沒有半個看得懂的音）");
+        Holder<SoundEvent> sound = DuelSounds.byId(entry.sound());
+        if (sound == null) {
+            deny("這件商品設定錯誤（音效 id 不合法：" + entry.sound() + "）");
             return;
         }
 
@@ -432,7 +432,7 @@ public final class ShopMenu extends ChestMenu {
             return;
         }
 
-        if (!duel.playMusic(song)) {
+        if (!duel.playMusic(sound, entry.lengthSeconds() * 20)) {
             deny("這首還沒放完。");
             return;
         }

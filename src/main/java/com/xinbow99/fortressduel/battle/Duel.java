@@ -7,7 +7,6 @@ import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.util.DuelItems;
 import com.xinbow99.fortressduel.util.InventoryStash;
 import com.xinbow99.fortressduel.util.Msg;
-import com.xinbow99.fortressduel.util.NoteSong;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -112,11 +111,8 @@ public final class Duel {
     /** 打到第幾輪（一輪 ＝ 一次建造 + 一次攻擊）。 */
     private int round;
     private long ticksElapsed;
-    /** 商店點的那首歌；放完之前不接受下一次點歌，見 {@link #playMusic}。null ＝ 現在沒在放。 */
-    private NoteSong playing;
-    /** 這首歌放到第幾 tick，以及下一個還沒響的音是第幾個。 */
-    private int songTick;
-    private int songIndex;
+    /** 商店點的那首歌放完的時間；在這之前不接受下一次點歌，見 {@link #playMusic}。 */
+    private long musicUntilTick;
     /**
      * 已經等離線的人等了幾 tick；0 ＝ 沒有人離線，這一場正常在跑。
      *
@@ -404,7 +400,6 @@ public final class Duel {
         }
 
         ticksElapsed++;
-        tickSong();
 
         // 每秒一次就夠：封死是持續狀態，不是瞬間事件，而且掉血的單位本來就是「每秒」
         if (ticksElapsed % 20 == 0) {
@@ -904,48 +899,25 @@ public final class Duel {
     /**
      * 放一首歌給場上所有人聽——**包含對手**。
      *
-     * <p>歌是用原版音符盒的音色一個音一個音彈出來的（見 {@link NoteSong}），所以純原版客戶端
-     * 也聽得到，不用裝模組也不用資源包。
+     * <p>是直接送音效封包給每個人、位置放在他自己身上，不是 {@code level().playSound}：
+     * 後者會隨距離衰減，而競技場的兩端遠得聽不到；點歌的意思就是兩邊都要聽到。
      *
      * <p>同一時間只放一首：還在放的時候再點一次不會有任何效果（回傳 {@code false}）。
-     * 不擋的話兩首歌會疊在一起，聽起來只是噪音。
+     * 不擋的話連點就會疊出好幾軌同一首歌，那是原版音效系統的行為，不是我們要的。
      *
-     * @return 有沒有真的開始放
+     * @param lengthTicks 這首歌多長；在這之前不接受下一次點歌
+     * @return 有沒有真的放出去
      */
-    public boolean playMusic(NoteSong song) {
-        if (playing != null) return false;
+    public boolean playMusic(Holder<SoundEvent> sound, int lengthTicks) {
+        if (ticksElapsed < musicUntilTick) return false;
 
-        playing = song;
-        songTick = 0;
-        songIndex = 0;
+        musicUntilTick = ticksElapsed + lengthTicks;
+        for (ServerPlayer player : onlinePlayers()) {
+            player.connection.send(new ClientboundSoundPacket(sound, SoundSource.RECORDS,
+                    player.getX(), player.getY(), player.getZ(), 1.0f, 1.0f,
+                    player.level().getRandom().nextLong()));
+        }
         return true;
-    }
-
-    /**
-     * 把這首歌往前推一個 tick，該響的音就送出去。
-     *
-     * <p>音符是照 tick 排好的，所以只要從上次停的地方往前走，不用每 tick 掃整首歌。
-     *
-     * <p>送封包給每個人、位置放在他自己身上，不是 {@code level().playSound}：後者會隨距離衰減，
-     * 而競技場的兩端遠得聽不到；點歌的意思就是兩邊都要聽到。
-     */
-    private void tickSong() {
-        if (playing == null) return;
-
-        ServerPlayer[] listeners = onlinePlayers();
-        while (songIndex < playing.notes().size()
-                && playing.notes().get(songIndex).tick() <= songTick) {
-            NoteSong.Note note = playing.notes().get(songIndex++);
-            for (ServerPlayer player : listeners) {
-                player.connection.send(new ClientboundSoundPacket(playing.instrument(),
-                        SoundSource.RECORDS, player.getX(), player.getY(), player.getZ(),
-                        1.0f, note.pitch(), player.level().getRandom().nextLong()));
-            }
-        }
-
-        if (++songTick > playing.lengthTicks()) {
-            playing = null;
-        }
     }
 
     // ---------- 全域修正（突發事件用） ----------
