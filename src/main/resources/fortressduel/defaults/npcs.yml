@@ -32,3 +32,30 @@ npcs:
     shop: arms_dealer
     health: 200
     name_visible: true
+
+  # ---- 工人 ----
+  #
+  # 礦工與農夫（他們做什麼、賺多少在 jobs.yml）。跟軍火商是同一種東西，只是 shop 留空——
+  # 右鍵他們不會開店，他們自己會走去礦脈與稻田工作。
+  #
+  # health 60 大約是軍火商的三成：他們是**消耗品**，不是要你死守的資產。
+  # 軍火商倒了那一側整場都補不到子彈，所以他該很耐打；工人倒了只是少一份收入，
+  # 再花一次本金就補得回來。而且工人的工作地點本來就在牆外（jobs.yml 的 min_distance），
+  # 給他高血量等於讓那個「走出去是有代價的」設計失效。
+  #
+  # 兩個都用村民當殼是刻意的：他們身上是原版 AI，而村民的導航最穩。想換成別的實體要注意
+  # 兩件事——流浪商人有自己的消失計時器（會憑空不見），敵對生物會反過來打你。
+  # 名字前面的顏色碼就足以在場上分辨誰是誰
+  miner:
+    name: §8礦工
+    entity: minecraft:villager
+    shop: ""
+    health: 60
+    name_visible: true
+
+  farmer:
+    name: §a農夫
+    entity: minecraft:villager
+    shop: ""
+    health: 60
+    name_visible: true

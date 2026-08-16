@@ -418,6 +418,19 @@ public final class Arena {
         return !snapshot.isUntouched(level, pos);
     }
 
+    /**
+     * 在覆寫場內某一格之前先記進還原快照。
+     *
+     * <p>給**對戰開始之後**才往場內放東西的子系統用（工人的礦脈與稻田就是這樣長出來的）。
+     * 開場的框線、熊貓圈、建築都走各自的私有路徑，它們不需要這個。
+     *
+     * <p>{@code restore_terrain: true} 時快照是整包模式、這裡是空操作；但 incremental 模式下
+     * 它是那些方塊唯一的還原保證，少呼叫一次就會在世界上留下永久痕跡。
+     */
+    public void recordBefore(BlockPos pos) {
+        snapshot.record(level, pos);
+    }
+
     /** 拆掉一格並記進快照的還原路徑。不掉落物品——理由同玩家自己挖（見 DuelManager）。 */
     public void breakBuilt(BlockPos pos) {
         snapshot.record(level, pos);

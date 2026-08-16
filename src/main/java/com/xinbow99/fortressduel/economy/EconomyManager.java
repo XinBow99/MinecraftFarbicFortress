@@ -150,6 +150,24 @@ public final class EconomyManager {
                 SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.6f, 1.4f);
     }
 
+    /**
+     * 直接入帳，不發訊息。
+     *
+     * <p>給工人那條收入用（見 {@code jobs.JobManager}）：那邊是一格一格採、一筆一筆進帳的，
+     * 每次都講一句的話一場下來上百行，會把其他提示全部洗掉。訊息由呼叫端自己湊成一輪一次。
+     *
+     * @return true ＝ 真的入帳了（金額為正且這個人有錢包）
+     */
+    public boolean pay(ServerPlayer player, int amount) {
+        if (amount <= 0) return false;
+
+        Wallet wallet = wallets.get(player.getUUID());
+        if (wallet == null) return false;
+
+        wallet.earn(amount);
+        return true;
+    }
+
     // ---------- 查詢 ----------
 
     public Wallet walletOf(ServerPlayer player) {

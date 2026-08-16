@@ -804,6 +804,10 @@ public final class Duel {
             }
             beep(player, SoundEvents.NOTE_BLOCK_PLING.value(), 0.8f);
         }
+
+        // 工人：報告上一輪的產出，並在雙方陣地補上這一輪的礦脈與稻田。
+        // 排在固定收入之後，玩家看到的順序才是「本輪收入 → 工人賺了多少 → 場上多了什麼」
+        services.jobs().onRoundStart(this, players);
     }
 
     /**

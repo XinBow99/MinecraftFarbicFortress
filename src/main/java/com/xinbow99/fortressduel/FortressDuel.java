@@ -8,6 +8,7 @@ import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.npc.NpcManager;
 import com.xinbow99.fortressduel.core.DuelCommands;
 import com.xinbow99.fortressduel.incident.IncidentScheduler;
+import com.xinbow99.fortressduel.jobs.JobManager;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.fabricmc.api.ModInitializer;
@@ -30,6 +31,7 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code mobs.entity} — 怪物本身（mobs.yml）</li>
  *   <li>{@code mobs.skills} — 怪物技能（skills.yml）</li>
  *   <li>{@code incident} — 突發事件（incidents.yml）</li>
+ *   <li>{@code jobs}     — 工人經濟：礦工與農夫（jobs.yml）</li>
  *   <li>{@code util}     — 共用工具</li>
  * </ul>
  */
@@ -48,10 +50,14 @@ public class FortressDuel implements ModInitializer {
         EconomyManager economy = new EconomyManager(config, duels, skills);
         NpcManager npcs = new NpcManager(config, economy, weapons, duels);
         BuildingPlacer buildings = new BuildingPlacer(npcs);
+        JobManager jobs = new JobManager(config, duels, npcs, buildings, economy, weapons);
 
         // 子系統之間互相需要，所以先全部建好再互相登記，最後才第一次讀設定
         config.attach(npcs, buildings);
-        duels.attach(new DuelServices(buildings, economy, weapons));
+        // 商店要靠它處理 type: worker 的商品，它要靠商店那邊的 NpcManager 生成工人——雙向，
+        // 所以只能事後注入
+        npcs.attach(jobs);
+        duels.attach(new DuelServices(buildings, economy, weapons, jobs));
         config.reload();
 
         duels.register();
@@ -60,9 +66,10 @@ public class FortressDuel implements ModInitializer {
         economy.register();
         weapons.register();
         npcs.register();
+        jobs.register();
         IncidentScheduler incidents = new IncidentScheduler(config, skills);
         incidents.register();
-        new DuelCommands(duels, config, skills, weapons, incidents).register();
+        new DuelCommands(duels, config, skills, weapons, incidents, jobs).register();
 
         LOGGER.info("Fortress Duel loaded. Config directory: {}", config.configDir());
     }
