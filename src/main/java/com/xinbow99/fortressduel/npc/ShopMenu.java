@@ -6,6 +6,8 @@ import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.DesignRegistry;
+import com.xinbow99.fortressduel.craft.MaterialItems;
+import com.xinbow99.fortressduel.craft.MaterialRegistry;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
 import com.xinbow99.fortressduel.jobs.JobDef;
@@ -140,6 +142,18 @@ public final class ShopMenu extends ChestMenu {
                 "你自己的設計");
     }
 
+    /**
+     * 這筆商品是不是彈藥材料。
+     *
+     * <p>用**物品 id** 回頭查 materials.yml，而不是另外開一種 shop type：材料的商店條目是
+     * 程式生成的（見 {@code NpcManager.withMaterials}），而那張表本來就是以物品為鍵的，
+     * 多一個型別只是多一個會忘記同步的地方。
+     */
+    private static MaterialRegistry.MaterialDef materialOf(ShopEntry entry, ConfigManager config) {
+        if (entry.item().isEmpty()) return null;
+        return config.materials().byItem(Identifier.parse(entry.item()));
+    }
+
     /** 商品的展示物品：圖示 + 名稱 + 價格與現況。 */
     private static ItemStack icon(ShopEntry entry, ServerPlayer player,
                                   EconomyManager economy, WeaponSystem weapons, JobManager jobs,
@@ -199,7 +213,14 @@ public final class ShopMenu extends ChestMenu {
             default -> {
                 lore.add(Component.literal("數量 " + entry.amount())
                         .withStyle(ChatFormatting.GRAY));
-                describeBuildingBlock(lore, entry, player, weapons);
+                // 材料跟建材共用 type: item，但它們要講的是完全不同的兩件事——建材講血量與
+                // 幾發打得破，材料講它推哪一條軸、投進去換到多少
+                MaterialRegistry.MaterialDef material = materialOf(entry, config);
+                if (material != null) {
+                    lore.addAll(MaterialItems.describe(material, config.materials()));
+                } else {
+                    describeBuildingBlock(lore, entry, player, weapons);
+                }
             }
         }
 
@@ -530,6 +551,16 @@ public final class ShopMenu extends ChestMenu {
             deny("這件商品設定錯誤（找不到物品 " + entry.item() + "）");
             return false;
         }
+
+        // 材料要帶著名稱與說明走。材料是原版物品（火藥就是火藥），發原樣的話玩家背包裡那疊
+        // 東西跟隨手撿到的火藥完全分不出來——他不會知道它推哪一條軸，而那是這套系統的全部
+        MaterialRegistry.MaterialDef material = materialOf(entry, config);
+        if (material != null) {
+            player.getInventory().placeItemBackInInventory(
+                    MaterialItems.create(material, config.materials(), entry.amount()));
+            return true;
+        }
+
         ItemStack stack = new ItemStack(item, entry.amount());
         applyEnchantments(stack, entry);
 

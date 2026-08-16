@@ -45,6 +45,9 @@
 # ── 欄位 ──────────────────────────────────────────────────────────────
 #
 # attributes（每一條軸怎麼從投入數換成數值）
+#   label      這條軸給玩家看的名字。材料的說明文字靠它——沒寫的話架上會出現英文 id
+#   suffix     數值的單位後綴（度、格、顆…）。留空 = 沒有單位
+#              （不叫 unit 是因為下面那個 unit 已經是曲線的係數了）
 #   base       投入 0 個時的值（那個「很差的基準」）
 #   unit       曲線的係數
 #   exponent   邊際遞減的指數。0.6 = 九倍投入換三.六倍效果；1.0 = 線性（不建議）
@@ -68,6 +71,9 @@
 #              那些在對戰場地裡都是意外。目前七種都是純惰性的物品
 #   attribute  它推哪一條軸
 #   price      單價。商店的材料條目由程式從這裡生成，不用手寫進 shops.yml
+#   note       曲線講不出來的那一句話（例：連發機構會改變操作方式）。留空 = 沒有。
+#              **只寫規則，不要寫數字**——數字全部由程式從曲線現算（見 MaterialItems），
+#              手抄一份進來就會漂掉，而漂掉的那天沒有人會發現
 
 # 軍火商的量產。工作台只做出「一份設計」，數量永遠是用錢買的。
 #
@@ -88,6 +94,7 @@ production:
 attributes:
   # 單發傷害。基準 4 ＝ 打三發才破一格木頭（木頭 30 血），可用但難用
   damage:
+    label: 單發傷害
     base: 4.0
     unit: 8.0
     exponent: 0.6
@@ -95,6 +102,8 @@ attributes:
 
   # 彈丸初速（格/tick）。基準 1.6 慢到看得清楚，但配上基準重力射程只有 28 格
   speed:
+    label: 彈丸初速
+    suffix: 格/tick
     base: 1.6
     unit: 0.5
     exponent: 0.6
@@ -105,6 +114,8 @@ attributes:
   # 45 度最大射程 ≈ 速度² ÷ 重力，所以這兩軸是一起決定射程的——
   # 只堆速度不堆彈道的話，那發子彈會很快地掉下去
   guidance:
+    label: 彈道下墜
+    suffix: 格/tick²
     base: 0.09
     unit: 0.6
     exponent: 0.6
@@ -114,6 +125,8 @@ attributes:
   # 散佈半頂角（度）。越小越準。
   # 基準 8 度在 30 格外偏 4 格——打得到牆，打不到人
   precision:
+    label: 散佈角
+    suffix: 度
     base: 8.0
     unit: 1.0
     exponent: 0.6
@@ -122,6 +135,8 @@ attributes:
 
   # 一發打出幾顆。上限 12 是效能考量：每一顆都是獨立的彈丸與粒子軌跡
   pellets:
+    label: 一發幾顆
+    suffix: 顆
     base: 1.0
     unit: 1.2
     exponent: 0.6
@@ -131,6 +146,8 @@ attributes:
 
   # 濺射半徑（格）。上限 5 也是效能：半徑 5 的球體要掃 1331 格
   splash:
+    label: 濺射半徑
+    suffix: 格
     base: 0.0
     unit: 0.5
     exponent: 0.6
@@ -158,6 +175,11 @@ attributes:
   #
   # floor 2 是硬底：雷射（cooldown 2）是這個遊戲最快的武器，自製設計逼近但到不了。
   cadence:
+    label: 裝填間隔
+    # 基準是執行時從彈重算出來的，不是這裡的 base。標了之後說明文字會改印倍率——
+    # 不標的話玩家在材料上會看到一串從 base 0 推出來的負數
+    derived_base: true
+    suffix: tick
     base: 0.0
     unit: 0.5
     exponent: 0.6
@@ -208,3 +230,4 @@ materials:
     item: minecraft:sugar
     attribute: cadence
     price: 18
+    note: 投一個以上就變成按住右鍵連射，但連射不吃蓄力（沒辦法用力道控制初速）
