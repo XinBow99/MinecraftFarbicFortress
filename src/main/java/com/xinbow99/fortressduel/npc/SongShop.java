@@ -73,6 +73,7 @@ public final class SongShop {
                     "music",
                     Math.max(0, YamlConfig.i(section, "price", 0)),
                     "",
+                    "",
                     item,
                     sound,
                     Math.max(1, YamlConfig.i(section, "length", 10)),

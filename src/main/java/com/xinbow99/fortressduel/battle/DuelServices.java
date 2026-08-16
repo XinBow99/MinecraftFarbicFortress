@@ -2,6 +2,7 @@ package com.xinbow99.fortressduel.battle;
 
 import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.economy.EconomyManager;
+import com.xinbow99.fortressduel.jobs.JobManager;
 import com.xinbow99.fortressduel.weapon.WeaponSystem;
 
 /**
@@ -14,5 +15,6 @@ import com.xinbow99.fortressduel.weapon.WeaponSystem;
 public record DuelServices(
         BuildingPlacer buildings,
         EconomyManager economy,
-        WeaponSystem weapons
+        WeaponSystem weapons,
+        JobManager jobs
 ) {}

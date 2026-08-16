@@ -8,12 +8,13 @@ import java.util.Map;
 /**
  * 商店裡的一件商品。
  *
- * <p>四種 {@code type}：
+ * <p>五種 {@code type}：
  * <ul>
  *   <li>{@code weapon}——賣一把武器（把對應物品放進背包，並補到 {@code ammo} 指定的彈藥）</li>
  *   <li>{@code ammo}——只賣子彈，補 {@code amount} 發到指定武器上（買滿了就不收錢）</li>
  *   <li>{@code item}——賣一般物品（建材之類）</li>
- *   <li>{@code music}——放一首歌給按的人聽，什麼東西都不給</li>
+ *   <li>{@code worker}——雇一名工人（礦工、農夫），買到的是一個會自己賺錢的 NPC 而不是物品</li>
+ *   <li>{@code music}——放一首歌給場上所有人聽，什麼東西都不給</li>
  * </ul>
  */
 public record ShopEntry(
@@ -23,6 +24,8 @@ public record ShopEntry(
         int price,
         /** type = weapon/ammo 時指向 weapons.yml 的武器 id。 */
         String weapon,
+        /** type = worker 時指向 jobs.yml 的職業 id。 */
+        String job,
         /** type = item 時要給的物品，type = weapon 時當作展示圖示（省略就用武器綁的物品）。 */
         String item,
         /** type = music 時要放的音效 id（例如 {@code fortress-duel:chinese}）。 */
@@ -55,6 +58,7 @@ public record ShopEntry(
                 YamlConfig.str(section, "type", "item"),
                 Math.max(0, YamlConfig.i(section, "price", 0)),
                 YamlConfig.str(section, "weapon", ""),
+                YamlConfig.str(section, "job", ""),
                 YamlConfig.str(section, "item", ""),
                 YamlConfig.str(section, "sound", ""),
                 Math.max(1, YamlConfig.i(section, "length", 10)),
