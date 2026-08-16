@@ -95,6 +95,58 @@ jar {
 }
 
 /**
+ * sounds.json 是掃出來的，不是手寫的。
+ *
+ * 加一首歌應該只要「把 ogg 丟進 sounds/ 資料夾、在 songs.yml 寫個名字」——手寫一份宣告檔
+ * 的話一定會有人漏掉，而漏掉的症狀是「遊戲裡安靜，沒有任何錯誤訊息」，最難查的那種。
+ */
+def generatedResources = layout.buildDirectory.dir('generated/resources')
+def soundsDir = file('src/main/resources/assets/fortress-duel/sounds')
+
+tasks.register('generateSoundsJson') {
+	group = 'build'
+	description = '掃 assets/fortress-duel/sounds/*.ogg 產生 sounds.json'
+
+	inputs.dir soundsDir
+	def outFile = generatedResources.map { it.file('assets/fortress-duel/sounds.json') }
+	outputs.file outFile
+
+	doLast {
+		def names = soundsDir.listFiles()
+				.findAll { it.name.endsWith('.ogg') }
+				.collect { it.name - '.ogg' }
+				.sort()
+
+		def bad = names.findAll { !(it ==~ /[a-z0-9_.-]+/) }
+		if (bad) {
+			// 音效 id 只吃小寫英數與 _ . -，中文檔名在遊戲裡會直接找不到而且不會報錯
+			throw new GradleException("這些音檔的檔名不能當音效 id（只能用小寫英數與 _ . -）：${bad}")
+		}
+
+		def json = new StringBuilder('{\n')
+		names.eachWithIndex { name, i ->
+			json << """  "${name}": {
+    "category": "record",
+    "sounds": [
+      { "name": "fortress-duel:${name}", "stream": true }
+    ]
+  }${i < names.size() - 1 ? ',' : ''}\n"""
+		}
+		json << '}\n'
+
+		def target = outFile.get().asFile
+		target.parentFile.mkdirs()
+		target.text = json.toString()
+		logger.lifecycle("sounds.json：${names.size()} 首（${names.join(', ')}）")
+	}
+}
+
+sourceSets.main.resources.srcDir(generatedResources)
+// 產生的檔案在 main 的 resources 裡，所以每個會讀那份 resources 的任務都要等它先跑完
+tasks.named('processResources') { dependsOn 'generateSoundsJson' }
+tasks.named('sourcesJar') { dependsOn 'generateSoundsJson' }
+
+/**
  * 伺服器資源包：把模組 assets 裡的音效打包成一個 zip，讓**沒裝模組的客戶端**也聽得到。
  *
  * 玩家不用手動裝——伺服器在 server.properties 填這個 zip 的網址，進來時原版就會問
@@ -110,11 +162,14 @@ tasks.register('resourcePack', Zip) {
 	archiveFileName = "fortress-duel-resources-${project.version}.zip"
 	destinationDirectory = layout.buildDirectory.dir('resourcepack')
 
+	dependsOn 'generateSoundsJson'
+
 	from('resourcepack') // pack.mcmeta
 	from('src/main/resources/assets') {
 		into 'assets'
 		exclude 'fortress-duel/icon.png' // 模組清單用的圖示，資源包裡沒有意義
 	}
+	from(generatedResources) // 掃出來的 sounds.json
 
 	doLast {
 		def zip = archiveFile.get().asFile

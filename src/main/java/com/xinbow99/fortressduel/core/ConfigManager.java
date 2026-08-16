@@ -51,6 +51,8 @@ public final class ConfigManager {
         if (npcs != null) {
             npcs.loadNpcs(YamlConfig.load(configDir, "npcs.yml"));
             npcs.loadShops(YamlConfig.load(configDir, "shops.yml"));
+            // 音樂家那間店是從曲目表生出來的，所以一定要排在 loadShops 後面（見 loadSongs）
+            npcs.loadSongs(YamlConfig.load(configDir, "songs.yml"));
         }
         if (buildings != null) {
             buildings.load(YamlConfig.load(configDir, "buildings.yml"));

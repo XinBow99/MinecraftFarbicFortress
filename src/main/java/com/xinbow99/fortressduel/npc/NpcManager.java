@@ -114,6 +114,18 @@ public final class NpcManager {
         this.shops = Map.copyOf(loaded);
     }
 
+    /**
+     * 把 songs.yml 的曲目掛成音樂家那間店。
+     *
+     * <p>**要排在 {@link #loadShops} 後面**：它是併進同一張表的，先跑會被 loadShops 整個蓋掉。
+     */
+    public void loadSongs(YamlConfig cfg) {
+        ShopDef songs = SongShop.from(cfg);
+        Map<String, ShopDef> merged = new LinkedHashMap<>(shops);
+        merged.put(songs.id(), songs);
+        this.shops = Map.copyOf(merged);
+    }
+
     public int npcCount() {
         return npcs.size();
     }

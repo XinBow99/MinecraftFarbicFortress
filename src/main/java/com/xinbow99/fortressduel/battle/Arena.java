@@ -103,8 +103,8 @@ public final class Arena {
         placePen(penA, settings);
         placePen(penB, settings);
 
-        placeDealer(penA, penB, settings, buildings);
-        placeDealer(penB, penA, settings, buildings);
+        placeDealers(penA, penB, settings, buildings);
+        placeDealers(penB, penA, settings, buildings);
 
         placeBuildings(settings, buildings, penA, penB);
         placeBuildings(settings, buildings, penB, penA);
@@ -160,30 +160,35 @@ public final class Arena {
      * <p>不再包在一棟建築裡——極簡開場沒有建築，但商人仍然是這一側的資產：他被打死那一方
      * 就補不到子彈，所以「先做掉對方的商人」還是一條有效的戰術（見 npcs.yml）。
      */
-    private void placeDealer(BlockPos pen, BlockPos enemyPen, DuelSettings settings,
-                             BuildingPlacer buildings) {
-        if (settings.dealerNpc().isBlank()) return;
-
-        NpcDef def = buildings.npcs().npc(settings.dealerNpc());
-        if (def == null) {
-            FortressDuel.LOGGER.warn("arena.dealer_npc '{}' is not defined in npcs.yml, no shop this duel",
-                    settings.dealerNpc());
-            return;
-        }
-
+    private void placeDealers(BlockPos pen, BlockPos enemyPen, DuelSettings settings,
+                              BuildingPlacer buildings) {
         // 站在圈後方一格半徑處，臉朝中場——玩家從自己這側走過來就直接面對他
         int back = settings.penRadius() + 2;
         int dx = pen.getX() - enemyPen.getX();
         int dz = pen.getZ() - enemyPen.getZ();
         boolean alongX = Math.abs(dx) >= Math.abs(dz);
-        int x = pen.getX() + (alongX ? Integer.signum(dx) * back : 0);
-        int z = pen.getZ() + (alongX ? 0 : Integer.signum(dz) * back);
-
-        int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3);
         float yaw = alongX
                 ? (dx > 0 ? 90f : 270f)
                 : (dz > 0 ? 0f : 180f);
-        buildings.npcs().spawn(level, def, new BlockPos(x, y, z), yaw);
+
+        int slot = 0;
+        for (String id : settings.dealerNpcs()) {
+            NpcDef def = buildings.npcs().npc(id);
+            if (def == null) {
+                FortressDuel.LOGGER.warn("arena.dealer_npcs lists '{}' which is not defined in npcs.yml, skipping", id);
+                continue;
+            }
+
+            // 幾個商人沿著「面向中場」那條線的左右排開：0、+3、-3、+6……
+            // 疊在同一格的話原版的推擠會把他們慢慢擠散，玩家會看到商人自己在飄
+            int spread = (slot % 2 == 0 ? 1 : -1) * ((slot + 1) / 2) * 3;
+            int x = pen.getX() + (alongX ? Integer.signum(dx) * back : spread);
+            int z = pen.getZ() + (alongX ? spread : Integer.signum(dz) * back);
+
+            int y = Math.clamp(surfaceY(level, x, z), region.minY() + 1, region.maxY() - 3);
+            buildings.npcs().spawn(level, def, new BlockPos(x, y, z), yaw);
+            slot++;
+        }
     }
 
     /**

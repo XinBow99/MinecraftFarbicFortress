@@ -8,12 +8,11 @@
 #   type    launcher = 給那把弓（全場通用的發射器）
 #           ammo     = 給彈藥實物（放副手就是用那把武器）
 #           item     = 給一般物品（建材之類），直接發原版物品
-#           music    = 放一首歌給場上所有人聽（包含對手），什麼都不給、也不收錢
+#           music    = 放一首歌給場上所有人聽（包含對手）。**曲目寫在 songs.yml**，
+#                      音樂家那間店是從那張表生出來的，這裡不用也不該手寫歌
 #   price   價格
 #   weapon  type = ammo 時指向 weapons.yml 的武器 id；圖示與給出的實物都是它的 item
-#   item    type = item 時要給的物品；type = music 時只當櫃子上的圖示
-#   sound   type = music 時要放的音效 id（模組內建的在 assets/fortress-duel/sounds.json）
-#   length  type = music 時這首歌有多長（秒）；放完之前再點沒有作用，避免疊軌
+#   item    type = item 時要給的物品
 #   amount  買一次給幾發／幾個
 #   enchantments  附在商品上的附魔（附魔 id → 等級），只有 type: item 用得到。
 #           直接寫進物品、不經過附魔台，所以不需要經驗值，等級也不受原版上限與相容規則限制
@@ -306,29 +305,3 @@ shops:
       #   amount: 16
       #   lore: 血量最高、佔得最少；隕石炸不穿的只有它
 
-      # ---- 點歌 ----
-      #
-      # 按一下放一首歌，不收錢也不給東西——這是拿來**驗證自訂音效這條路走得通**的按鈕：
-      # 音檔（OGG）放在模組的 assets 裡，由 assets/fortress-duel/sounds.json 宣告，
-      # 伺服器端就當成一個普通的音效 id 播（跟原版播 note block 完全同一條路）。
-      #
-      # 聽得到的前提是客戶端手上有那個音檔。兩條路都成立：
-      #   1. 客戶端也裝了這個模組（模組的 assets 就是它的資源包）
-      #   2. 伺服器掛了資源包（`./gradlew resourcePack` 產出 zip，填進 server.properties，
-      #      玩家進來按同意就自動載——見 README 的「伺服器資源包」）
-      # 兩條都沒有的人收到一個查不到的音效 id，不會出錯也不會被踢，只是安靜。
-      #
-      # **場上所有人都聽得到，包含對手**——封包是分別送到每個人身上的，不是在按的人腳邊
-      # 放一個會隨距離衰減的音效（競技場兩端遠得聽不到，那就不叫點歌了）。
-      #
-      # length 是這首歌的長度（秒），放完之前再點沒有作用：不擋的話連點會疊出好幾軌同一首歌。
-      #
-      # 分類是唱片機（RECORDS），嫌吵可以用原版音量設定關掉
-      jukebox_chinese:
-        name: 點一首歌
-        type: music
-        price: 0
-        item: minecraft:jukebox
-        sound: fortress-duel:chinese
-        length: 8
-        lore: 全場都聽得到；嫌吵就把音量設定裡的唱片機關掉

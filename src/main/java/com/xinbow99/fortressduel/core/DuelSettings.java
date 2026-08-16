@@ -75,8 +75,8 @@ public record DuelSettings(
         /** 熊貓圈外再往外幾格的木製平台。0 ＝ 不鋪，沿用原本的地形。 */
         int platformRadius,
         String platformBlock,
-        /** 開場放在平台上的商人 NPC（對應 npcs.yml）。留空 ＝ 不放。 */
-        String dealerNpc,
+        /** 開場放在平台上的商人 NPC（對應 npcs.yml），依序左右排開。空的 ＝ 一個都不放。 */
+        List<String> dealerNpcs,
         /**
          * 熊貓周圍至少要有幾格可站的空間（3×3×3 共 27 格裡算）。低於這個值就持續掉血。
          *
@@ -204,7 +204,7 @@ public record DuelSettings(
                 cfg.getString("objective.pen_block", "minecraft:oak_fence"),
                 Math.max(0, cfg.getInt("arena.platform_radius", 5)),
                 cfg.getString("arena.platform_block", "minecraft:oak_planks"),
-                cfg.getString("arena.dealer_npc", "arms_dealer"),
+                dealerNpcs(cfg),
                 cfg.getInt("objective.suffocation_min_space", 6),
                 cfg.getDouble("objective.suffocation_damage", 2.0),
 
@@ -242,6 +242,22 @@ public record DuelSettings(
     private static List<String> pandaPersonalities(YamlConfig cfg) {
         List<String> configured = cfg.getStringList("objective.personalities");
         return configured.isEmpty() ? List.of("normal", "normal", "normal", "lazy") : configured;
+    }
+
+    /**
+     * 開場要放哪幾個商人。
+     *
+     * <p>舊設定檔寫的是單數的 {@code arena.dealer_npc}，那些檔案還在玩家的 config 資料夾裡，
+     * 所以複數的沒寫時退回去讀它——不然升級之後場上會一個商人都沒有，而那是「補不到子彈」。
+     */
+    private static List<String> dealerNpcs(YamlConfig cfg) {
+        List<String> configured = cfg.getStringList("arena.dealer_npcs");
+        if (!configured.isEmpty()) return List.copyOf(configured);
+
+        String single = cfg.getString("arena.dealer_npc", "");
+        if (!single.isBlank()) return List.of(single);
+
+        return List.of("arms_dealer", "musician");
     }
 
     /** 全部用預設值，設定檔還沒讀進來時的退路。 */

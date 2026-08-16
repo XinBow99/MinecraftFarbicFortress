@@ -62,21 +62,45 @@ Minecraft Fabric mod（1.26.2 / Fabric Loader 0.19.3）。玩家可以向任意�
 
 要測對戰至少需要兩個玩家，所以內建了第二個客戶端的啟動設定。只是要試武器、怪物、技能或商店的話不用開兩個視窗——`/duel solo` 一個人就能進場，對手是一座不會還手的靶子。
 
+## 音樂家與加歌
+
+場上除了軍火商，還站著一個**音樂家**（`npcs.yml` 的 `musician`）。右鍵他開店，點一格放一首歌，
+不用錢，**場上兩邊都聽得到**，放完之前再點沒有作用。他的貨架不寫在 `shops.yml` 裡——
+是從 `songs.yml` 的曲目表生出來的。
+
+加一首歌就兩步：
+
+```bash
+# 1. 轉成 OGG 丟進去，檔名 = 音效 id（只能用小寫英數與底線）
+ffmpeg -i 你的歌.mp3 -c:a libvorbis -q:a 4 -ar 44100 \
+  src/main/resources/assets/fortress-duel/sounds/wow.ogg
+```
+
+```yaml
+# 2. songs.yml 加三行
+  wow:
+    name: Wow
+    length: 5
+```
+
+`sounds.json` 不用碰——`./gradlew build` 會掃那個資料夾自動產生（檔名不合法會直接讓建置失敗，
+而不是在遊戲裡默默沒有聲音）。伺服器端 `/duel reload` 就會看到新歌，不用重開。
+
 ## 伺服器資源包（音效）
 
-商店的點歌按鈕放的是自訂音效，音檔在模組的 `assets/` 裡——**裝了模組的客戶端**本來就聽得到。
-要讓**沒裝模組的原版客戶端**也聽到，就掛一個伺服器資源包：玩家一進來原版會問「是否下載伺服器資源包」，
-同意之後自動套用，不用手動裝任何東西。
+音檔在模組的 `assets/` 裡——**裝了模組的客戶端**本來就聽得到。要讓**沒裝模組的原版客戶端**也聽到，
+就掛一個伺服器資源包：玩家一進來原版會問「是否下載伺服器資源包」，同意之後自動套用，
+不用手動裝任何東西。
 
 ```bash
 ./gradlew resourcePack   # 產出 build/resourcepack/*.zip，並印出 sha1
 ```
 
-把 zip 放到任何公開網址（現成的一份在 [Release `resources-v1`](https://github.com/XinBow99/MinecraftFarbicFortress/releases/tag/resources-v1)），然後填進 `server.properties`：
+把 zip 放到任何公開網址（現成的一份在 [Release `resources-v2`](https://github.com/XinBow99/MinecraftFarbicFortress/releases/tag/resources-v2)），然後填進 `server.properties`：
 
 ```properties
-resource-pack=https://github.com/XinBow99/MinecraftFarbicFortress/releases/download/resources-v1/fortress-duel-resources-1.0.0.zip
-resource-pack-sha1=783e1f9167489edda5527990a1df56e88ae3b9d0
+resource-pack=https://github.com/XinBow99/MinecraftFarbicFortress/releases/download/resources-v2/fortress-duel-resources-1.0.0.zip
+resource-pack-sha1=e274bbee96303ea92e11bfcc23caee18f325c578
 resource-pack-required=false
 ```
 

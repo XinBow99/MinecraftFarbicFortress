@@ -32,3 +32,16 @@ npcs:
     shop: arms_dealer
     health: 200
     name_visible: true
+
+  # 音樂家。他的貨架不在 shops.yml 裡——是從 songs.yml 的曲目表生出來的（見 SongShop），
+  # 所以加一首歌不用動商品清單，寫三行在 songs.yml 就會多一格。
+  #
+  # 為什麼是村民：他要跟軍火商（羊駝）一眼分得出來，而村民是原版最直白的「這個人可以互動」。
+  # 血量比軍火商低很多是刻意的——點歌不影響勝負，他不是戰術資產，打掉他只是掃興，
+  # 不該值得對手花一發子彈（但真的想掃興的話還是打得死）
+  musician:
+    name: §b音樂家
+    entity: minecraft:villager
+    shop: musician
+    health: 60
+    name_visible: true
