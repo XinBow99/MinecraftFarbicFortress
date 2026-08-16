@@ -1,6 +1,9 @@
 package com.xinbow99.fortressduel.npc;
 
 import com.xinbow99.fortressduel.FortressDuel;
+import com.xinbow99.fortressduel.core.ConfigManager;
+import com.xinbow99.fortressduel.craft.AmmoLook;
+import com.xinbow99.fortressduel.craft.DesignRegistry;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.economy.Wallet;
 import com.xinbow99.fortressduel.jobs.JobDef;
@@ -60,44 +63,89 @@ public final class ShopMenu extends ChestMenu {
     private final ServerPlayer player;
     private final EconomyManager economy;
     private final WeaponSystem weapons;
+    private final ConfigManager config;
+    private final DesignRegistry designs;
     /** {@code type: worker} 的商品要靠它雇人，也要靠它算「現在幾個工人」。 */
     private final JobManager jobs;
 
     private ShopMenu(int syncId, Inventory inventory, SimpleContainer container, ShopDef shop,
                      List<ShopEntry> slotEntries, ServerPlayer player,
-                     EconomyManager economy, WeaponSystem weapons, JobManager jobs) {
+                     EconomyManager economy, WeaponSystem weapons, JobManager jobs,
+                     ConfigManager config, DesignRegistry designs) {
         super(MenuType.GENERIC_9x6, syncId, inventory, container, ROWS);
         this.shop = shop;
         this.slotEntries = slotEntries;
         this.player = player;
         this.economy = economy;
         this.weapons = weapons;
+        this.config = config;
+        this.designs = designs;
         this.jobs = jobs;
     }
 
     /** 開一間店給某個玩家看。 */
     public static void open(ServerPlayer player, ShopDef shop, EconomyManager economy,
-                            WeaponSystem weapons, JobManager jobs) {
+                            WeaponSystem weapons, JobManager jobs,
+                            ConfigManager config, DesignRegistry designs) {
         player.openMenu(new SimpleMenuProvider((syncId, inventory, owner) -> {
             SimpleContainer container = new SimpleContainer(SIZE);
             List<ShopEntry> slots = new ArrayList<>(java.util.Collections.nCopies(SIZE, null));
 
             int slot = 0;
-            for (ShopEntry entry : shop.entries()) {
+            // 玩家自己登記的設計排在固定商品後面：架上前段永遠是同一批東西，
+            // 位置不會因為研發進度而跳來跳去
+            List<ShopEntry> all = new ArrayList<>(shop.entries());
+            for (DesignRegistry.Design design : designs.designsOf(player.getUUID())) {
+                all.add(designEntry(design, config));
+            }
+
+            for (ShopEntry entry : all) {
                 if (slot >= SIZE) break;
-                container.setItem(slot, icon(entry, player, economy, weapons, jobs));
+                container.setItem(slot, icon(entry, player, economy, weapons, jobs, config, designs));
                 slots.set(slot, entry);
                 slot++;
             }
 
-            return new ShopMenu(syncId, inventory, container, shop, slots, player, economy, weapons, jobs);
+            return new ShopMenu(syncId, inventory, container, shop, slots, player, economy, weapons,
+                    jobs, config, designs);
         }, Component.literal(shop.title()).withStyle(ChatFormatting.DARK_GREEN)));
+    }
+
+    /**
+     * 玩家登記過的設計在架上的那一格。
+     *
+     * <p>{@code weapon} 欄位借來放設計的 key——那是這份設計的身分，買的時候靠它回頭
+     * 從登記表把向量找出來。價格是算的不是填的（見 {@code MaterialRegistry.batchPrice}）。
+     */
+    private static ShopEntry designEntry(DesignRegistry.Design design, ConfigManager config) {
+        return new ShopEntry(
+                "design_" + design.vector().key(),
+                design.name(),
+                "design",
+                config.materials().batchPrice(design.vector()),
+                design.vector().key(),
+                "",
+                "",
+                config.materials().batch(),
+                java.util.Map.<String, Integer>of(),
+                "你自己的設計");
     }
 
     /** 商品的展示物品：圖示 + 名稱 + 價格與現況。 */
     private static ItemStack icon(ShopEntry entry, ServerPlayer player,
-                                  EconomyManager economy, WeaponSystem weapons, JobManager jobs) {
-        ItemStack stack = new ItemStack(resolveIcon(entry, weapons));
+                                  EconomyManager economy, WeaponSystem weapons, JobManager jobs,
+                                  ConfigManager config, DesignRegistry designs) {
+        ItemStack stack;
+        if ("design".equals(entry.type())) {
+            DesignRegistry.Design design = designs.byKey(player.getUUID(), entry.weapon());
+            // 架上那格就長成它本人的樣子——玩家記住的是那顆蛋，不是名字
+            stack = design == null
+                    ? new ItemStack(Items.PAPER)
+                    : WeaponItems.createDesignAmmo(design.vector(),
+                            config.designs().toWeapon(design.vector()), 1);
+        } else {
+            stack = new ItemStack(resolveIcon(entry, weapons));
+        }
         stack.set(DataComponents.CUSTOM_NAME,
                 Component.literal(entry.displayName()).withStyle(ChatFormatting.YELLOW));
 
@@ -116,6 +164,14 @@ public final class ShopMenu extends ChestMenu {
                     lore.add(Component.literal("目前 " + weapons.ammoCount(player, weapon) + " 發")
                             .withStyle(ChatFormatting.GRAY));
                     describeWeapon(lore, weapon, player, weapons);
+                }
+            }
+            case "design" -> {
+                lore.add(Component.literal("量產 " + entry.amount() + " 發")
+                        .withStyle(ChatFormatting.GRAY));
+                DesignRegistry.Design design = designs.byKey(player.getUUID(), entry.weapon());
+                if (design != null) {
+                    describeWeapon(lore, config.designs().toWeapon(design.vector()), player, weapons);
                 }
             }
             case "worker" -> describeWorker(lore, entry, player, jobs);
@@ -349,6 +405,7 @@ public final class ShopMenu extends ChestMenu {
             case "launcher" -> giveLauncher();
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
+            case "design" -> giveDesign(entry);
             case "worker" -> hireWorker(entry);
             default -> {
                 FortressDuel.LOGGER.warn("Shop entry {} uses unknown type '{}'", entry.id(), entry.type());
@@ -393,6 +450,27 @@ public final class ShopMenu extends ChestMenu {
 
         player.getInventory().placeItemBackInInventory(
                 WeaponItems.createAmmo(weapon, entry.amount()));
+        return true;
+    }
+
+    /**
+     * 量產一批自己登記過的設計。
+     *
+     * <p>發出去的那疊**沒有原型標記**——它是消耗品，不能再丟回工作台當材料。
+     * 少了這條分界的話，玩家可以買便宜的成品拆回去當高階材料，繞過材料本身的成本。
+     */
+    private boolean giveDesign(ShopEntry entry) {
+        DesignRegistry.Design design = designs.byKey(player.getUUID(), entry.weapon());
+        if (design == null) {
+            deny("這份設計已經不在你的名單上了");
+            return false;
+        }
+
+        ItemStack stack = WeaponItems.createDesignAmmo(design.vector(),
+                config.designs().toWeapon(design.vector()), entry.amount());
+        AmmoLook.writeName(stack, design.name());
+        AmmoLook.apply(stack, design.vector(), config.designs().toWeapon(design.vector()));
+        player.getInventory().placeItemBackInInventory(stack);
         return true;
     }
 
@@ -468,7 +546,7 @@ public final class ShopMenu extends ChestMenu {
         for (int slot = 0; slot < SIZE; slot++) {
             ShopEntry entry = slotEntries.get(slot);
             if (entry != null) {
-                getSlot(slot).set(icon(entry, player, economy, weapons, jobs));
+                getSlot(slot).set(icon(entry, player, economy, weapons, jobs, config, designs));
             }
         }
         broadcastChanges();

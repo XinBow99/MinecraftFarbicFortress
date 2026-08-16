@@ -3,6 +3,11 @@ package com.xinbow99.fortressduel.npc;
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.battle.DuelManager;
 import com.xinbow99.fortressduel.core.ConfigManager;
+import com.xinbow99.fortressduel.craft.AmmoLook;
+import com.xinbow99.fortressduel.craft.AmmoVector;
+import com.xinbow99.fortressduel.craft.CraftingBench;
+import com.xinbow99.fortressduel.craft.DesignRegistry;
+import com.xinbow99.fortressduel.craft.MaterialRegistry;
 import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.jobs.JobManager;
@@ -26,12 +31,15 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -47,8 +55,18 @@ public final class NpcManager {
     private final ConfigManager config;
     private final EconomyManager economy;
     private final WeaponSystem weapons;
+    /**
+     * 材料一次賣幾個。
+     *
+     * <p>9 是一次合成能吃掉的上限（3×3、每格 1 個），所以一份「買一次就夠做一個純專精設計」。
+     * 賣得比這少的話，做一個設計要點好幾次架子上的同一格。
+     */
+    private static final int MATERIAL_PACK = 9;
+
     /** 把 NPC 關在他那一側。移動本身是原版的事，這裡只畫界線。 */
     private final NpcBounds bounds;
+    /** 每個人在軍火商那裡登記過的設計。逐人、不跨場。 */
+    private final DesignRegistry designs = new DesignRegistry();
     /** 工人（礦工、農夫）也是 NPC，但雇用與產出由它管。啟動時 {@link #attach} 進來。 */
     private JobManager jobs;
 
@@ -71,8 +89,12 @@ public final class NpcManager {
     public void register() {
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) ->
                 player instanceof ServerPlayer sp ? onInteract(sp, entity) : InteractionResult.PASS);
-        DuelEvents.END.register((duel, result) ->
-                removeIn(duel.arena().level(), duel.arena().region()));
+        DuelEvents.END.register((duel, result) -> {
+            // 配方跟錢、材料、彈藥一樣是打完就收的——沒有理由只有它跨場留著
+            designs.forget(duel.north().playerId());
+            designs.forget(duel.south().playerId());
+            removeIn(duel.arena().level(), duel.arena().region());
+        });
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> onNpcDeath(entity));
         ServerTickEvents.END_SERVER_TICK.register(server -> bounds.tick(server, homes));
     }
@@ -110,12 +132,66 @@ public final class NpcManager {
         this.npcs = Map.copyOf(loaded);
     }
 
-    public void loadShops(YamlConfig cfg) {
+    /**
+     * @param materials 彈藥材料。它們的商店條目是**生成的**，不寫在 shops.yml 裡——
+     *                  價格已經在 materials.yml 有一份了，手抄第二份必定會漂移，
+     *                  而漂掉的那天沒有人會發現（這份檔案的 lore 欄位就是為了同一件事才禁止手寫）
+     */
+    public void loadShops(YamlConfig cfg, MaterialRegistry materials) {
         Map<String, ShopDef> loaded = new LinkedHashMap<>();
         for (Map.Entry<String, Map<String, Object>> e : cfg.getSections("shops").entrySet()) {
-            loaded.put(e.getKey(), ShopDef.from(e.getKey(), e.getValue()));
+            ShopDef shop = ShopDef.from(e.getKey(), e.getValue());
+            loaded.put(e.getKey(), withMaterials(shop, materials));
         }
         this.shops = Map.copyOf(loaded);
+    }
+
+    /** 把六種材料掛到軍火商的架上。其他商店（之後可能會有）不受影響。 */
+    private static ShopDef withMaterials(ShopDef shop, MaterialRegistry materials) {
+        if (!"arms_dealer".equals(shop.id()) || materials.size() == 0) return shop;
+
+        List<ShopEntry> entries = new ArrayList<>(shop.entries());
+        for (MaterialRegistry.MaterialDef material : materials.all()) {
+            entries.add(new ShopEntry(
+                    "material_" + material.id(),
+                    material.displayName() + " ×" + MATERIAL_PACK,
+                    "item",
+                    material.price() * MATERIAL_PACK,
+                    "",
+                    "",
+                    material.item().toString(),
+                    MATERIAL_PACK,
+                    Map.<String, Integer>of(),
+                    "彈藥材料：放進工作台組成自己的彈藥"));
+        }
+        return new ShopDef(shop.id(), shop.title(), List.copyOf(entries));
+    }
+
+    /**
+     * 把手上的原型登記給軍火商，之後就能在店裡量產。
+     *
+     * <p>**原型會被收走**：它是一份設計圖，交出去就是交出去了。留著的話玩家可以拿同一份
+     * 原型去對面的商人那裡再登記一次——而配方逐人正是這個系統的競爭點。
+     */
+    private boolean registerDesign(ServerPlayer player) {
+        ItemStack prototype = player.getMainHandItem();
+        AmmoVector vector = AmmoVector.read(prototype).orElse(null);
+        if (vector == null) return false;
+
+        String name = AmmoLook.readName(prototype)
+                .orElseGet(() -> config.designs().toWeapon(vector).displayName());
+
+        boolean fresh = designs.register(player.getUUID(), vector, name);
+        if (!fresh) {
+            player.sendSystemMessage(Msg.info("「" + name + "」已經登記過了，架上就有。"));
+            return true;
+        }
+
+        prototype.shrink(1);
+        int price = config.materials().batchPrice(vector);
+        player.sendSystemMessage(Msg.good("軍火商收下了「" + name + "」的設計圖，開始量產——"
+                + "架上多了一格，$" + price + " 一批（" + config.materials().batch() + " 發）。"));
+        return true;
     }
 
     public int npcCount() {
@@ -214,6 +290,12 @@ public final class NpcManager {
         NpcDef def = spawned.get(entity.getUUID());
         if (def == null) return InteractionResult.PASS;
 
+        // 手上拿著工作台做出來的原型 → 登記進他的軍火商，而不是開店。
+        // 「拿東西給商人看」是這個動作最直覺的表達，不需要另外一個介面
+        if (CraftingBench.isPrototype(player.getMainHandItem())) {
+            return registerDesign(player) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+        }
+
         // 拴繩相關的右鍵一律放行，讓**原版**去處理，我們一行都不寫。兩種情況：
         //
         //   手上拿著拴繩        → 要牽起他
@@ -243,7 +325,7 @@ public final class NpcManager {
             return InteractionResult.FAIL;
         }
 
-        ShopMenu.open(player, shop, economy, weapons, jobs);
+        ShopMenu.open(player, shop, economy, weapons, jobs, config, designs);
         return InteractionResult.SUCCESS;
     }
 
