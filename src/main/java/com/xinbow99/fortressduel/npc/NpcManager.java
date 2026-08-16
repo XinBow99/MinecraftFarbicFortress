@@ -163,7 +163,7 @@ public final class NpcManager {
         this.shops = Map.copyOf(merged);
     }
 
-    /** 把六種材料掛到軍火商的架上。其他商店（之後可能會有）不受影響。 */
+    /** 把 materials.yml 裡的材料掛到軍火商的架上。其他商店（之後可能會有）不受影響。 */
     private static ShopDef withMaterials(ShopDef shop, MaterialRegistry materials) {
         if (!"arms_dealer".equals(shop.id()) || materials.size() == 0) return shop;
 

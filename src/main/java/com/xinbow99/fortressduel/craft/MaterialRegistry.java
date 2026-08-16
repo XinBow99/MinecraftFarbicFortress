@@ -8,7 +8,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** materials.yml 讀出來的材料表與六條軸的曲線。 */
+/** materials.yml 讀出來的材料表與各條軸的曲線。 */
 public final class MaterialRegistry {
 
     private volatile Map<String, AttributeCurve> curves = Map.of();

@@ -384,9 +384,9 @@ public final class DuelCommands {
                 weapon.gravity(), weapon.spreadDegrees(), weapon.splashRadius()),
                 ChatFormatting.GRAY), false);
         ctx.getSource().sendSuccess(() -> Msg.plain(String.format(
-                "冷卻 %d tick（每秒 %.1f 發）   後座 %.2f/發，回復 %.2f°/秒   45°射程 %.0f 格",
+                "冷卻 %d tick（每秒 %.1f 發，%s）   45°射程 %.0f 格",
                 weapon.cooldownTicks(), 20.0 / weapon.cooldownTicks(),
-                weapon.recoil(), weapon.recoilRecovery(), weapon.maxRange()),
+                weapon.auto() ? "連射" : "單發", weapon.maxRange()),
                 ChatFormatting.GRAY), false);
         // 做出來的當下才講：取名這件事沒有任何視覺入口（不像商店有櫃子、工作台有格子），
         // 不在這裡提一句的話玩家不會知道它存在

@@ -112,13 +112,6 @@ public final class WeaponSystem {
     private final List<Projectile> projectiles = new ArrayList<>();
     /** 玩家 → 各武器的剩餘冷卻（tick）。 */
     private final Map<UUID, Map<String, Integer>> cooldowns = new HashMap<>();
-    /**
-     * 玩家 → 各武器目前累積的後座力（度）。
-     *
-     * <p>逐武器而不是逐玩家：切到另一把槍不該繼承前一把的後座力，而放下一把槍去打別的、
-     * 再切回來時它應該已經回穩了——這由 {@link #tickRecoil} 的固定衰減自然達成。
-     */
-    private final Map<UUID, Map<String, Double>> recoil = new HashMap<>();
     /** 每一場對戰裡、每一格已經累積的傷害。 */
     private final Map<Duel, Map<BlockPos, Float>> blockDamage = new HashMap<>();
     /**
@@ -190,10 +183,6 @@ public final class WeaponSystem {
                 level.destroyBlockProgress(progressId(pos), pos, -1);
             }
         }
-
-        // 後座力不跨場，否則上一場最後那串連射會讓下一場的第一發歪掉
-        recoil.remove(duel.north().playerId());
-        recoil.remove(duel.south().playerId());
     }
 
     /**
@@ -427,9 +416,29 @@ public final class WeaponSystem {
             return false;
         }
         playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
+        showCooldown(player, weapon);
 
         fire(player, duel, weapon, ammoName, power);
         return true;
+    }
+
+    /**
+     * 把冷卻畫給玩家看：副手那疊彈藥蓋上原版的灰色遮罩，跟金蘋果、盾牌同一個東西。
+     *
+     * <p>用原版的 {@code ItemCooldowns} 而不是自己送 actionbar：這個專案的前提是客戶端不裝
+     * mod，而這條是**唯一**不用發字、直接畫在物品上的進度指示——玩家不必把視線從準心移開。
+     *
+     * <p>純粹是顯示。真正決定能不能開火的仍然是 {@link #cooldowns} 那張表：彈藥物品本身沒有
+     * 任何右鍵行為，被鎖住也不會擋掉主手那把弓。
+     *
+     * <p>冷卻群組寫在彈藥上（見 {@link AmmoLook#apply}）：不指定的話原版按**物品種類**分組，
+     * 而所有自製設計的本體都是同一種磚——換一份設計會繼承上一份的遮罩。
+     */
+    private void showCooldown(ServerPlayer player, WeaponDef weapon) {
+        ItemStack ammo = player.getOffhandItem();
+        if (!ammo.isEmpty()) {
+            player.getCooldowns().addCooldown(ammo, weapon.cooldownTicks());
+        }
     }
 
     /**
@@ -493,9 +502,7 @@ public final class WeaponSystem {
         Vec3 origin = player.getEyePosition();
         Vec3 look = player.getLookAngle();
 
-        // 這一發用的是「開火前」的後座力：第一發永遠是準的，代價從第二發才開始付
-        double spread = weapon.spreadDegrees() + recoilOf(player, weapon);
-        addRecoil(player, weapon);
+        double spread = weapon.spreadDegrees();
 
         double speed = weapon.projectileSpeed();
         if (weapon.chargeAffectsSpeed()) {
@@ -566,42 +573,10 @@ public final class WeaponSystem {
 
     private void onServerTick(MinecraftServer server) {
         tickCooldowns();
-        tickRecoil();
         // 要排在 tickCooldowns 之後：先讓冷卻減到 0，這一 tick 才打得出下一發。
         // 反過來的話每一發都會多等一 tick，機槍的實際射速會比設定值慢三成
         tickAutoFire(server);
         tickProjectiles();
-    }
-
-    /** 目前這把武器累積了多少後座力（度）。 */
-    private double recoilOf(ServerPlayer player, WeaponDef weapon) {
-        Map<String, Double> perWeapon = recoil.get(player.getUUID());
-        return perWeapon == null ? 0 : perWeapon.getOrDefault(weapon.id(), 0.0);
-    }
-
-    private void addRecoil(ServerPlayer player, WeaponDef weapon) {
-        if (weapon.recoil() <= 0) return;
-        recoil.computeIfAbsent(player.getUUID(), k -> new HashMap<>())
-                .merge(weapon.id(), weapon.recoil(),
-                        (old, add) -> Math.min(weapon.recoilMax(), old + add));
-    }
-
-    /**
-     * 後座力回穩。
-     *
-     * <p>固定速率往下掉而不是按比例衰減：按比例的話尾巴會拖很長，玩家永遠等不到「完全回穩」
-     * 的那一刻，而「停火多久才會恢復準度」是要能被背下來的。
-     */
-    private void tickRecoil() {
-        for (Map.Entry<UUID, Map<String, Double>> entry : recoil.entrySet()) {
-            entry.getValue().replaceAll((id, degrees) -> {
-                WeaponDef weapon = config.weapons().byId(id);
-                double perTick = (weapon == null ? 6.0 : weapon.recoilRecovery()) / 20.0;
-                return degrees - perTick;
-            });
-            entry.getValue().values().removeIf(degrees -> degrees <= 0);
-        }
-        recoil.values().removeIf(Map::isEmpty);
     }
 
     private void tickCooldowns() {

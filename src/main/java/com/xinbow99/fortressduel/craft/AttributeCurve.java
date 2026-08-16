@@ -45,6 +45,17 @@ public record AttributeCurve(
 
     /** 投入 {@code n} 個材料之後這條軸的值。 */
     public double valueAt(int n) {
+        return valueAt(n, base);
+    }
+
+    /**
+     * 同上，但基準由呼叫端給。
+     *
+     * <p>給射速那條軸用：它的「投入 0 個」不是一個常數，而是**從這一發有多重推出來的**
+     * 冷卻（見 {@code AmmoDesign.cooldown}）。把基準留在設定檔裡的話那個耦合就斷了，
+     * 而斷掉的後果是傷害與射速變成兩條互相獨立、可以同時買滿的軸。
+     */
+    public double valueAt(int n, double base) {
         double curved = n <= 0 ? 0 : unit * Math.pow(n, exponent);
         double value = down
                 ? floor + (base - floor) / (1 + curved)

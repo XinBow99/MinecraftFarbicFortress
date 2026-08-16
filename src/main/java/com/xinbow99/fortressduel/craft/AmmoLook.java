@@ -8,9 +8,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.item.component.UseCooldown;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 給一份自製彈藥一個看得出來是它的長相。
@@ -85,6 +87,9 @@ public final class AmmoLook {
     public static void apply(ItemStack stack, AmmoVector vector, WeaponDef weapon) {
         stack.set(DataComponents.ITEM_MODEL, eggFor(vector));
         stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+        // 開火時蓋在這疊上的灰色遮罩要獨立分組，見 cooldownGroup
+        stack.set(DataComponents.USE_COOLDOWN,
+                new UseCooldown(weapon.cooldownTicks() / 20f, Optional.of(cooldownGroup(vector))));
 
         // 玩家取過名字就用他的，沒有就用「主材料 + 總數」推出來的那個
         String name = readName(stack).orElseGet(weapon::displayName);
@@ -96,8 +101,9 @@ public final class AmmoLook {
                 weapon.damage(), weapon.pellets(), weapon.splashRadius())));
         lines.add(line(String.format("初速 %.2f   重力 %.4f   45°射程 %.0f 格",
                 weapon.projectileSpeed(), weapon.gravity(), weapon.maxRange())));
-        lines.add(line(String.format("散佈 %.2f°   每秒 %.1f 發",
-                weapon.spreadDegrees(), 20.0 / weapon.cooldownTicks())));
+        lines.add(line(String.format("散佈 %.2f°   每秒 %.1f 發（%s）",
+                weapon.spreadDegrees(), 20.0 / weapon.cooldownTicks(),
+                weapon.auto() ? "按住連射" : "單發")));
         lines.add(line("材料 " + materials(vector)));
         stack.set(DataComponents.LORE, new ItemLore(lines));
     }
@@ -143,6 +149,21 @@ public final class AmmoLook {
      * <p>用 {@link AmmoVector#key()} 的雜湊而不是亂數：外觀必須是配方的函數。
      * 取絕對值再取模——{@code hashCode} 可能是負的，而負的索引會直接丟例外。
      */
+    /**
+     * 這份設計的冷卻分組。
+     *
+     * <p>開火時副手那疊會被蓋上原版的灰色冷卻遮罩（見 {@code WeaponSystem.showCooldown}），
+     * 而原版預設**按物品種類分組**——所有自製設計的本體都是同一種磚，不分開的話換一份設計
+     * 會直接繼承上一份剩下的遮罩，讀數是錯的。
+     *
+     * <p>用向量的雜湊而不是 {@link AmmoVector#key()} 本身：key 裡有 {@code :} 與 {@code ;}，
+     * 那兩個字元放進 {@link Identifier} 的路徑會直接丟例外。
+     */
+    private static Identifier cooldownGroup(AmmoVector vector) {
+        return Identifier.fromNamespaceAndPath("fortress-duel",
+                "design/" + Integer.toHexString(vector.key().hashCode()));
+    }
+
     private static Identifier eggFor(AmmoVector vector) {
         List<Identifier> all = eggs();
         if (all.isEmpty()) return BASE_ITEM;
