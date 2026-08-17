@@ -24,6 +24,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
@@ -103,7 +104,56 @@ public final class NpcManager {
         // 光碟是音樂家賣出去的東西，右鍵播放的那條路跟著他一起登記
         SongDisc.register(duels);
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> onNpcDeath(entity));
-        ServerTickEvents.END_SERVER_TICK.register(server -> bounds.tick(server, homes));
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            bounds.tick(server, homes);
+            expire(server);
+        });
+    }
+
+    /**
+     * 到期的商人自己收攤。
+     *
+     * <p>只管有寫 {@code lifespan_seconds} 的那些（事件放出來的臨時商人）。長駐的商人不受
+     * 影響——他們是這一側的命脈，會消失的話那條「保護你的軍火商」的戰術就沒有意義了。
+     *
+     * <p>計時看實體自己的 {@code tickCount}，理由跟 {@code SkillTypes.expire} 一樣：那本來
+     * 就是「出生到現在幾 tick」，不用另外記一份會跟現實對不起來的表。
+     *
+     * <p>走 {@code discard()} 而不是 {@code kill()}：收攤不是被殺，不該觸發死亡訊息，
+     * 也不該讓「打死商人」的音效與提示跑出來——那兩件事在玩家眼裡是完全不同的事件。
+     */
+    private void expire(MinecraftServer server) {
+        if (spawned.isEmpty()) return;
+
+        Iterator<Map.Entry<UUID, NpcDef>> it = spawned.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, NpcDef> e = it.next();
+            if (e.getValue().lifespanSeconds() <= 0) continue;
+
+            Entity entity = entityOf(server, e.getKey());
+            if (entity == null) continue;
+            if (entity.tickCount < e.getValue().lifespanSeconds() * 20) continue;
+
+            if (entity.level() instanceof ServerLevel level) {
+                level.sendParticles(net.minecraft.core.particles.ParticleTypes.POOF,
+                        entity.getX(), entity.getY(1.0), entity.getZ(), 12, 0.3, 0.4, 0.3, 0.02);
+                Component text = Msg.info(e.getValue().displayName() + " 收攤走了。");
+                level.getPlayers(p -> p.distanceToSqr(entity) < 96 * 96)
+                        .forEach(p -> p.sendSystemMessage(text));
+            }
+            entity.discard();
+            homes.remove(e.getKey());
+            it.remove();
+        }
+    }
+
+    /** 在所有世界裡找這個 UUID。NPC 只會在對戰那個世界，但這裡不預設哪一個。 */
+    private static Entity entityOf(MinecraftServer server, UUID id) {
+        for (ServerLevel level : server.getAllLevels()) {
+            Entity entity = level.getEntity(id);
+            if (entity != null) return entity;
+        }
+        return null;
     }
 
     /**

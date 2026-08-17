@@ -16,6 +16,7 @@ import com.xinbow99.fortressduel.incident.IncidentDef;
 import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.AmmoVector;
 import com.xinbow99.fortressduel.craft.CraftingBench;
+import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.craft.MaterialRegistry;
 import com.xinbow99.fortressduel.incident.IncidentScheduler;
 import com.xinbow99.fortressduel.jobs.JobDef;
@@ -69,9 +70,13 @@ public final class DuelCommands {
     private final IncidentScheduler incidents;
     /** /duel hire 要能直接雇一名工人，不用先湊錢走到商人面前。 */
     private final JobManager jobs;
+    /** {@code /duel money} 用。測試時最花時間的一直是「先賺到錢」那一段。 */
+    private final EconomyManager economy;
 
     public DuelCommands(DuelManager duels, ConfigManager config, SkillEngine skills,
-                        WeaponSystem weapons, IncidentScheduler incidents, JobManager jobs) {
+                        WeaponSystem weapons, IncidentScheduler incidents, JobManager jobs,
+                        EconomyManager economy) {
+        this.economy = economy;
         this.duels = duels;
         this.config = config;
         this.skills = skills;
@@ -142,6 +147,12 @@ public final class DuelCommands {
                 .then(Commands.literal("name")
                         .then(Commands.argument("name", StringArgumentType.greedyString())
                                 .executes(this::nameAmmo)))
+                .then(Commands.literal("money")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .then(Commands.argument("amount", IntegerArgumentType.integer())
+                                .executes(ctx -> money(ctx, null))
+                                .then(Commands.argument("player", EntityArgument.player())
+                                        .executes(ctx -> money(ctx, EntityArgument.getPlayer(ctx, "player"))))))
                 .then(Commands.literal("testfire")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .executes(this::testfire))
@@ -342,6 +353,31 @@ public final class DuelCommands {
      * <p>發到手上的那疊身上帶著材料向量，所以照樣可以真的射出去：{@code byAmmoStack}
      * 先看向量、查不到才退回 weapons.yml 那張固定表。
      */
+    /**
+     * 直接給錢（或扣錢，填負數）。
+     *
+     * <p>純粹是測試用的：這個遊戲裡最花時間的一段一直是「先賺到錢」——想看一份 $478 的圖紙
+     * 蓋起來長什麼樣，不該先去中場打十分鐘的怪。
+     *
+     * @param target null ＝ 給自己
+     */
+    private int money(CommandContext<CommandSourceStack> ctx, ServerPlayer target) throws CommandSyntaxException {
+        ServerPlayer player = target != null ? target : ctx.getSource().getPlayerOrException();
+        int amount = IntegerArgumentType.getInteger(ctx, "amount");
+
+        if (duels.duelOf(player) == null) {
+            ctx.getSource().sendFailure(Msg.warn(player.getGameProfile().name() + " 不在對戰中，沒有錢包。"));
+            return 0;
+        }
+
+        economy.pay(player, amount);
+        int balance = economy.balanceOf(player);
+        ctx.getSource().sendSuccess(() -> Msg.good(
+                player.getGameProfile().name() + " " + (amount >= 0 ? "+" : "") + "$" + amount
+                        + "（餘額 $" + balance + "）"), false);
+        return 1;
+    }
+
     private int craft(CommandContext<CommandSourceStack> ctx) {
         ServerPlayer player = ctx.getSource().getPlayer();
         if (player == null) {
