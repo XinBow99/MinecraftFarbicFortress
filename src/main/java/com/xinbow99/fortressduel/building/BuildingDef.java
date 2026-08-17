@@ -33,7 +33,15 @@ public record BuildingDef(
         List<List<String>> layers,
         /** 要放在裡面的 NPC id（對應 npcs.yml），空字串 ＝ 不放。 */
         String npc,
-        int npcOffsetX, int npcOffsetY, int npcOffsetZ
+        int npcOffsetX, int npcOffsetY, int npcOffsetZ,
+        /**
+         * true ＝ 建築師會賣這一張圖紙。
+         *
+         * <p>價格**不寫在設定裡**，是照藍圖裡每一格的建材單價加總再打折算出來的
+         * （見 {@code BlueprintShop}）——手寫的話改一層樓就要記得回頭改價格，
+         * 而忘記改不會有任何徵兆。
+         */
+        boolean sold
 ) {
 
     public static BuildingDef from(String id, Map<String, Object> section) {
@@ -72,7 +80,38 @@ public record BuildingDef(
                 YamlConfig.str(section, "npc", ""),
                 YamlConfig.i(npcOffset, "x", 0),
                 YamlConfig.i(npcOffset, "y", 1),
-                YamlConfig.i(npcOffset, "z", 0));
+                YamlConfig.i(npcOffset, "z", 0),
+                YamlConfig.bool(section, "sold", false));
+    }
+
+    /**
+     * 這張藍圖佔的格數（調色盤裡有定義的才算，空氣與「不要動」的格子不算）。
+     *
+     * <p>價格靠它算，見 {@code BlueprintShop}。
+     */
+    public Map<String, Integer> blockCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (List<String> rows : layers) {
+            for (String row : rows) {
+                for (int x = 0; x < row.length(); x++) {
+                    String block = palette.get(row.charAt(x));
+                    if (block != null) counts.merge(block, 1, Integer::sum);
+                }
+            }
+        }
+        return counts;
+    }
+
+    public int width() {
+        return layers.stream().flatMap(List::stream).mapToInt(String::length).max().orElse(0);
+    }
+
+    public int depth() {
+        return layers.stream().mapToInt(List::size).max().orElse(0);
+    }
+
+    public int height() {
+        return layers.size();
     }
 
     @SuppressWarnings("unchecked")

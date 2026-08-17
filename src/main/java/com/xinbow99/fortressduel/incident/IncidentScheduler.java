@@ -8,6 +8,9 @@ import com.xinbow99.fortressduel.core.DuelEvents;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
+import com.xinbow99.fortressduel.npc.NpcDef;
+import com.xinbow99.fortressduel.npc.NpcManager;
+import com.xinbow99.fortressduel.util.Ground;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.minecraft.ChatFormatting;
@@ -47,6 +50,8 @@ public final class IncidentScheduler {
 
     private final ConfigManager config;
     private final SkillEngine skills;
+    /** {@code action: merchant} 要靠它把商人放到場上。 */
+    private final NpcManager npcs;
 
     /** 每一場對戰各自的倒數，key 用 Duel 物件本身（一場對戰的生命週期內都是同一個實例）。 */
     private final Map<Duel, Integer> countdowns = new HashMap<>();
@@ -54,9 +59,10 @@ public final class IncidentScheduler {
     /** {@link #capMobs} 的節流計數器。全場共用一個就夠——它只是決定「這一 tick 要不要數」。 */
     private int mobCapTicks;
 
-    public IncidentScheduler(ConfigManager config, SkillEngine skills) {
+    public IncidentScheduler(ConfigManager config, SkillEngine skills, NpcManager npcs) {
         this.config = config;
         this.skills = skills;
+        this.npcs = npcs;
     }
 
     public void register() {
@@ -170,6 +176,7 @@ public final class IncidentScheduler {
             }
             case "spawn_mobs" -> spawnMobs(duel, incident);
             case "raid" -> raid(duel, incident);
+            case "merchant" -> merchant(duel, incident);
             case "meteor" -> meteorShower(duel, incident);
             case "modifier" -> applyModifier(duel, incident);
             default -> FortressDuel.LOGGER.warn("Incident {} uses action '{}' which is not implemented yet",
@@ -189,6 +196,39 @@ public final class IncidentScheduler {
         }
         duel.applyModifier(incident.modifier(), incident.displayName(),
                 incident.factor(), incident.durationSeconds() * 20);
+    }
+
+    /**
+     * 在雙方各自的陣地放一個商人。
+     *
+     * <p>{@code npc} 欄位指向 npcs.yml 的哪一個。**兩邊各一個**，理由跟 {@code raid} 一樣：
+     * 這是一個給雙方的機會，不是給先跑到中場的人的獎勵——不對稱的話它會變成「誰離中間近」
+     * 決定的，而那跟玩得好不好無關。
+     *
+     * <p>他跟軍火商一樣**打得死、不會重生**，而且對戰結束時跟著被清掉。所以「先做掉對方的
+     * 建築師」是一條真的戰術，跟做掉軍火商同一個道理。
+     */
+    private void merchant(Duel duel, IncidentDef incident) {
+        if (incident.npc().isBlank()) {
+            FortressDuel.LOGGER.warn("Incident {} uses action 'merchant' but has no npc field", incident.id());
+            return;
+        }
+        NpcDef def = npcs.npc(incident.npc());
+        if (def == null) {
+            FortressDuel.LOGGER.warn("Incident {} references NPC '{}' which is not defined in npcs.yml",
+                    incident.id(), incident.npc());
+            return;
+        }
+
+        ServerLevel level = duel.arena().level();
+        // 放在熊貓圈旁邊，跟 raid 用同一個落點邏輯——那是「你的陣地」最明確的座標
+        int spread = Math.max(3, config.settings().penRadius() + 3);
+        for (BlockPos pen : new BlockPos[]{duel.arena().penA(), duel.arena().penB()}) {
+            BlockPos spot = Ground.onSurface(level, 
+                    pen.getX() + level.getRandom().nextInt(spread * 2 + 1) - spread,
+                    pen.getZ() + level.getRandom().nextInt(spread * 2 + 1) - spread);
+            npcs.spawn(level, def, spot, level.getRandom().nextFloat() * 360f);
+        }
     }
 
     /**

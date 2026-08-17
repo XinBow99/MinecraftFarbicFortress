@@ -11,6 +11,7 @@
 #                       message     只公告，沒有其他效果
 #                       spawn_mobs  在場中央生成 mobs 列出的怪
 #                       raid        在**雙方各自的熊貓圈旁邊**放一批怪（家裡的麻煩）
+#                       merchant    在雙方陣地各放一個商人（npc 欄位指定是誰）
 #                       meteor      在雙方的熊貓圈上方落下一批已點燃的 TNT
 #                       modifier    有時限的全域修正（重力／武器傷害／方塊受到的傷害）
 #   modifier            action = modifier 時要改什麼：gravity / weapon_damage / block_damage
@@ -206,3 +207,20 @@ incidents:
     mobs: [fox_thief]
     music: minecraft:entity.fox.ambient
     music_pitch: 1.2
+
+  # 建築師巴布帶著圖紙來了，兩邊各一個。買一張右鍵地面，整棟直接長出來。
+  #
+  # 它賣的不是強度是**時間**：同樣的錢自己一格一格擺也蓋得出來，圖紙省掉的是那三分鐘，
+  # 而那三分鐘裡場上什麼都沒有發生。所以只打八折——要讓它有理由買，又不能變成「不買就虧」。
+  #
+  # 他打得死、不會重生，所以「先做掉對方的建築師」是一條真的戰術。
+  #
+  # weight 16：全部權重加起來 93 + 16 = 109，也就是大約 15%
+  architect_bob:
+    name: 建築師巴布
+    description: 一個帶著圖紙的商人出現在兩邊的陣地，買一張就能整棟蓋起來。
+    weight: 16
+    action: merchant
+    npc: architect_bob
+    music: minecraft:entity.villager.yes
+    music_pitch: 0.9

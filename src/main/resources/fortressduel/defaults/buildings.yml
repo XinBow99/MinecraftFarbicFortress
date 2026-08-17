@@ -11,6 +11,8 @@
 #   layers      由下往上，一層一個 y；一層裡一列一個 z（北→南），一列裡一個字元一個 x（西→東）
 #   npc         要放在裡面的 NPC id（對應 npcs.yml）
 #   npc_offset  NPC 相對建築原點（也就是 offset 那一格）的位置
+#   sold        true = 建築師巴布會賣這張圖紙。offset 對圖紙沒有意義（玩家自己選點，
+#               程式會把 offset 抵消掉），所以標了 sold 的藍圖不用寫 offset
 #
 # 對戰結束時整棟會跟著競技場一起還原，NPC 也會被移除。
 
@@ -118,3 +120,202 @@ buildings:
       - ["###",
          "#.#",
          "###"]
+
+  # ---- 建築師巴布賣的圖紙（sold: true）----
+  #
+  # 這兩棟是**給玩家省時間的**，不是新的戰術。同樣的錢自己一格一格擺也蓋得出來，圖紙省掉
+  # 的是那三分鐘——而那三分鐘裡場上什麼都沒有發生，那正是這個遊戲最無聊的一段。
+  #
+  # 價格不寫在這裡：照下面每一格的建材單價加總再打八折算出來（見 BlueprintShop）。
+  # 所以改一層樓高度、換一種材質，價格會自己跟著動。
+
+  # 10 寬 × 6 高的一片鐵牆。一格厚——它是掩體不是堡壘，繞得過去。
+  # 鐵塊 $5 一格 × 60 格 = $300，打八折 $240
+  iron_wall:
+    name: 反移民圍牆
+    sold: true
+    palette:
+      I: minecraft:iron_block
+    layers:
+      - ["IIIIIIIIII"]
+      - ["IIIIIIIIII"]
+      - ["IIIIIIIIII"]
+      - ["IIIIIIIIII"]
+      - ["IIIIIIIIII"]
+      - ["IIIIIIIIII"]
+
+  # 20 格高的空心石塔，外徑 7×7（半徑 3），裡面一路梯子爬到頂。
+  #
+  # 底下兩層的南面留一格門進去。梯子貼著北牆（facing=south＝梯面朝南，也就是背靠北牆），
+  # 從 y=0 一路長到頂，所以爬上去之後可以直接踩上塔緣。
+  #
+  # 石頭 $1.25 一格 × 478 格 ≈ $598，打八折 ≈ $478。梯子不在架上，算 0——
+  # 玩家本來就買不到它，而它是附屬品，不該憑空生出一個價格
+  burj:
+    name: 哈里發塔
+    sold: true
+    palette:
+      S: minecraft:stone
+      L: minecraft:ladder[facing=south]
+      ".": minecraft:air
+    layers:
+      # y = 0
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSS.SSS"]
+      # y = 1
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSS.SSS"]
+      # y = 2
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 3
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 4
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 5
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 6
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 7
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 8
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 9
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 10
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 11
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 12
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 13
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 14
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 15
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 16
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 17
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 18
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]
+      # y = 19
+      - ["SSSSSSS",
+         "S..L..S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "S.....S",
+         "SSSSSSS"]

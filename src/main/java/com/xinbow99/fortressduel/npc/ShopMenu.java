@@ -3,6 +3,8 @@ package com.xinbow99.fortressduel.npc;
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.battle.Duel;
 import com.xinbow99.fortressduel.battle.DuelManager;
+import com.xinbow99.fortressduel.building.Blueprint;
+import com.xinbow99.fortressduel.building.BuildingDef;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.DesignRegistry;
@@ -208,6 +210,16 @@ public final class ShopMenu extends ChestMenu {
                 if (design != null) {
                     describeWeapon(lore, config.designs().toWeapon(design.vector()), player, weapons);
                 }
+            }
+            case "blueprint" -> {
+                BuildingDef def = config.buildings() == null ? null : config.buildings().byId(entry.weapon());
+                if (def != null) {
+                    lore.add(Component.literal(String.format("%d × %d × %d 格",
+                            def.width(), def.height(), def.depth())).withStyle(ChatFormatting.GRAY));
+                }
+                lore.add(Component.literal("右鍵地面：整棟直接蓋起來").withStyle(ChatFormatting.GRAY));
+                lore.add(Component.literal("只能蓋在自己半場，而且要整棟放得下")
+                        .withStyle(ChatFormatting.DARK_GRAY));
             }
             case "worker" -> describeWorker(lore, entry, player, jobs);
             default -> {
@@ -455,6 +467,7 @@ public final class ShopMenu extends ChestMenu {
             case "launcher" -> giveLauncher();
             case "ammo" -> giveAmmo(entry);
             case "item" -> giveItem(entry);
+            case "blueprint" -> giveBlueprint(entry);
             case "disc" -> giveDisc(entry);
             case "design" -> giveDesign(entry);
             case "worker" -> hireWorker(entry);
@@ -542,6 +555,17 @@ public final class ShopMenu extends ChestMenu {
         }
 
         player.getInventory().placeItemBackInInventory(SongDisc.create(entry));
+        return true;
+    }
+
+    /** 給一張圖紙。{@code weapon} 欄位借來放藍圖 id，見 {@link BlueprintShop}。 */
+    private boolean giveBlueprint(ShopEntry entry) {
+        BuildingDef def = config.buildings() == null ? null : config.buildings().byId(entry.weapon());
+        if (def == null) {
+            deny("這張圖紙設定錯誤（buildings.yml 裡沒有 " + entry.weapon() + "）");
+            return false;
+        }
+        player.getInventory().placeItemBackInInventory(Blueprint.create(def));
         return true;
     }
 

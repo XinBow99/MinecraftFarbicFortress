@@ -2,6 +2,7 @@ package com.xinbow99.fortressduel.npc;
 
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.battle.DuelManager;
+import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.AmmoVector;
@@ -150,6 +151,37 @@ public final class NpcManager {
             loaded.put(e.getKey(), withMaterials(shop, materials));
         }
         this.shops = Map.copyOf(loaded);
+    }
+
+    /**
+     * 把 buildings.yml 裡標了 {@code sold} 的藍圖掛成建築師那間店。
+     *
+     * <p>**要排在 {@link #loadShops} 後面**，理由跟 {@link #loadSongs} 一樣：它是併進同一張
+     * 表的，先跑會被整個蓋掉。而且它要用建材的單價，那份單價得先從架上讀出來。
+     */
+    public void loadBlueprints(BuildingPlacer buildings) {
+        ShopDef architect = BlueprintShop.from(buildings, blockPrices(), "建築師巴布");
+        Map<String, ShopDef> merged = new LinkedHashMap<>(shops);
+        merged.put(architect.id(), architect);
+        this.shops = Map.copyOf(merged);
+    }
+
+    /**
+     * 建材一格多少錢，從軍火商架上的商品回推（{@code price ÷ amount}）。
+     *
+     * <p>圖紙的價格靠它算。回推而不是另外寫一份表：另外寫的那份會跟架上的價格漂移，
+     * 而漂掉的那天沒有人會發現——這份檔案裡到處都是同一條規矩。
+     */
+    private Map<String, Double> blockPrices() {
+        Map<String, Double> prices = new LinkedHashMap<>();
+        for (ShopDef shop : shops.values()) {
+            for (ShopEntry entry : shop.entries()) {
+                if (!"item".equals(entry.type()) || entry.item().isEmpty()) continue;
+                if (entry.amount() <= 0) continue;
+                prices.put(entry.item(), (double) entry.price() / entry.amount());
+            }
+        }
+        return prices;
     }
 
     /**

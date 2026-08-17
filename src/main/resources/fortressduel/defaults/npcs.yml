@@ -72,3 +72,14 @@ npcs:
     shop: ""
     health: 60
     name_visible: true
+
+# 建築師巴布。由突發事件放到場上（incidents.yml 的 architect_bob），兩邊各一個。
+#
+# 跟軍火商一樣打得死、不會重生——所以「先做掉對方的建築師」是一條真的戰術。
+# 血量比軍火商低：他是這一輪的機會，不是整場的命脈，守不住就是守不住
+architect_bob:
+  name: 建築師巴布
+  entity: minecraft:villager
+  shop: architect
+  health: 60
+  name_visible: true
