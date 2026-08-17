@@ -6,6 +6,7 @@ import com.xinbow99.fortressduel.util.Ground;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
@@ -63,6 +64,42 @@ public final class MobSpawner {
             cleared++;
         }
         return cleared;
+    }
+
+    /**
+     * 把場上的怪壓回上限以內，回傳收掉了幾隻。
+     *
+     * <p>這是**效能的煞車，不是平衡的旋鈕**。突發事件、寶貝蛋、以及會召喚與分裂的技能都會
+     * 往場上加怪，而它們互相不知道對方生了多少——連續幾個生怪事件疊在一起，數量是相加的，
+     * 沒有任何一條規則會把它收斂回來。
+     *
+     * <p>收的是**最老的那幾隻**，不是隨機挑。老的多半是前幾波留下來、卡在角落沒人理的，
+     * 那正是純粹在吃效能的部分；而剛降臨的那一波是玩家現在正在應付的東西，抽掉它會讓事件
+     * 的張力憑空消失。隨機挑則兩種都可能中，包括玩家眼前正在打的那一隻。
+     *
+     * <p>用 {@code discard()} 而不是 {@code kill()}：後者會觸發死亡事件，也就是**賞金會照發**
+     * ——那等於系統自己印錢，而且會記在最後打過牠的人頭上。冒一陣煙是為了讓它看起來像原版
+     * 的自然消失，而不是一隻怪憑空不見。
+     *
+     * @param max 場上最多幾隻；{@code <= 0} ＝ 不限制
+     */
+    public static int enforceCap(ServerLevel level, AABB box, int max) {
+        if (max <= 0) return 0;
+
+        List<Entity> alive = new ArrayList<>(level.getEntities(EntityTypeTest.forClass(Entity.class), box,
+                e -> e.entityTags().contains(DUEL_MOB_TAG) && e.isAlive()));
+        int excess = alive.size() - max;
+        if (excess <= 0) return 0;
+
+        // tickCount 大 ＝ 活得久，所以降冪排序之後前面那幾隻就是最老的
+        alive.sort((a, b) -> Integer.compare(b.tickCount, a.tickCount));
+        for (int i = 0; i < excess; i++) {
+            Entity entity = alive.get(i);
+            level.sendParticles(ParticleTypes.POOF,
+                    entity.getX(), entity.getY(0.5), entity.getZ(), 8, 0.2, 0.2, 0.2, 0.02);
+            entity.discard();
+        }
+        return excess;
     }
 
     /**

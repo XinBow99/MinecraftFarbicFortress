@@ -56,6 +56,8 @@ public final class SongShop {
 
     public static ShopDef from(YamlConfig cfg) {
         List<ShopEntry> entries = new ArrayList<>();
+        // 音效 id → 歌名。合進彈藥的音效在向量裡只有 id，說明要靠這張表翻回中文
+        Map<String, String> names = new java.util.LinkedHashMap<>();
 
         int index = 0;
         for (Map.Entry<String, Map<String, Object>> e : cfg.getSections("songs").entrySet()) {
@@ -84,9 +86,11 @@ public final class SongShop {
                     1,
                     Map.of(),
                     YamlConfig.str(section, "lore", "")));
+            names.put(sound, YamlConfig.str(section, "name", id));
             index++;
         }
 
+        SongDisc.installNames(names);
         return new ShopDef(SHOP_ID, cfg.getString("title", "音樂家"), List.copyOf(entries));
     }
 }

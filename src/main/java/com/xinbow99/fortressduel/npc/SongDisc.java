@@ -31,9 +31,13 @@ import java.util.Optional;
  * 影響得了氣氛——衝進對面院子的那一刻按下去，跟站在商店前面點一首，是兩件事。所以買的是
  * 一個隨身的按鈕，不是一次播放。
  *
- * <p>買到就是你的，**不會用掉、對戰結束也不收回**（沒有打 {@code DuelItems} 的標記）。
+ * <p>右鍵播放**不會用掉**，放完可以再放，對戰結束也不收回（沒有打 {@code DuelItems} 的標記）。
  * 一次性的話玩家會捨不得用，而捨不得用的道具等於不存在；而它給不了任何戰鬥優勢，
  * 留著也不破壞平衡。
+ *
+ * <p>**但拿去合成會被吃掉**（見 {@code CraftingBench.consume}）。那不是同一件事：合進彈藥
+ * 之後那份設計會永久帶著這首歌、量產出來的每一發都帶著，所以那張光碟確實是被用掉的。
+ * 反正音樂家那裡再拿一張是免費的。
  *
  * <h2>為什麼不用原版唱片機那條路</h2>
  * 光碟長得像原版唱片，但 {@link DataComponents#JUKEBOX_PLAYABLE} 是被拔掉的——留著的話塞進
@@ -49,6 +53,26 @@ public final class SongDisc {
 
     /** 一張光碟記著的東西：放哪個音效、放多久。 */
     public record Song(String sound, int lengthSeconds) {
+    }
+
+    /**
+     * 音效 id → 歌名。
+     *
+     * <p>合進彈藥的音效在向量裡只留得下 id（那是設計的身分，必須穩定），但彈藥的說明要給
+     * 人看——沒有這張表，玩家看到的是 {@code fortress-duel:xue_hua_piao_piao} 而不是「雪花飄飄」。
+     *
+     * <p>由 {@link SongShop#from} 在載入曲目時填，所以它跟著 songs.yml 走，
+     * {@code /duel reload} 之後也是對的。
+     */
+    private static volatile java.util.Map<String, String> names = java.util.Map.of();
+
+    public static void installNames(java.util.Map<String, String> soundToName) {
+        names = java.util.Map.copyOf(soundToName);
+    }
+
+    /** 這個音效的歌名；不認得就回傳 id 本身（總比顯示空白好）。 */
+    public static String nameOf(String sound) {
+        return names.getOrDefault(sound, sound);
     }
 
     private SongDisc() {

@@ -8,9 +8,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.item.component.UseCooldown;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 給一份自製彈藥一個看得出來是它的長相。
@@ -85,6 +87,9 @@ public final class AmmoLook {
     public static void apply(ItemStack stack, AmmoVector vector, WeaponDef weapon) {
         stack.set(DataComponents.ITEM_MODEL, eggFor(vector));
         stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+        // 開火時蓋在這疊上的灰色遮罩要獨立分組，見 cooldownGroup
+        stack.set(DataComponents.USE_COOLDOWN,
+                new UseCooldown(weapon.cooldownTicks() / 20f, Optional.of(cooldownGroup(vector))));
 
         // 玩家取過名字就用他的，沒有就用「主材料 + 總數」推出來的那個
         String name = readName(stack).orElseGet(weapon::displayName);
@@ -96,9 +101,14 @@ public final class AmmoLook {
                 weapon.damage(), weapon.pellets(), weapon.splashRadius())));
         lines.add(line(String.format("初速 %.2f   重力 %.4f   45°射程 %.0f 格",
                 weapon.projectileSpeed(), weapon.gravity(), weapon.maxRange())));
-        lines.add(line(String.format("散佈 %.2f°   每秒 %.1f 發",
-                weapon.spreadDegrees(), 20.0 / weapon.cooldownTicks())));
+        lines.add(line(String.format("散佈 %.2f°   每秒 %.1f 發（%s）",
+                weapon.spreadDegrees(), 20.0 / weapon.cooldownTicks(),
+                weapon.auto() ? "按住連射" : "單發")));
         lines.add(line("材料 " + materials(vector)));
+        if (vector.songCount() > 0) {
+            lines.add(Component.literal("♪ " + songs(vector))
+                    .withStyle(ChatFormatting.LIGHT_PURPLE));
+        }
         stack.set(DataComponents.LORE, new ItemLore(lines));
     }
 
@@ -125,11 +135,31 @@ public final class AmmoLook {
         return Component.literal(text).withStyle(ChatFormatting.GRAY);
     }
 
+    /**
+     * 這一發開火時放的歌。
+     *
+     * <p>同一首放兩張就寫 ×2——它真的會被送兩次，說明要跟耳朵聽到的一致。
+     */
+    private static String songs(AmmoVector vector) {
+        java.util.Map<String, Integer> tally = new java.util.LinkedHashMap<>();
+        for (String sound : vector.songs()) {
+            tally.merge(com.xinbow99.fortressduel.npc.SongDisc.nameOf(sound), 1, Integer::sum);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        tally.forEach((name, n) -> {
+            if (!sb.isEmpty()) sb.append(' ');
+            sb.append(name);
+            if (n > 1) sb.append('×').append(n);
+        });
+        return sb.toString();
+    }
+
     /** 材料清單。顯示中文名稱而不是 id——tooltip 是給玩家看的，不是給設定檔看的。 */
     private static String materials(AmmoVector vector) {
         MaterialRegistry registry = materials;
         StringBuilder sb = new StringBuilder();
-        vector.counts().forEach((id, n) -> {
+        vector.materials().forEach((id, n) -> {
             if (!sb.isEmpty()) sb.append(' ');
             MaterialRegistry.MaterialDef def = registry == null ? null : registry.byId(id);
             sb.append(def == null ? id : def.displayName()).append('×').append(n);
@@ -138,10 +168,28 @@ public final class AmmoLook {
     }
 
     /**
+     * 這份設計的冷卻分組。
+     *
+     * <p>開火時副手那疊會被蓋上原版的灰色冷卻遮罩（見 {@code WeaponSystem.showCooldown}），
+     * 而原版預設**按物品種類分組**——所有自製設計的本體都是同一種磚，不分開的話換一份設計
+     * 會直接繼承上一份剩下的遮罩，讀數是錯的。
+     *
+     * <p>用向量的雜湊而不是 {@link AmmoVector#key()} 本身：key 裡有 {@code :} 與 {@code ;}，
+     * 那兩個字元放進 {@link Identifier} 的路徑會直接丟例外。
+     */
+    private static Identifier cooldownGroup(AmmoVector vector) {
+        return Identifier.fromNamespaceAndPath("fortress-duel",
+                "design/" + Integer.toHexString(vector.key().hashCode()));
+    }
+
+    /**
      * 這份設計長成哪一顆蛋。
      *
      * <p>用 {@link AmmoVector#key()} 的雜湊而不是亂數：外觀必須是配方的函數。
-     * 取絕對值再取模——{@code hashCode} 可能是負的，而負的索引會直接丟例外。
+     * 取模前先 floorMod——{@code hashCode} 可能是負的，而負的索引會直接丟例外。
+     *
+     * <p>合進去的音效也在 key 裡，所以**換一首歌就換一顆蛋**。那是對的：彈道相同但開火
+     * 聲音不同的兩份設計就是兩份設計，架上與背包裡都該分得出來。
      */
     private static Identifier eggFor(AmmoVector vector) {
         List<Identifier> all = eggs();

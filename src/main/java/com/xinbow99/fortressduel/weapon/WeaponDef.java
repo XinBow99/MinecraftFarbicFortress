@@ -59,12 +59,6 @@ public record WeaponDef(
         int pelletsMax,
         /** 散佈：以視線為軸的圓錐半頂角（度）。0 ＝ 完全不散。 */
         double spreadDegrees,
-        /** 後座力：每擊發一次，散佈額外增加幾度。 */
-        double recoil,
-        /** 後座力累積的上限（度）。 */
-        double recoilMax,
-        /** 後座力每秒回復幾度。 */
-        double recoilRecovery,
         /** 裝填間隔（tick）。 */
         int cooldownTicks,
         /** 彈丸初速（格/tick）。 */
@@ -112,17 +106,17 @@ public record WeaponDef(
         int trailColor,
         /** 彈道粒子的大小倍率。只有指定顏色時有意義（dust 才吃得到）。 */
         double trailScale,
-        /** 開火音效。 */
-        Identifier fireSound
+        /**
+         * 開火音效。**可以有好幾個，會同時放。**
+         *
+         * <p>是清單而不是單一個，是因為玩家可以把音樂家的光碟合進彈藥裡，而且可以疊
+         * （見 {@code AmmoDesign.fireSounds}）。weapons.yml 寫一個字串或一個清單都吃得下。
+         */
+        List<Identifier> fireSounds
 ) {
 
     /** 沒寫 knockback 時，用傷害推一個。乘數挑成讓導彈（180）大約推 1.4 格/tick。 */
     private static final double KNOCKBACK_PER_DAMAGE = 0.008;
-    /** 沒寫 recoil 時，用基礎散佈推一個：本來就不準的槍，連射時散得更快。 */
-    private static final double RECOIL_PER_SPREAD = 0.5;
-    /** 後座力上限的預設倍率（相對基礎散佈），並且至少給這麼多度。 */
-    private static final double RECOIL_MAX_FACTOR = 3.0;
-    private static final double RECOIL_MAX_FLOOR = 3.0;
 
     public static WeaponDef from(String id, Map<String, Object> section) {
         double damage = YamlConfig.d(section, "damage", 1.0);
@@ -162,12 +156,6 @@ public record WeaponDef(
                 pellets,
                 Math.max(pellets, YamlConfig.i(section, "pellets_max", pellets)),
                 spread,
-                // 跟 knockback 同樣的理由：既有的設定檔沒有這些鍵，預設 0 等於要玩家刪檔
-                // 才吃得到後座力。用基礎散佈推一個——本來就不準的槍，連射時散得更快
-                Math.max(0, YamlConfig.d(section, "recoil", spread * RECOIL_PER_SPREAD)),
-                Math.max(0, YamlConfig.d(section, "recoil_max",
-                        Math.max(RECOIL_MAX_FLOOR, spread * RECOIL_MAX_FACTOR))),
-                Math.max(0, YamlConfig.d(section, "recoil_recovery", 6.0)),
                 Math.max(1, YamlConfig.i(section, "cooldown_ticks", 20)),
                 YamlConfig.d(section, "projectile_speed", 3.0),
                 YamlConfig.d(section, "gravity", 0.04),
@@ -182,7 +170,32 @@ public record WeaponDef(
                 Identifier.parse(YamlConfig.str(section, "trail_particle", "minecraft:crit")),
                 parseColor(YamlConfig.str(section, "trail_color", ""), id),
                 Math.max(0.1, YamlConfig.d(section, "trail_scale", 1.4)),
-                Identifier.parse(YamlConfig.str(section, "fire_sound", "minecraft:entity.generic.explode")));
+                fireSounds(section));
+    }
+
+    /**
+     * {@code fire_sound} 可以寫一個字串，也可以寫一個清單。
+     *
+     * <pre>{@code
+     * fire_sound: minecraft:entity.arrow.shoot
+     * fire_sound: [minecraft:entity.arrow.shoot, fortress-duel:wow]
+     * }</pre>
+     *
+     * <p>兩種都吃是因為既有的十把武器全部寫的是單一個字串，而清單是為了自製設計才需要的
+     * ——為了一個新功能去改十個現成的設定檔，只會讓那十行變得更難讀。
+     */
+    private static List<Identifier> fireSounds(Map<String, Object> section) {
+        Object raw = section.get("fire_sound");
+        if (raw instanceof List<?> list) {
+            List<Identifier> sounds = new java.util.ArrayList<>(list.size());
+            for (Object entry : list) {
+                Identifier id = Identifier.tryParse(String.valueOf(entry));
+                if (id != null) sounds.add(id);
+            }
+            if (!sounds.isEmpty()) return List.copyOf(sounds);
+        }
+        return List.of(Identifier.parse(
+                YamlConfig.str(section, "fire_sound", "minecraft:entity.generic.explode")));
     }
 
     /**

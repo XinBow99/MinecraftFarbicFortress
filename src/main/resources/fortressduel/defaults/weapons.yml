@@ -40,25 +40,14 @@
 #   pellets           一次擊發幾顆（散彈）。寫 pellets_max 的話每一發在兩者之間重抽
 #   pellets_max       一次最多幾顆。不寫 = 跟 pellets 相同 = 固定顆數
 #   spread_degrees    以視線為軸的圓錐半頂角（度）。彈著點在圓盤上均勻分布
-#   recoil            後座力：每擊發一次散佈額外增加幾度
-#                     不寫的話 = spread_degrees × 0.5，所以舊設定檔不改也會有後座力
-#   recoil_max        後座力累積的上限（度）。不寫 = max(3, spread_degrees × 3)
-#   recoil_recovery   後座力每秒回復幾度。固定速率，不是按比例衰減——
-#                     「停火多久才會恢復準度」要能被背下來
 #
-#                     ※ 這三個欄位共用一個隱形計數器：開一槍 +recoil、每秒 −recoil_recovery、
-#                       上限 recoil_max，而**開槍那一刻的計數器就是散佈角**。
-#
-#                       所以真正決定有沒有效果的是「兩槍之間回復多少」對上「一槍加多少」：
-#                           每發淨增 = recoil − recoil_recovery × (cooldown_ticks / 20)
-#                       淨增 ≤ 0 的話計數器每次都在下一槍之前被扣回 0，後座力完全不存在——
-#                       這七把武器曾經全部踩到這個坑（狙擊的煞車是油門的五倍），而症狀是
-#                       「什麼都沒發生」，不會報錯也看不出來。改任何一個欄位都要重算這條。
-#
-#                       現在的取值原則：淨增 ≈ recoil 的一半，也就是
-#                           recoil_recovery ≈ recoil ÷ (2 × 冷卻秒數)
-#                       全速連射會累積、正常節奏打不出來，分界線落在射速上
-#   cooldown_ticks    裝填間隔（20 tick = 1 秒）
+#                     ※ 這個遊戲**沒有後座力**：散佈角從頭到尾就是 spread_degrees，
+#                       開幾槍都不會變。曾經有過 recoil / recoil_max / recoil_recovery
+#                       三個欄位，拿掉是因為「連射會越打越歪」讓每一把槍打起來都黏手，
+#                       而準度的取捨已經由 spread_degrees 自己表達完了。
+#                       舊設定檔留著那三個鍵不會報錯，只是完全沒有作用
+#   cooldown_ticks    裝填間隔（20 tick = 1 秒）。開火時副手那疊彈藥會蓋上原版的灰色
+#                     冷卻遮罩，所以玩家不用背秒數也看得到什麼時候能打下一發
 #   projectile_speed  彈丸初速（格/tick）
 #   gravity           重力（格/tick²），0 = 直線飛行
 #   lifetime_ticks    飛多久之後自己消失。**這是安全網，不是射程**——彈丸一飛出框線就會被
@@ -114,10 +103,7 @@ weapons:
       min_draw: 0.1
       affects: [speed]
     spread_degrees: 1.0
-    # 全場最溫和的懲罰：連打 14 發才觸頂，而它本來就是給人隨手打的萬用彈
-    recoil: 0.6
-    recoil_max: 4.0
-    recoil_recovery: 0.35
+    # 0.9 秒一發：全場最寬鬆的節奏，它本來就是給人隨手打的萬用彈
     cooldown_ticks: 18
     projectile_speed: 3.0
     gravity: 0.04
@@ -142,12 +128,8 @@ weapons:
       min_draw: 0
       affects: []
     spread_degrees: 3.0
-    # 連射的代價全在這裡：全速潑 3 秒（約 20 發）就散到 9 度，停火 3 秒回復。
-    # 這句話以前是假的——回復 7°/秒 對上 0.15 秒的冷卻，等於每發之間回復 1.05° 而只累積
-    # 0.9°，計數器永遠停在 0。這把武器整個定位建立在「連射會失準」上，而那件事沒有發生過
-    recoil: 0.9
-    recoil_max: 9.0
-    recoil_recovery: 3.0
+    # 連射的代價在散佈與彈藥消耗：3 度的底噪讓它在 20 格外就潑不準，
+    # 而每秒近 7 發等於每秒近 $9。它買的是壓制與近距離的爆發，不是遠射
     cooldown_ticks: 3
     projectile_speed: 3.8
     gravity: 0.03
@@ -183,10 +165,7 @@ weapons:
       min_draw: 0.25
       affects: [damage]
     spread_degrees: 1.6
-    # 拆鐵牆時不能無腦連點：10 發觸頂。它一發破一格鐵塊，沒有節奏限制的話那面牆等於紙做的
-    recoil: 0.8
-    recoil_max: 4.0
-    recoil_recovery: 0.4
+    # 1 秒一發：它一發破一格鐵塊，沒有這個節奏限制的話那面牆等於紙做的
     cooldown_ticks: 20
     projectile_speed: 3.4
     gravity: 0.03
@@ -231,11 +210,7 @@ weapons:
     pellets: 6
     pellets_max: 7
     spread_degrees: 6.0
-    # 散佈本來就大，後座力再疊上去很快就完全失準——這是逼你控制節奏，不是連射武器。
-    # 連開 12 發觸頂，那時候是 6 度底噪 + 12 度後座 = 18 度，等於朝那個方向灑出去而已
-    recoil: 2.0
-    recoil_max: 12.0
-    recoil_recovery: 0.85
+    # 散佈本來就大：6 度在 15 格外就散開三格，這是逼你貼近，不是逼你控制節奏
     cooldown_ticks: 24
     projectile_speed: 2.6
     # 0.05 → 0.035：45 度射程 135 → 193 格。散彈的「短距離武器」定位靠的是**散佈**
@@ -259,30 +234,18 @@ weapons:
     pierce: 0.25
     knockback: 0.45
     # 門檻最高，逼你站定。affects 是空的不是漏寫：spread_degrees 已經是 0，
-    # 力道對散佈再乘一次還是 0——寫 [spread] 只是一句沒有作用的宣告。
-    # 這把武器的準度完全由下面的後座力決定
+    # 力道對散佈再乘一次還是 0——寫 [spread] 只是一句沒有作用的宣告
     charge:
       curve: linear
       min_draw: 0.3
       affects: []
+    # 完全不散：這把槍指哪打哪，限制它的是價格與 30 tick 的裝填，不是準度
     spread_degrees: 0
-    # 單發極準，但連著開就完全失去狙擊的意義——這句話以前是假的。
-    #
-    # 回復曾經是 10°/秒，而冷卻是 1.5 秒，所以每打一發之間會回復 15°，遠超過單發累積的 2.5°。
-    # 換句話說**後座力永遠停在 0**，用最快的速度連打也發發正中紅心。這條在全部七把武器上
-    # 都成立（機槍那句「打滿一梭最後幾發已經散到 9 度」也從來沒有發生過）。
-    #
-    # 1.0°/秒 的算法：每發之間回復 1.5°、單發累積 2.5°，淨增 1.0°。
-    #   連續速射 → 第 2 發 1°、第 5 發 4°、第 9 發觸頂 8°（30 格外偏 4 格，等於打不中）
-    #   每 3 秒一發 → 回復 3° > 累積 2.5°，永遠維持 0°，跟以前完全一樣
     # 所以分界線落在「你有沒有在瞄」：慢慢打的狙擊手不受影響，拿它掃怪的人會越打越歪。
     #
     # 這是衝著中場搶賞金來的。賞金是先殺先得、贏者全拿，所以重點不是「每塊錢多少傷害」
     # （狙擊本來就是全場最貴的），是**清場速度**——平直彈道 + 永不失準的話，別人還在算
     # 拋物線落點，狙擊已經一發一隻把整群收乾淨了。現在它得慢下來，那段時間就是別人的機會
-    recoil: 2.5
-    recoil_max: 8.0
-    recoil_recovery: 1.0
     cooldown_ticks: 30
     projectile_speed: 5.0
     # 彈道平直：重力極低（平射約 93 格才落地），背下來的落點不會隨距離大幅改變。
@@ -308,11 +271,8 @@ weapons:
       min_draw: 0.2
       affects: [speed]   # 只影響射程，傷害維持固定，平衡不位移
     spread_degrees: 1.6
-    # 影響最小的一把：5 度封頂在 20 格外只偏 1.75 格，而它的濺射半徑就有 2.5 格——
-    # 對高爆彈來說後座力接近裝飾。留著是為了一致性，真正限制它的是 2 秒的冷卻
-    recoil: 1.2
-    recoil_max: 5.0
-    recoil_recovery: 0.3
+    # 1.6 度在 20 格外只偏 0.56 格，而它的濺射半徑就有 2.5 格——散佈對高爆彈幾乎沒有意義，
+    # 真正限制它的是 2 秒的冷卻
     cooldown_ticks: 40
     projectile_speed: 2.4
     # 0.06 → 0.03：舊值的 45 度最大射程只有 96 格，而場地最大可以到 132 格見方，
@@ -337,10 +297,7 @@ weapons:
       min_draw: 0
       affects: []
     spread_degrees: 0.3
-    # 每秒 10 發，單發加一點點就會在持續射擊時明顯散開：照射 4 秒（40 發）觸頂 5 度
-    recoil: 0.25
-    recoil_max: 5.0
-    recoil_recovery: 1.25
+    # 每秒 10 發。限制它的是彈藥消耗與 0 重力帶來的固定彈道，不是準度
     cooldown_ticks: 2
     # 一 tick 飛 20 格 + 零重力 ＝ 幾乎是即時命中的直線光束。
     # 壽命曾經是 6，那等於一道 120 格的硬牆——雙方站得遠一點時它連場地都跨不過去，
@@ -367,10 +324,6 @@ weapons:
       min_draw: 0.2
       affects: [speed]
     spread_degrees: 0
-    # 一次一發、80 tick 裝填，後座力沒有意義
-    recoil: 0.0
-    recoil_max: 0.0
-    recoil_recovery: 6.0
     cooldown_ticks: 80
     projectile_speed: 2.0
     gravity: 0
@@ -409,9 +362,6 @@ weapons:
       min_draw: 0.2
       affects: [speed]
     spread_degrees: 1.6
-    recoil: 1.0
-    recoil_max: 4.0
-    recoil_recovery: 0.25
     cooldown_ticks: 60
     projectile_speed: 2.4
     # 跟高爆彈一起從 0.06 調到 0.03（它整組飛行參數都照抄高爆彈）
@@ -440,9 +390,6 @@ weapons:
       min_draw: 0.2
       affects: [speed]
     spread_degrees: 0
-    recoil: 0.0
-    recoil_max: 0.0
-    recoil_recovery: 6.0
     cooldown_ticks: 120
     projectile_speed: 1.4
     gravity: 0

@@ -35,6 +35,10 @@ public record IncidentDef(
         /** 持續幾秒。 */
         int durationSeconds,
 
+        // ---- action ＝ merchant 專用 ----
+        /** 要放哪一個 NPC（對應 npcs.yml）。 */
+        String npc,
+
         // ---- action ＝ meteor 專用 ----
         /** 每一方的頭上各落幾顆。 */
         int meteorCount,
@@ -70,6 +74,7 @@ public record IncidentDef(
                 YamlConfig.str(section, "modifier", ""),
                 YamlConfig.d(section, "factor", 1.0),
                 Math.max(1, YamlConfig.i(section, "duration_seconds", 60)),
+                YamlConfig.str(section, "npc", ""),
                 Math.max(1, YamlConfig.i(section, "meteor_count", 10)),
                 Math.max(1, YamlConfig.i(section, "meteor_height", 26)),
                 Math.max(0, YamlConfig.i(section, "meteor_spread", 8)),
