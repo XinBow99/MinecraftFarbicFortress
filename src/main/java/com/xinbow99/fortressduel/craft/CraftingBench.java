@@ -22,11 +22,17 @@ import net.minecraft.world.item.ItemStack;
  * 無法反序列化，等於強制所有人裝 mod。改成 mixin 進選單自己算結果，客戶端看到的只是
  * 「結果格裡出現了一個物品」——純物品同步，原版客戶端完全無感。
  *
+ * <h2>一格疊幾個就算幾個</h2>
+ * 放九個火藥在同一格，那份設計就記著九個火藥，而那九個會被整疊吃掉。所以一次合成的上限
+ * 是九疊，不是九個。
+ *
+ * <p>守恆**不是**靠「一格只算一個」維持的，是靠**算的規則與扣的規則是同一條**：
+ * {@link #offerFor} 讀 {@code getCount()}，{@link #consume} 就扣 {@code getCount()}。
+ * 只要有一邊看數量、另一邊不看，就會變成複製（算得多扣得少）或蒸發（反過來）。
+ *
  * <h2>為什麼一次只產出一個</h2>
- * 產出一疊的話會變成無限複製：9 個材料做出 8 發、每發都記著「9 個材料」，把那 8 發丟回去
- * 就是 72 個材料。而原版的合成**每一格只消耗 1 個**，所以「一次最多 9 個材料 → 一個產物」
- * 天生就是守恆的。要突破 9 格的上限就得先做兩個原型再合起來——那是一個看得見的工程，
- * 不是漏洞。
+ * 產出一疊的話會變成無限複製：一份設計做出 8 發、每發都記著整個向量，把那 8 發丟回去
+ * 就是 8 倍的材料。所以產物永遠是**一個**，它記著的就是這次吃掉的那些。
  *
  * <p>數量交給軍火商量產（用錢買），工作台只負責**設計**。
  */
@@ -130,11 +136,14 @@ public final class CraftingBench {
                 if (!isPrototype(stack)) {
                     return Offer.problem("軍火商量產的彈藥不能當材料回收——只有工作台做出來的設計圖可以。");
                 }
-                vector = vector.plus(existing);
+                vector = vector.plus(existing, stack.getCount());
                 continue;
             }
 
-            // 音樂家的光碟：把那首歌記進向量。它不推任何一條軸，純粹是開火時放什麼
+            // 音樂家的光碟：把那首歌記進向量。它不推任何一條軸，純粹是開火時放什麼。
+            //
+            // **一格只算一首，不看疊了幾張**：光碟是不消耗的（見 consume），照數量算的話
+            // 一疊就能白拿好幾軌，而「一格一首」也比較好在腦子裡對應
             SongDisc.Song song = SongDisc.read(stack).orElse(null);
             if (song != null) {
                 vector = vector.plus(AmmoVector.songKey(song.sound()), 1);
@@ -145,7 +154,7 @@ public final class CraftingBench {
                     config.materials().byItem(BuiltInRegistries.ITEM.getKey(stack.getItem()));
             if (material == null) return Offer.PASS;   // 不認得 → 交給原版
 
-            vector = vector.plus(material.id(), 1);
+            vector = vector.plus(material.id(), stack.getCount());
         }
 
         if (slotsUsed == 0) return Offer.PASS;
@@ -242,7 +251,9 @@ public final class CraftingBench {
             // 不提供任何數值、也拆不回材料——豁免它換不到任何東西，只省下一趟回去點歌
             if (SongDisc.read(stack).isPresent()) continue;
 
-            grid.removeItem(i, 1);
+            // **整疊吃掉**，跟 offerFor 那邊「整疊都算進去」是同一條規則。
+            // 兩邊一起看數量才守恆——只要有一邊看、另一邊不看，就會變成複製或蒸發
+            grid.removeItem(i, stack.getCount());
         }
     }
 }

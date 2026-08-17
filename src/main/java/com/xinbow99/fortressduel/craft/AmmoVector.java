@@ -124,6 +124,18 @@ public record AmmoVector(Map<String, Integer> counts) {
     }
 
     /**
+     * 把另一份設計加進來 {@code times} 次。
+     *
+     * <p>給「一格疊了好幾個原型」用：那一格會被整疊吃掉，所以它貢獻的就是整疊的份量。
+     */
+    public AmmoVector plus(AmmoVector other, int times) {
+        if (times <= 0) return this;
+        Map<String, Integer> sum = new TreeMap<>(counts);
+        other.counts.forEach((id, n) -> sum.merge(id, n * times, Integer::sum));
+        return new AmmoVector(sum);
+    }
+
+    /**
      * 這份設計的身分。同一組材料永遠得到同一個字串，不管它是怎麼被組出來的——
      * 一次放九個火藥，跟先做兩個原型再合起來，結果是同一份設計，也就長得一樣。
      */
