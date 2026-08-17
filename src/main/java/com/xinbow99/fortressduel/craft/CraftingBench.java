@@ -142,11 +142,11 @@ public final class CraftingBench {
 
             // 音樂家的光碟：把那首歌記進向量。它不推任何一條軸，純粹是開火時放什麼。
             //
-            // **一格只算一首，不看疊了幾張**：光碟是不消耗的（見 consume），照數量算的話
-            // 一疊就能白拿好幾軌，而「一格一首」也比較好在腦子裡對應
+            // 跟材料同一條規則（照數量算、照數量扣），不特別處理——而原版唱片的堆疊上限
+            // 本來就是 1，所以實際上一格永遠就是一張
             SongDisc.Song song = SongDisc.read(stack).orElse(null);
             if (song != null) {
-                vector = vector.plus(AmmoVector.songKey(song.sound()), 1);
+                vector = vector.plus(AmmoVector.songKey(song.sound()), stack.getCount());
                 continue;
             }
 
@@ -244,15 +244,12 @@ public final class CraftingBench {
             ItemStack stack = grid.getItem(i);
             if (stack.isEmpty()) continue;
 
-            // 光碟不吃掉。它是買斷制的（見 SongDisc：不會用掉、對戰結束也不收回），
-            // 而合成本來就不該把那個承諾收回去。
-            //
-            // 這不會破壞「每格消耗 1」那條守恆：那條規則存在的目的是防材料複製，而光碟
-            // 不提供任何數值、也拆不回材料——豁免它換不到任何東西，只省下一趟回去點歌
-            if (SongDisc.read(stack).isPresent()) continue;
-
             // **整疊吃掉**，跟 offerFor 那邊「整疊都算進去」是同一條規則。
-            // 兩邊一起看數量才守恆——只要有一邊看、另一邊不看，就會變成複製或蒸發
+            // 兩邊一起看數量才守恆——只要有一邊看、另一邊不看，就會變成複製或蒸發。
+            //
+            // 光碟也一樣吃掉。它在右鍵播放那條路上仍然是買斷的（放完可以再放、對戰結束
+            // 不收回），但合進彈藥是**另一回事**：那份設計會永久帶著這首歌、量產出來的
+            // 每一發都帶著，所以那張光碟是被用掉的。豁免它只會讓工作台多一條要記的例外
             grid.removeItem(i, stack.getCount());
         }
     }
