@@ -4,6 +4,7 @@ import com.xinbow99.fortressduel.weapon.ChargeCurve;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import net.minecraft.resources.Identifier;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -82,7 +83,7 @@ public final class AmmoDesign {
                 Identifier.parse("minecraft:crit"),
                 trailColor(vector),
                 1.4,
-                Identifier.parse("minecraft:entity.arrow.shoot"));
+                fireSounds(vector));
     }
 
     private double axis(AmmoVector vector, String attribute) {
@@ -123,13 +124,42 @@ public final class AmmoDesign {
         return (int) Math.max(1, Math.round(ticks));
     }
 
-    /** 軌跡顏色由投入最多的那一軸決定，所以看一眼曳光就知道對面帶的是什麼路線的彈。 */
-    private static int trailColor(AmmoVector vector) {
-        String dominant = vector.counts().entrySet().stream()
+    /**
+     * 這份設計開火時放什麼。
+     *
+     * <p>沒放光碟就是原版的弓聲；放了就**改放那幾首**，而不是弓聲再加上去——三首歌上面
+     * 再疊一聲「咻」只是噪音，而歌本身已經是足夠清楚的開火回饋了。
+     *
+     * <p>同一首放兩張就會在清單裡出現兩次，也就會被送兩次：那正是把兩張塞進去的人想要的。
+     */
+    private static List<Identifier> fireSounds(AmmoVector vector) {
+        List<String> songs = vector.songs();
+        if (songs.isEmpty()) return List.of(Identifier.parse("minecraft:entity.arrow.shoot"));
+
+        List<Identifier> sounds = new ArrayList<>(songs.size());
+        for (String song : songs) {
+            Identifier id = Identifier.tryParse(song);
+            if (id != null) sounds.add(id);
+        }
+        return sounds.isEmpty() ? List.of(Identifier.parse("minecraft:entity.arrow.shoot")) : sounds;
+    }
+
+    /**
+     * 投入最多的那一種**材料**。
+     *
+     * <p>要走 {@code materials()} 不能走 {@code counts()}：音效也住在同一個向量裡，
+     * 而三張光碟會蓋過兩個火藥變成「主材料」——那會讓曳光顏色與預設名稱跟著音效跑。
+     */
+    private static String dominant(AmmoVector vector) {
+        return vector.materials().entrySet().stream()
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("");
-        return switch (dominant) {
+    }
+
+    /** 軌跡顏色由投入最多的那一軸決定，所以看一眼曳光就知道對面帶的是什麼路線的彈。 */
+    private static int trailColor(AmmoVector vector) {
+        return switch (dominant(vector)) {
             case "powder" -> 0xFF5A2A;      // 火藥：橙紅
             case "propellant" -> 0xFFE9A8;  // 推進：淡金
             case "guidance" -> 0x5AC8FF;    // 導引：天藍
@@ -142,11 +172,7 @@ public final class AmmoDesign {
     }
 
     private String displayName(AmmoVector vector) {
-        String dominant = vector.counts().entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElse(null);
-        MaterialRegistry.MaterialDef def = dominant == null ? null : materials.byId(dominant);
+        MaterialRegistry.MaterialDef def = materials.byId(dominant(vector));
         String base = def == null ? "自製彈" : def.displayName() + "彈";
         return base + " ×" + vector.total();
     }

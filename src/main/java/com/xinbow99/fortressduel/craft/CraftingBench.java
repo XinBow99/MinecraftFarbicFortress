@@ -1,6 +1,7 @@
 package com.xinbow99.fortressduel.craft;
 
 import com.xinbow99.fortressduel.core.ConfigManager;
+import com.xinbow99.fortressduel.npc.SongDisc;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.weapon.WeaponDef;
 import com.xinbow99.fortressduel.weapon.WeaponItems;
@@ -33,6 +34,14 @@ public final class CraftingBench {
 
     /** 至少要放幾個材料才算一份設計。1 個的話等於把單一材料變成彈藥，那不是組合。 */
     private static final int MIN_MATERIALS = 2;
+
+    /**
+     * 一份設計最多帶幾份音效。
+     *
+     * <p>純粹是效能與耳朵：九格全塞光碟等於九軌同時播，加上每次開火九個封包。三首已經
+     * 夠混出玩家想要的那種吵，再多只是糊成一片。
+     */
+    private static final int MAX_SONGS = 3;
 
     /**
      * 標記「這是工作台做出來的原型」。
@@ -125,6 +134,13 @@ public final class CraftingBench {
                 continue;
             }
 
+            // 音樂家的光碟：把那首歌記進向量。它不推任何一條軸，純粹是開火時放什麼
+            SongDisc.Song song = SongDisc.read(stack).orElse(null);
+            if (song != null) {
+                vector = vector.plus(AmmoVector.songKey(song.sound()), 1);
+                continue;
+            }
+
             MaterialRegistry.MaterialDef material =
                     config.materials().byItem(BuiltInRegistries.ITEM.getKey(stack.getItem()));
             if (material == null) return Offer.PASS;   // 不認得 → 交給原版
@@ -133,8 +149,13 @@ public final class CraftingBench {
         }
 
         if (slotsUsed == 0) return Offer.PASS;
-        if (slotsUsed < MIN_MATERIALS) {
-            return Offer.problem("一份設計至少要放兩格（材料，或已經做好的設計圖）。");
+        if (vector.total() < MIN_MATERIALS) {
+            // 光碟不算數：它不推任何一條軸，光碟加光碟組不出一發子彈
+            return Offer.problem("一份設計至少要放兩個材料（光碟不算，它只決定開火的聲音）。");
+        }
+        if (vector.songCount() > MAX_SONGS) {
+            return Offer.problem("一份設計最多帶 " + MAX_SONGS + " 首歌，這裡有 "
+                    + vector.songCount() + " 首。");
         }
 
         WeaponDef weapon = config.designs().toWeapon(vector);
@@ -211,9 +232,17 @@ public final class CraftingBench {
      */
     public static void consume(Container grid) {
         for (int i = 0; i < grid.getContainerSize(); i++) {
-            if (!grid.getItem(i).isEmpty()) {
-                grid.removeItem(i, 1);
-            }
+            ItemStack stack = grid.getItem(i);
+            if (stack.isEmpty()) continue;
+
+            // 光碟不吃掉。它是買斷制的（見 SongDisc：不會用掉、對戰結束也不收回），
+            // 而合成本來就不該把那個承諾收回去。
+            //
+            // 這不會破壞「每格消耗 1」那條守恆：那條規則存在的目的是防材料複製，而光碟
+            // 不提供任何數值、也拆不回材料——豁免它換不到任何東西，只省下一趟回去點歌
+            if (SongDisc.read(stack).isPresent()) continue;
+
+            grid.removeItem(i, 1);
         }
     }
 }

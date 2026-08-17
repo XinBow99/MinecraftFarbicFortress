@@ -51,6 +51,26 @@ public final class SongDisc {
     public record Song(String sound, int lengthSeconds) {
     }
 
+    /**
+     * 音效 id → 歌名。
+     *
+     * <p>合進彈藥的音效在向量裡只留得下 id（那是設計的身分，必須穩定），但彈藥的說明要給
+     * 人看——沒有這張表，玩家看到的是 {@code fortress-duel:xue_hua_piao_piao} 而不是「雪花飄飄」。
+     *
+     * <p>由 {@link SongShop#from} 在載入曲目時填，所以它跟著 songs.yml 走，
+     * {@code /duel reload} 之後也是對的。
+     */
+    private static volatile java.util.Map<String, String> names = java.util.Map.of();
+
+    public static void installNames(java.util.Map<String, String> soundToName) {
+        names = java.util.Map.copyOf(soundToName);
+    }
+
+    /** 這個音效的歌名；不認得就回傳 id 本身（總比顯示空白好）。 */
+    public static String nameOf(String sound) {
+        return names.getOrDefault(sound, sound);
+    }
+
     private SongDisc() {
     }
 

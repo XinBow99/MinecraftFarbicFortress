@@ -13,6 +13,7 @@ import com.xinbow99.fortressduel.craft.AmmoVector;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
+import com.xinbow99.fortressduel.util.DuelSounds;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -112,6 +113,24 @@ public final class WeaponSystem {
     private final List<Projectile> projectiles = new ArrayList<>();
     /** 玩家 → 各武器的剩餘冷卻（tick）。 */
     private final Map<UUID, Map<String, Integer>> cooldowns = new HashMap<>();
+
+    /**
+     * 開火音效最多放幾 tick。
+     *
+     * <p>玩家合進去的是**整首歌**（音樂家那邊最長的一首有 30 秒），所以一定要有一個天花板，
+     * 不然一發導彈會放到下一輪。1.5 秒夠聽出是哪一首，又短到不會蓋掉下一發。
+     */
+    private static final int MAX_FIRE_SOUND = 30;
+
+    /** 開火音效送給多遠的人。超出這個距離的人收到也聽不見，只是浪費封包。 */
+    private static final double FIRE_SOUND_RANGE = 64.0;
+
+    /** 沒有合光碟時的預設開火音效。用來認出「這一發帶了歌，要排切除」。 */
+    private static final List<Identifier> DEFAULT_FIRE_SOUNDS =
+            List.of(Identifier.parse("minecraft:entity.arrow.shoot"));
+
+    /** 排隊中的音效切除。見 {@link #playFireSounds}。 */
+    private final List<PendingStop> pendingStops = new ArrayList<>();
     /** 每一場對戰裡、每一格已經累積的傷害。 */
     private final Map<Duel, Map<BlockPos, Float>> blockDamage = new HashMap<>();
     /**
@@ -533,9 +552,58 @@ public final class WeaponSystem {
                     direction.scale(speed), damageScale, gravityScale, damageBoost));
         }
 
-        SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(weapon.fireSound());
-        if (sound != null) {
-            level.playSound(null, player.blockPosition(), sound, SoundSource.PLAYERS, 1f, 1f);
+        playFireSounds(level, player, weapon);
+    }
+
+    /**
+     * 放這一發的開火音效，並排好把它切掉的時間。
+     *
+     * <p>玩家可以把音樂家的光碟合進彈藥裡，而那些是**整首歌**——不切的話一發子彈會放三分鐘。
+     * 切法是原版的停止封包，時機是 {@code min(冷卻, MAX_FIRE_SOUND)}：
+     *
+     * <ul>
+     *   <li>不超過冷卻 ＝ 聲音永遠不會壓到下一發，所以節奏自己就對上了</li>
+     *   <li>不超過 {@link #MAX_FIRE_SOUND} ＝ 再慢的武器也不會變成點歌機</li>
+     * </ul>
+     *
+     * <p>代價是射速快的設計只聽得到歌的開頭一小段。那是誠實的：那條規則就是「聲音不重疊」，
+     * 而機槍的兩發之間本來就只有 0.15 秒。想聽完整一點就把射速做慢一點，這是一個真的取捨。
+     *
+     * <p>只有帶歌的才排切除。原版的弓聲本來就只有半秒，多送一個停止封包只是浪費——而且
+     * 停止是按 id 停的，會順手把別人同時開的槍聲也切掉。
+     */
+    private void playFireSounds(ServerLevel level, ServerPlayer player, WeaponDef weapon) {
+        Vec3 pos = player.position();
+        boolean custom = !weapon.fireSounds().equals(DEFAULT_FIRE_SOUNDS);
+        int cut = Math.min(weapon.cooldownTicks(), MAX_FIRE_SOUND);
+
+        for (Identifier sound : weapon.fireSounds()) {
+            DuelSounds.playAt(level, pos, sound, SoundSource.PLAYERS, 1f, 1f, FIRE_SOUND_RANGE);
+            if (custom) {
+                pendingStops.add(new PendingStop(level, sound, cut));
+            }
+        }
+    }
+
+    /** 到期就把那個音效切掉。 */
+    private void tickFireSounds() {
+        pendingStops.removeIf(stop -> {
+            if (--stop.ticks > 0) return false;
+            DuelSounds.stop(stop.level, stop.sound, SoundSource.PLAYERS);
+            return true;
+        });
+    }
+
+    /** 一個排隊中的「把這個音效切掉」。 */
+    private static final class PendingStop {
+        final ServerLevel level;
+        final Identifier sound;
+        int ticks;
+
+        PendingStop(ServerLevel level, Identifier sound, int ticks) {
+            this.level = level;
+            this.sound = sound;
+            this.ticks = ticks;
         }
     }
 
@@ -573,6 +641,7 @@ public final class WeaponSystem {
 
     private void onServerTick(MinecraftServer server) {
         tickCooldowns();
+        tickFireSounds();
         // 要排在 tickCooldowns 之後：先讓冷卻減到 0，這一 tick 才打得出下一發。
         // 反過來的話每一發都會多等一 tick，機槍的實際射速會比設定值慢三成
         tickAutoFire(server);

@@ -5,6 +5,8 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
@@ -38,13 +40,73 @@ public record AmmoVector(Map<String, Integer> counts) {
         return counts.isEmpty();
     }
 
+    /**
+     * 音效那幾個 key 的前綴。
+     *
+     * <p>光碟不是材料，但它**住在同一個向量裡**——因為「組合 ＝ 向量相加」那條性質已經把
+     * 疊加、遞迴（原型丟回工作台）、量產、設計的身分與快取全部處理掉了。另外開一份清單
+     * 的話，那四件事每一件都要再寫一次，而且每一次都有寫錯的機會。
+     *
+     * <p>代價是「key 就是材料 id」這個假設不再成立，所以凡是要走 {@code counts} 的地方
+     * 都得先過濾（見 {@link #materials()}）。那個代價收在這個檔案裡，不會外溢。
+     */
+    private static final String SONG_PREFIX = "song:";
+
+    public static String songKey(String sound) {
+        return SONG_PREFIX + sound;
+    }
+
+    public static boolean isSong(String key) {
+        return key.startsWith(SONG_PREFIX);
+    }
+
     public int count(String material) {
         return counts.getOrDefault(material, 0);
     }
 
-    /** 總共用了幾個材料。價格與「這份設計有多貴重」都看這個。 */
+    /** 只有材料的那一部分。數值、價格、名稱、外觀全部只看這個。 */
+    public Map<String, Integer> materials() {
+        Map<String, Integer> out = new TreeMap<>();
+        counts.forEach((id, n) -> {
+            if (!isSong(id)) out.put(id, n);
+        });
+        return out;
+    }
+
+    /**
+     * 這份設計帶的音效 id，**同一首放幾張就出現幾次**。
+     *
+     * <p>重複不是多餘的：開火時每一份都會各播一次，疊起來就是玩家把三張同樣的光碟塞進去
+     * 想要的那個效果（更大聲、更厚）。
+     */
+    public List<String> songs() {
+        List<String> out = new ArrayList<>();
+        counts.forEach((id, n) -> {
+            if (!isSong(id)) return;
+            for (int i = 0; i < n; i++) out.add(id.substring(SONG_PREFIX.length()));
+        });
+        return out;
+    }
+
+    /** 帶了幾份音效（含重複）。 */
+    public int songCount() {
+        return counts.entrySet().stream()
+                .filter(e -> isSong(e.getKey()))
+                .mapToInt(Map.Entry::getValue)
+                .sum();
+    }
+
+    /**
+     * 總共用了幾個**材料**。價格與「這份設計有多貴重」都看這個。
+     *
+     * <p>音效不算：它是裝飾，不是戰力。算進去的話一發彈藥會因為好聽而變貴，而那條沒有
+     * 任何道理——量產的價格是在買一發子彈的威力。
+     */
     public int total() {
-        return counts.values().stream().mapToInt(Integer::intValue).sum();
+        return counts.entrySet().stream()
+                .filter(e -> !isSong(e.getKey()))
+                .mapToInt(Map.Entry::getValue)
+                .sum();
     }
 
     /** 相加。這就是「組合」的全部。 */

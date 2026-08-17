@@ -106,8 +106,13 @@ public record WeaponDef(
         int trailColor,
         /** 彈道粒子的大小倍率。只有指定顏色時有意義（dust 才吃得到）。 */
         double trailScale,
-        /** 開火音效。 */
-        Identifier fireSound
+        /**
+         * 開火音效。**可以有好幾個，會同時放。**
+         *
+         * <p>是清單而不是單一個，是因為玩家可以把音樂家的光碟合進彈藥裡，而且可以疊
+         * （見 {@code AmmoDesign.fireSounds}）。weapons.yml 寫一個字串或一個清單都吃得下。
+         */
+        List<Identifier> fireSounds
 ) {
 
     /** 沒寫 knockback 時，用傷害推一個。乘數挑成讓導彈（180）大約推 1.4 格/tick。 */
@@ -165,7 +170,32 @@ public record WeaponDef(
                 Identifier.parse(YamlConfig.str(section, "trail_particle", "minecraft:crit")),
                 parseColor(YamlConfig.str(section, "trail_color", ""), id),
                 Math.max(0.1, YamlConfig.d(section, "trail_scale", 1.4)),
-                Identifier.parse(YamlConfig.str(section, "fire_sound", "minecraft:entity.generic.explode")));
+                fireSounds(section));
+    }
+
+    /**
+     * {@code fire_sound} 可以寫一個字串，也可以寫一個清單。
+     *
+     * <pre>{@code
+     * fire_sound: minecraft:entity.arrow.shoot
+     * fire_sound: [minecraft:entity.arrow.shoot, fortress-duel:wow]
+     * }</pre>
+     *
+     * <p>兩種都吃是因為既有的十把武器全部寫的是單一個字串，而清單是為了自製設計才需要的
+     * ——為了一個新功能去改十個現成的設定檔，只會讓那十行變得更難讀。
+     */
+    private static List<Identifier> fireSounds(Map<String, Object> section) {
+        Object raw = section.get("fire_sound");
+        if (raw instanceof List<?> list) {
+            List<Identifier> sounds = new java.util.ArrayList<>(list.size());
+            for (Object entry : list) {
+                Identifier id = Identifier.tryParse(String.valueOf(entry));
+                if (id != null) sounds.add(id);
+            }
+            if (!sounds.isEmpty()) return List.copyOf(sounds);
+        }
+        return List.of(Identifier.parse(
+                YamlConfig.str(section, "fire_sound", "minecraft:entity.generic.explode")));
     }
 
     /**

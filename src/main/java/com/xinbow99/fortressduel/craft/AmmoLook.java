@@ -105,6 +105,10 @@ public final class AmmoLook {
                 weapon.spreadDegrees(), 20.0 / weapon.cooldownTicks(),
                 weapon.auto() ? "按住連射" : "單發")));
         lines.add(line("材料 " + materials(vector)));
+        if (vector.songCount() > 0) {
+            lines.add(Component.literal("♪ " + songs(vector))
+                    .withStyle(ChatFormatting.LIGHT_PURPLE));
+        }
         stack.set(DataComponents.LORE, new ItemLore(lines));
     }
 
@@ -131,11 +135,31 @@ public final class AmmoLook {
         return Component.literal(text).withStyle(ChatFormatting.GRAY);
     }
 
+    /**
+     * 這一發開火時放的歌。
+     *
+     * <p>同一首放兩張就寫 ×2——它真的會被送兩次，說明要跟耳朵聽到的一致。
+     */
+    private static String songs(AmmoVector vector) {
+        java.util.Map<String, Integer> tally = new java.util.LinkedHashMap<>();
+        for (String sound : vector.songs()) {
+            tally.merge(com.xinbow99.fortressduel.npc.SongDisc.nameOf(sound), 1, Integer::sum);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        tally.forEach((name, n) -> {
+            if (!sb.isEmpty()) sb.append(' ');
+            sb.append(name);
+            if (n > 1) sb.append('×').append(n);
+        });
+        return sb.toString();
+    }
+
     /** 材料清單。顯示中文名稱而不是 id——tooltip 是給玩家看的，不是給設定檔看的。 */
     private static String materials(AmmoVector vector) {
         MaterialRegistry registry = materials;
         StringBuilder sb = new StringBuilder();
-        vector.counts().forEach((id, n) -> {
+        vector.materials().forEach((id, n) -> {
             if (!sb.isEmpty()) sb.append(' ');
             MaterialRegistry.MaterialDef def = registry == null ? null : registry.byId(id);
             sb.append(def == null ? id : def.displayName()).append('×').append(n);
@@ -143,12 +167,6 @@ public final class AmmoLook {
         return sb.toString();
     }
 
-    /**
-     * 這份設計長成哪一顆蛋。
-     *
-     * <p>用 {@link AmmoVector#key()} 的雜湊而不是亂數：外觀必須是配方的函數。
-     * 取絕對值再取模——{@code hashCode} 可能是負的，而負的索引會直接丟例外。
-     */
     /**
      * 這份設計的冷卻分組。
      *
@@ -164,6 +182,15 @@ public final class AmmoLook {
                 "design/" + Integer.toHexString(vector.key().hashCode()));
     }
 
+    /**
+     * 這份設計長成哪一顆蛋。
+     *
+     * <p>用 {@link AmmoVector#key()} 的雜湊而不是亂數：外觀必須是配方的函數。
+     * 取模前先 floorMod——{@code hashCode} 可能是負的，而負的索引會直接丟例外。
+     *
+     * <p>合進去的音效也在 key 裡，所以**換一首歌就換一顆蛋**。那是對的：彈道相同但開火
+     * 聲音不同的兩份設計就是兩份設計，架上與背包裡都該分得出來。
+     */
     private static Identifier eggFor(AmmoVector vector) {
         List<Identifier> all = eggs();
         if (all.isEmpty()) return BASE_ITEM;
