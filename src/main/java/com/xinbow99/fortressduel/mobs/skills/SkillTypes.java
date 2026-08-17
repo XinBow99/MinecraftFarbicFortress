@@ -9,6 +9,7 @@ import com.xinbow99.fortressduel.util.Ground;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -55,6 +56,36 @@ public final class SkillTypes {
         engine.registerType("break_blocks", ctx -> breakBlocks(engine, ctx));
         engine.registerType("restless", SkillTypes::restless);
         engine.registerType("steal", SkillTypes::steal);
+        engine.registerType("expire", SkillTypes::expire);
+    }
+
+    /**
+     * 壽命到了就自己消失。
+     *
+     * <p>params：{@code seconds}（活多久）。
+     *
+     * <p>給「一陣風式」的事件用：鼠疫那種一次放十幾隻、目的是逼玩家在幾秒內做決定的怪，
+     * 留著只會變成打掃工作——而打掃不是遊戲。有了它，事件的張力落在**那二十秒**裡，
+     * 而不是落在「等一下要花多久把牠們清乾淨」。
+     *
+     * <p>計時看的是實體自己的 {@code tickCount}（出生到現在幾 tick），不是技能的間隔。
+     * {@code INTERVAL} 的第一次觸發是**立刻**發生的（見 {@code SkillEngine} 的倒數：初值
+     * 不存在，{@code merge(-1)} 之後就已經 ≤ 0），拿它當計時器的話怪一生出來就死了。
+     * 所以這個技能設成每秒問一次，真正的判斷交給 tickCount。
+     *
+     * <p>用 {@code discard()} 而不是 {@code kill()}：牠不是被殺的，**不該發賞金**——
+     * 不然只要站著等就有錢拿。冒一陣煙是為了讓它看起來像自然消失，跟怪物數量上限
+     * （{@code MobSpawner.enforceCap}）用的是同一個表達。
+     */
+    private static boolean expire(SkillContext ctx) {
+        int lifespan = Math.max(1, ctx.skill().param("seconds", 20)) * 20;
+        LivingEntity mob = ctx.caster();
+        if (mob.tickCount < lifespan) return false;
+
+        ctx.level().sendParticles(ParticleTypes.POOF,
+                mob.getX(), mob.getY(0.5), mob.getZ(), 8, 0.2, 0.2, 0.2, 0.02);
+        mob.discard();
+        return true;
     }
 
     /**
