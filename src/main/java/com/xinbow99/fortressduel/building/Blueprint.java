@@ -120,7 +120,7 @@ public final class Blueprint {
     }
 
     private static void place(ServerPlayer player, DuelManager duels, BuildingPlacer buildings,
-                              String buildingId, ItemStack stack, BlockPos base) {
+                              String buildingId, ItemStack stack, BlockPos clicked) {
         BuildingDef def = buildings.byId(buildingId);
         if (def == null) {
             player.sendSystemMessage(Msg.warn("這張圖紙壞了（buildings.yml 裡沒有 " + buildingId + "）。"));
@@ -134,22 +134,41 @@ public final class Blueprint {
             return;
         }
 
+        BuildingDef oriented = def.rotates() ? def.rotated(turnsFor(player)) : def;
+        // **以點擊的那一格為中心**，而不是從那裡往東南長。一片十格寬的牆從角落長出去的話，
+        // 玩家得先在腦子裡把它平移五格才知道會蓋在哪——而他真正在想的是「這面牆擋在我跟
+        // 那個方向之間」，那句話的意思就是置中
+        BlockPos base = clicked.offset(-(oriented.width() / 2), 0, -(oriented.depth() / 2));
+
         Arena arena = duel.arena();
         Side side = duel.sideOf(player.getUUID());
-        String problem = check(arena, duel, side, def, base);
+        String problem = check(arena, duel, side, oriented, base);
         if (problem != null) {
             player.sendSystemMessage(Msg.warn(problem));
             return;
         }
 
         // 藍圖自己的 offset 是給「相對核心擺」用的，圖紙是玩家自己選點，所以要抵消掉，
-        // 讓原點正好落在他指的那一格（跟 JobManager 擺節點是同一個理由）
-        BlockPos anchor = base.offset(-def.offsetX(), -def.offsetY(), -def.offsetZ());
-        buildings.place(arena.level(), def, anchor, false, arena::recordBefore);
+        // 讓原點正好落在算好的那一格（跟 JobManager 擺節點是同一個理由）
+        BlockPos anchor = base.offset(-oriented.offsetX(), -oriented.offsetY(), -oriented.offsetZ());
+        buildings.place(arena.level(), oriented, anchor, false, arena::recordBefore);
 
         stack.shrink(1);
-        arena.level().playSound(null, base, SoundEvents.ANVIL_USE, SoundSource.BLOCKS, 0.8f, 1.2f);
+        arena.level().playSound(null, clicked, SoundEvents.ANVIL_USE, SoundSource.BLOCKS, 0.8f, 1.2f);
         player.sendSystemMessage(Msg.good(def.displayName() + " 蓋好了。"));
+    }
+
+    /**
+     * 這棟要轉幾個四分之一圈，才會正對著蓋它的人。
+     *
+     * <p>藍圖的正面畫在**南邊**（z 最大那一排）。玩家是站在建築的反方向看過去的，所以
+     * 面向北的時候正面本來就朝著他，不用轉。
+     *
+     * <p>{@code get2DDataValue} 是 南0／西1／北2／東3，所以 {@code 2 − 它} 剛好就是圈數：
+     * 北 0、西 1、南 2、東 3。
+     */
+    private static int turnsFor(ServerPlayer player) {
+        return Math.floorMod(2 - player.getDirection().get2DDataValue(), 4);
     }
 
     /** @return 蓋不了的原因；null ＝ 可以蓋 */
