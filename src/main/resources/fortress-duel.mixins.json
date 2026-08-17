@@ -9,6 +9,7 @@
 		"ExampleMixin",
 		"ExplosionMixin",
 		"InventoryDropMixin",
+		"MobAccessor",
 		"ResultSlotMixin"
 	],
 	"injectors": {

@@ -189,3 +189,20 @@ incidents:
     mobs: [vermin]
     music: minecraft:entity.spider.ambient
     music_pitch: 1.6
+
+  # 兩邊各生 3~4 隻，牠們會直接朝你跑過來、搶走你背包裡隨機一整疊東西叼在嘴上，然後逃跑。
+  # 殺了牠才吐出來（見 skills.yml 的「小偷」）。
+  #
+  # 為什麼有趣：它是全場唯一**針對背包**的事件。其他事件打的是牆、是熊貓、是你的血，
+  # 而這個打的是「你剛買的那 60 發廢鐵彈」。而且損失是可回收的——那一隻就在那裡跑，
+  # 追不追得回來是你的選擇，不是骰子的。
+  #
+  # 攻擊力 0 是關鍵：牠不痛，所以正確反應是追上去而不是躲開
+  fox_raid:
+    name: 小狐狸來襲！
+    description: 一群狐狸衝進兩邊的院子，專挑背包裡的東西下手。
+    weight: 8
+    action: raid
+    mobs: [fox_thief]
+    music: minecraft:entity.fox.ambient
+    music_pitch: 1.2
