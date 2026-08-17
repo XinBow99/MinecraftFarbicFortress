@@ -115,12 +115,14 @@ public final class WeaponSystem {
     private final Map<UUID, Map<String, Integer>> cooldowns = new HashMap<>();
 
     /**
-     * 開火音效最多放幾 tick。
+     * 合進彈藥的歌一次放幾 tick。
      *
-     * <p>玩家合進去的是**整首歌**（音樂家那邊最長的一首有 30 秒），所以一定要有一個天花板，
-     * 不然一發導彈會放到下一輪。1.5 秒夠聽出是哪一首，又短到不會蓋掉下一發。
+     * <p>**固定長度，跟射速無關。** 曾經是 {@code min(冷卻, 30)}，想讓聲音永遠不重疊——
+     * 結果是射速快的設計每一發只切到開頭幾 tick，聽起來就是一串雜音，等於這個功能不存在。
+     *
+     * <p>2 秒是「聽得出來是哪一首」的下限。要改就改這一個數字。
      */
-    private static final int MAX_FIRE_SOUND = 30;
+    private static final int FIRE_SOUND_TICKS = 40;
 
     /** 開火音效送給多遠的人。超出這個距離的人收到也聽不見，只是浪費封包。 */
     private static final double FIRE_SOUND_RANGE = 64.0;
@@ -129,8 +131,8 @@ public final class WeaponSystem {
     private static final List<Identifier> DEFAULT_FIRE_SOUNDS =
             List.of(Identifier.parse("minecraft:entity.arrow.shoot"));
 
-    /** 排隊中的音效切除。見 {@link #playFireSounds}。 */
-    private final List<PendingStop> pendingStops = new ArrayList<>();
+    /** 正在放的開火音效。見 {@link #playFireSounds}。 */
+    private final List<ActiveSound> activeSounds = new ArrayList<>();
     /** 每一場對戰裡、每一格已經累積的傷害。 */
     private final Map<Duel, Map<BlockPos, Float>> blockDamage = new HashMap<>();
     /**
@@ -556,51 +558,77 @@ public final class WeaponSystem {
     }
 
     /**
-     * 放這一發的開火音效，並排好把它切掉的時間。
+     * 放這一發的開火音效。
      *
      * <p>玩家可以把音樂家的光碟合進彈藥裡，而那些是**整首歌**——不切的話一發子彈會放三分鐘。
-     * 切法是原版的停止封包，時機是 {@code min(冷卻, MAX_FIRE_SOUND)}：
+     * 規則有兩條，而它們合起來讓「聽起來像一首歌」而不是「像一串雜音」：
      *
      * <ul>
-     *   <li>不超過冷卻 ＝ 聲音永遠不會壓到下一發，所以節奏自己就對上了</li>
-     *   <li>不超過 {@link #MAX_FIRE_SOUND} ＝ 再慢的武器也不會變成點歌機</li>
+     *   <li><b>固定放 {@link #FIRE_SOUND_TICKS}</b>，跟射速無關</li>
+     *   <li><b>放完之前再開槍不重新觸發</b>——所以連射時聽到的是一首連續播下去的歌，
+     *       而不是每一發都從頭卡一下</li>
      * </ul>
      *
-     * <p>代價是射速快的設計只聽得到歌的開頭一小段。那是誠實的：那條規則就是「聲音不重疊」，
-     * 而機槍的兩發之間本來就只有 0.15 秒。想聽完整一點就把射速做慢一點，這是一個真的取捨。
+     * <p>這跟光碟右鍵播放用的是同一條規則（{@code Duel.playMusic} 的「放完之前再按沒有作用」）。
      *
-     * <p>只有帶歌的才排切除。原版的弓聲本來就只有半秒，多送一個停止封包只是浪費——而且
-     * 停止是按 id 停的，會順手把別人同時開的槍聲也切掉。
+     * <p>原版的弓聲不走這套：它只有半秒，而它就是「我開了一槍」的回饋，每一發都該響。
      */
     private void playFireSounds(ServerLevel level, ServerPlayer player, WeaponDef weapon) {
         Vec3 pos = player.position();
-        boolean custom = !weapon.fireSounds().equals(DEFAULT_FIRE_SOUNDS);
-        int cut = Math.min(weapon.cooldownTicks(), MAX_FIRE_SOUND);
+        boolean song = !weapon.fireSounds().equals(DEFAULT_FIRE_SOUNDS);
 
         for (Identifier sound : weapon.fireSounds()) {
+            if (!song) {
+                DuelSounds.playAt(level, pos, sound, SoundSource.PLAYERS, 1f, 1f, FIRE_SOUND_RANGE);
+                continue;
+            }
+            if (isPlaying(player, sound)) continue;
+
             DuelSounds.playAt(level, pos, sound, SoundSource.PLAYERS, 1f, 1f, FIRE_SOUND_RANGE);
-            if (custom) {
-                pendingStops.add(new PendingStop(level, sound, cut));
+            activeSounds.add(new ActiveSound(player.getUUID(), level, sound, FIRE_SOUND_TICKS));
+        }
+    }
+
+    private boolean isPlaying(ServerPlayer player, Identifier sound) {
+        for (ActiveSound active : activeSounds) {
+            if (active.sound.equals(sound) && active.player.equals(player.getUUID())) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 到期就把音效切掉。
+     *
+     * <p>**只有在沒有別人還在放同一首的時候才送停止封包。** 停止是按「id ＋ 頻道」生效的，
+     * 不是按單一次播放——不檢查的話，兩個人同時用同一首歌的彈藥時，先到期的那一個會把
+     * 另一個也一起掐掉。
+     */
+    private void tickFireSounds() {
+        if (activeSounds.isEmpty()) return;
+
+        List<ActiveSound> finished = new ArrayList<>();
+        activeSounds.removeIf(active -> {
+            if (--active.ticks > 0) return false;
+            finished.add(active);
+            return true;
+        });
+
+        for (ActiveSound done : finished) {
+            if (activeSounds.stream().noneMatch(a -> a.sound.equals(done.sound))) {
+                DuelSounds.stop(done.level, done.sound, SoundSource.PLAYERS);
             }
         }
     }
 
-    /** 到期就把那個音效切掉。 */
-    private void tickFireSounds() {
-        pendingStops.removeIf(stop -> {
-            if (--stop.ticks > 0) return false;
-            DuelSounds.stop(stop.level, stop.sound, SoundSource.PLAYERS);
-            return true;
-        });
-    }
-
-    /** 一個排隊中的「把這個音效切掉」。 */
-    private static final class PendingStop {
+    /** 一次正在進行中的開火音效。 */
+    private static final class ActiveSound {
+        final UUID player;
         final ServerLevel level;
         final Identifier sound;
         int ticks;
 
-        PendingStop(ServerLevel level, Identifier sound, int ticks) {
+        ActiveSound(UUID player, ServerLevel level, Identifier sound, int ticks) {
+            this.player = player;
             this.level = level;
             this.sound = sound;
             this.ticks = ticks;
