@@ -33,7 +33,26 @@ public record BuildingDef(
         List<List<String>> layers,
         /** 要放在裡面的 NPC id（對應 npcs.yml），空字串 ＝ 不放。 */
         String npc,
-        int npcOffsetX, int npcOffsetY, int npcOffsetZ
+        int npcOffsetX, int npcOffsetY, int npcOffsetZ,
+        /**
+         * true ＝ 建築師會賣這一張圖紙。
+         *
+         * <p>價格**不寫在設定裡**，是照藍圖裡每一格的建材單價加總再打折算出來的
+         * （見 {@code BlueprintShop}）——手寫的話改一層樓就要記得回頭改價格，
+         * 而忘記改不會有任何徵兆。
+         */
+        boolean sold,
+        /**
+         * true ＝ 用圖紙蓋的時候跟著玩家的面向轉，讓它正對著他。
+         *
+         * <p>**只轉字元圖，不轉方塊狀態。** 所以有方向性方塊（梯子、階梯、按鈕…）的藍圖
+         * 不能開這個——梯子的 {@code facing=south} 轉完之後會貼在錯的那面牆上，而那個錯誤
+         * 只有到現場爬不上去才會發現。
+         *
+         * <p>圓形或對稱的建築本來就不需要（哈里發塔就是），所以這個欄位真正服務的是
+         * 「一片牆」那種明確有正面的東西。
+         */
+        boolean rotates
 ) {
 
     public static BuildingDef from(String id, Map<String, Object> section) {
@@ -72,7 +91,77 @@ public record BuildingDef(
                 YamlConfig.str(section, "npc", ""),
                 YamlConfig.i(npcOffset, "x", 0),
                 YamlConfig.i(npcOffset, "y", 1),
-                YamlConfig.i(npcOffset, "z", 0));
+                YamlConfig.i(npcOffset, "z", 0),
+                YamlConfig.bool(section, "sold", false),
+                YamlConfig.bool(section, "rotates", false));
+    }
+
+    /**
+     * 轉四分之一圈的整數倍之後的樣子。
+     *
+     * <p>格子圖是 {@code [z][x]}（z 由北往南、x 由西往東），順時針轉一次的對應是
+     * {@code 新[z'][x'] = 舊[深度-1-x'][z']}——寬與深會對調。
+     *
+     * <p>方塊狀態不跟著轉，見 {@link #rotates()}。
+     */
+    public BuildingDef rotated(int quarterTurns) {
+        List<List<String>> current = layers;
+        for (int turn = 0; turn < Math.floorMod(quarterTurns, 4); turn++) {
+            current = turnOnce(current);
+        }
+        return new BuildingDef(id, displayName, offsetX, offsetY, offsetZ, palette, current,
+                npc, npcOffsetX, npcOffsetY, npcOffsetZ, sold, rotates);
+    }
+
+    private static List<List<String>> turnOnce(List<List<String>> layers) {
+        List<List<String>> out = new ArrayList<>(layers.size());
+        for (List<String> rows : layers) {
+            int depth = rows.size();
+            int width = rows.stream().mapToInt(String::length).max().orElse(0);
+
+            List<String> turned = new ArrayList<>(width);
+            for (int z = 0; z < width; z++) {
+                StringBuilder row = new StringBuilder(depth);
+                for (int x = 0; x < depth; x++) {
+                    String source = rows.get(depth - 1 - x);
+                    // 各列不一定等長，短的那幾格當成「不要動」
+                    row.append(z < source.length() ? source.charAt(z) : ' ');
+                }
+                turned.add(row.toString());
+            }
+            out.add(List.copyOf(turned));
+        }
+        return List.copyOf(out);
+    }
+
+    /**
+     * 這張藍圖佔的格數（調色盤裡有定義的才算，空氣與「不要動」的格子不算）。
+     *
+     * <p>價格靠它算，見 {@code BlueprintShop}。
+     */
+    public Map<String, Integer> blockCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (List<String> rows : layers) {
+            for (String row : rows) {
+                for (int x = 0; x < row.length(); x++) {
+                    String block = palette.get(row.charAt(x));
+                    if (block != null) counts.merge(block, 1, Integer::sum);
+                }
+            }
+        }
+        return counts;
+    }
+
+    public int width() {
+        return layers.stream().flatMap(List::stream).mapToInt(String::length).max().orElse(0);
+    }
+
+    public int depth() {
+        return layers.stream().mapToInt(List::size).max().orElse(0);
+    }
+
+    public int height() {
+        return layers.size();
     }
 
     @SuppressWarnings("unchecked")

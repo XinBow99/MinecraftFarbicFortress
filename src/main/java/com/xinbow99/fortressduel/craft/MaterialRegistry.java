@@ -8,7 +8,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** materials.yml 讀出來的材料表與六條軸的曲線。 */
+/** materials.yml 讀出來的材料表與各條軸的曲線。 */
 public final class MaterialRegistry {
 
     private volatile Map<String, AttributeCurve> curves = Map.of();
@@ -18,7 +18,10 @@ public final class MaterialRegistry {
     private volatile Map<Identifier, MaterialDef> byItem = Map.of();
 
     /** 一種買得到的材料。它只推一條軸——這就是「沒有最強的材料」的來源。 */
-    public record MaterialDef(String id, String displayName, Identifier item, String attribute, int price) {
+    public record MaterialDef(String id, String displayName, Identifier item, String attribute,
+                              int price,
+                              /** 曲線講不出來的那句話（例：投了就變連射）。空字串 ＝ 沒有。 */
+                              String note) {
     }
 
     /** 量產時每一發的價格 ＝ 材料數 × 這個。 */
@@ -42,7 +45,7 @@ public final class MaterialRegistry {
 
         Map<String, AttributeCurve> loadedCurves = new LinkedHashMap<>();
         for (Map.Entry<String, Map<String, Object>> e : cfg.getSections("attributes").entrySet()) {
-            loadedCurves.put(e.getKey(), AttributeCurve.from(e.getValue()));
+            loadedCurves.put(e.getKey(), AttributeCurve.from(e.getKey(), e.getValue()));
         }
 
         Map<String, MaterialDef> ids = new LinkedHashMap<>();
@@ -61,7 +64,8 @@ public final class MaterialRegistry {
                     YamlConfig.str(section, "name", e.getKey()),
                     Identifier.parse(YamlConfig.str(section, "item", "minecraft:gunpowder")),
                     attribute,
-                    YamlConfig.i(section, "price", 10));
+                    YamlConfig.i(section, "price", 10),
+                    YamlConfig.str(section, "note", ""));
             ids.put(def.id(), def);
 
             // 一個物品只能綁一種材料，不然工作台上分不出玩家擺的是哪一種

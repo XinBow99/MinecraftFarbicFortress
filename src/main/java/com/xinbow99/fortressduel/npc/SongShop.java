@@ -19,6 +19,10 @@ import java.util.Map;
  *     length: 5
  * }</pre>
  *
+ * <p>櫃子上那一格賣的是**一張光碟**（{@code type: disc}），不是當場播放：買回去拿在手上
+ * 右鍵才放，而且放得完就能再放（見 {@link SongDisc}）。點播與放歌拆開之後，「什麼時候放」
+ * 才是玩家的決定，而不是「你人必須站在音樂家面前」。
+ *
  * <p>兩個省略規則讓那三行變成真的三行：
  * <ul>
  *   <li>{@code sound} 省略就是 {@code fortress-duel:<id>}——音檔叫 {@code wow.ogg}，id 就是 {@code wow}</li>
@@ -52,6 +56,8 @@ public final class SongShop {
 
     public static ShopDef from(YamlConfig cfg) {
         List<ShopEntry> entries = new ArrayList<>();
+        // 音效 id → 歌名。合進彈藥的音效在向量裡只有 id，說明要靠這張表翻回中文
+        Map<String, String> names = new java.util.LinkedHashMap<>();
 
         int index = 0;
         for (Map.Entry<String, Map<String, Object>> e : cfg.getSections("songs").entrySet()) {
@@ -70,7 +76,7 @@ public final class SongShop {
             entries.add(new ShopEntry(
                     id,
                     YamlConfig.str(section, "name", id),
-                    "music",
+                    "disc",
                     Math.max(0, YamlConfig.i(section, "price", 0)),
                     "",
                     "",
@@ -80,9 +86,11 @@ public final class SongShop {
                     1,
                     Map.of(),
                     YamlConfig.str(section, "lore", "")));
+            names.put(sound, YamlConfig.str(section, "name", id));
             index++;
         }
 
+        SongDisc.installNames(names);
         return new ShopDef(SHOP_ID, cfg.getString("title", "音樂家"), List.copyOf(entries));
     }
 }

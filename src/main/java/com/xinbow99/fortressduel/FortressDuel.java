@@ -5,6 +5,7 @@ import com.xinbow99.fortressduel.battle.DuelServices;
 import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.craft.AmmoLook;
+import com.xinbow99.fortressduel.building.Blueprint;
 import com.xinbow99.fortressduel.craft.CraftingBench;
 import com.xinbow99.fortressduel.economy.EconomyManager;
 import com.xinbow99.fortressduel.npc.NpcManager;
@@ -63,6 +64,8 @@ public class FortressDuel implements ModInitializer {
         config.reload();
 
         CraftingBench.install(config);
+        // 圖紙的右鍵放置：它要對戰（拿還原快照）也要藍圖表
+        Blueprint.register(duels, buildings);
         AmmoLook.install(config.materials());
         duels.register();
         skills.register();
@@ -71,9 +74,9 @@ public class FortressDuel implements ModInitializer {
         weapons.register();
         npcs.register();
         jobs.register();
-        IncidentScheduler incidents = new IncidentScheduler(config, skills);
+        IncidentScheduler incidents = new IncidentScheduler(config, skills, npcs);
         incidents.register();
-        new DuelCommands(duels, config, skills, weapons, incidents, jobs).register();
+        new DuelCommands(duels, config, skills, weapons, incidents, jobs, economy).register();
 
         LOGGER.info("Fortress Duel loaded. Config directory: {}", config.configDir());
     }

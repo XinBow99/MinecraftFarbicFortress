@@ -18,6 +18,8 @@ import java.util.Map;
  * 逼近下限的倒數曲線，永遠到不了 {@code floor}——所以再有錢也買不到絕對的零散佈。
  */
 public record AttributeCurve(
+        /** 這條軸叫什麼（給玩家看的）。材料的說明文字靠它，沒有的話架上只會出現 id。 */
+        String label,
         /** 投入 0 個時的值。刻意是「很差但能用」而不是 0，見 materials.yml。 */
         double base,
         double unit,
@@ -32,8 +34,9 @@ public record AttributeCurve(
         boolean round
 ) {
 
-    public static AttributeCurve from(Map<String, Object> section) {
+    public static AttributeCurve from(String id, Map<String, Object> section) {
         return new AttributeCurve(
+                YamlConfig.str(section, "label", id),
                 YamlConfig.d(section, "base", 0.0),
                 YamlConfig.d(section, "unit", 1.0),
                 YamlConfig.d(section, "exponent", 0.6),
@@ -45,6 +48,17 @@ public record AttributeCurve(
 
     /** 投入 {@code n} 個材料之後這條軸的值。 */
     public double valueAt(int n) {
+        return valueAt(n, base);
+    }
+
+    /**
+     * 同上，但基準由呼叫端給。
+     *
+     * <p>給射速那條軸用：它的「投入 0 個」不是一個常數，而是**從這一發有多重推出來的**
+     * 冷卻（見 {@code AmmoDesign.cooldown}）。把基準留在設定檔裡的話那個耦合就斷了，
+     * 而斷掉的後果是傷害與射速變成兩條互相獨立、可以同時買滿的軸。
+     */
+    public double valueAt(int n, double base) {
         double curved = n <= 0 ? 0 : unit * Math.pow(n, exponent);
         double value = down
                 ? floor + (base - floor) / (1 + curved)

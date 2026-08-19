@@ -8,10 +8,12 @@ import com.xinbow99.fortressduel.battle.DuelState;
 import com.xinbow99.fortressduel.battle.Side;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.core.DuelEvents;
+import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.AmmoVector;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.mobs.skills.SkillEngine;
+import com.xinbow99.fortressduel.util.DuelSounds;
 import com.xinbow99.fortressduel.util.Msg;
 import com.xinbow99.fortressduel.util.Region;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -111,13 +113,26 @@ public final class WeaponSystem {
     private final List<Projectile> projectiles = new ArrayList<>();
     /** 玩家 → 各武器的剩餘冷卻（tick）。 */
     private final Map<UUID, Map<String, Integer>> cooldowns = new HashMap<>();
+
     /**
-     * 玩家 → 各武器目前累積的後座力（度）。
+     * 合進彈藥的歌一次放幾 tick。
      *
-     * <p>逐武器而不是逐玩家：切到另一把槍不該繼承前一把的後座力，而放下一把槍去打別的、
-     * 再切回來時它應該已經回穩了——這由 {@link #tickRecoil} 的固定衰減自然達成。
+     * <p>**固定長度，跟射速無關。** 曾經是 {@code min(冷卻, 30)}，想讓聲音永遠不重疊——
+     * 結果是射速快的設計每一發只切到開頭幾 tick，聽起來就是一串雜音，等於這個功能不存在。
+     *
+     * <p>2 秒是「聽得出來是哪一首」的下限。要改就改這一個數字。
      */
-    private final Map<UUID, Map<String, Double>> recoil = new HashMap<>();
+    private static final int FIRE_SOUND_TICKS = 40;
+
+    /** 開火音效送給多遠的人。超出這個距離的人收到也聽不見，只是浪費封包。 */
+    private static final double FIRE_SOUND_RANGE = 64.0;
+
+    /** 沒有合光碟時的預設開火音效。用來認出「這一發帶了歌，要排切除」。 */
+    private static final List<Identifier> DEFAULT_FIRE_SOUNDS =
+            List.of(Identifier.parse("minecraft:entity.arrow.shoot"));
+
+    /** 正在放的開火音效。見 {@link #playFireSounds}。 */
+    private final List<ActiveSound> activeSounds = new ArrayList<>();
     /** 每一場對戰裡、每一格已經累積的傷害。 */
     private final Map<Duel, Map<BlockPos, Float>> blockDamage = new HashMap<>();
     /**
@@ -189,10 +204,6 @@ public final class WeaponSystem {
                 level.destroyBlockProgress(progressId(pos), pos, -1);
             }
         }
-
-        // 後座力不跨場，否則上一場最後那串連射會讓下一場的第一發歪掉
-        recoil.remove(duel.north().playerId());
-        recoil.remove(duel.south().playerId());
     }
 
     /**
@@ -414,6 +425,9 @@ public final class WeaponSystem {
         Map<String, Integer> playerCooldowns = cooldowns.computeIfAbsent(player.getUUID(), k -> new HashMap<>());
         if (playerCooldowns.containsKey(weapon.id())) return false;
 
+        // 要在扣彈之前讀：打完最後一發時副手已經空了，那時候問不到名字
+        String ammoName = ammoNameOf(player, weapon);
+
         if (!consumeAmmo(player, weapon)) {
             duels.notify(player, Msg.plain(weapon.displayName() + " 用完了！去軍火商補貨", ChatFormatting.RED));
             player.level().playSound(null, player.blockPosition(),
@@ -423,9 +437,39 @@ public final class WeaponSystem {
             return false;
         }
         playerCooldowns.put(weapon.id(), weapon.cooldownTicks());
+        showCooldown(player, weapon);
 
-        fire(player, duel, weapon, power);
+        fire(player, duel, weapon, ammoName, power);
         return true;
+    }
+
+    /**
+     * 把冷卻畫給玩家看：副手那疊彈藥蓋上原版的灰色遮罩，跟金蘋果、盾牌同一個東西。
+     *
+     * <p>用原版的 {@code ItemCooldowns} 而不是自己送 actionbar：這個專案的前提是客戶端不裝
+     * mod，而這條是**唯一**不用發字、直接畫在物品上的進度指示——玩家不必把視線從準心移開。
+     *
+     * <p>純粹是顯示。真正決定能不能開火的仍然是 {@link #cooldowns} 那張表：彈藥物品本身沒有
+     * 任何右鍵行為，被鎖住也不會擋掉主手那把弓。
+     *
+     * <p>冷卻群組寫在彈藥上（見 {@link AmmoLook#apply}）：不指定的話原版按**物品種類**分組，
+     * 而所有自製設計的本體都是同一種磚——換一份設計會繼承上一份的遮罩。
+     */
+    private void showCooldown(ServerPlayer player, WeaponDef weapon) {
+        ItemStack ammo = player.getOffhandItem();
+        if (ammo.isEmpty()) return;
+
+        player.getCooldowns().addCooldown(ammo, weapon.cooldownTicks());
+    }
+
+    /**
+     * 這疊彈藥在玩家眼裡叫什麼。
+     *
+     * <p>玩家自己取的名字優先（{@code /duel name}）——死亡訊息報的該是他手上那疊的名字，
+     * 而不是程式從材料推出來的那個。沒取過名字、或副手已經空了就退回武器的顯示名稱。
+     */
+    private String ammoNameOf(ServerPlayer player, WeaponDef weapon) {
+        return AmmoLook.readName(player.getOffhandItem()).orElseGet(weapon::displayName);
     }
 
     /**
@@ -474,14 +518,12 @@ public final class WeaponSystem {
      * @param power 蓄力程度 0~1。即發武器永遠傳 1.0——它們沒有蓄力這條軸，
      *              所以走的是完全相同的路徑、只是力道恆滿
      */
-    private void fire(ServerPlayer player, Duel duel, WeaponDef weapon, double power) {
+    private void fire(ServerPlayer player, Duel duel, WeaponDef weapon, String ammoName, double power) {
         ServerLevel level = player.level();
         Vec3 origin = player.getEyePosition();
         Vec3 look = player.getLookAngle();
 
-        // 這一發用的是「開火前」的後座力：第一發永遠是準的，代價從第二發才開始付
-        double spread = weapon.spreadDegrees() + recoilOf(player, weapon);
-        addRecoil(player, weapon);
+        double spread = weapon.spreadDegrees();
 
         double speed = weapon.projectileSpeed();
         if (weapon.chargeAffectsSpeed()) {
@@ -508,13 +550,88 @@ public final class WeaponSystem {
 
         for (int i = 0; i < pellets; i++) {
             Vec3 direction = applySpread(level, look, spread);
-            projectiles.add(new Projectile(weapon, duel, level, player, origin,
+            projectiles.add(new Projectile(weapon, duel, level, player, ammoName, origin,
                     direction.scale(speed), damageScale, gravityScale, damageBoost));
         }
 
-        SoundEvent sound = BuiltInRegistries.SOUND_EVENT.getValue(weapon.fireSound());
-        if (sound != null) {
-            level.playSound(null, player.blockPosition(), sound, SoundSource.PLAYERS, 1f, 1f);
+        playFireSounds(level, player, weapon);
+    }
+
+    /**
+     * 放這一發的開火音效。
+     *
+     * <p>玩家可以把音樂家的光碟合進彈藥裡，而那些是**整首歌**——不切的話一發子彈會放三分鐘。
+     * 規則有兩條，而它們合起來讓「聽起來像一首歌」而不是「像一串雜音」：
+     *
+     * <ul>
+     *   <li><b>固定放 {@link #FIRE_SOUND_TICKS}</b>，跟射速無關</li>
+     *   <li><b>放完之前再開槍不重新觸發</b>——所以連射時聽到的是一首連續播下去的歌，
+     *       而不是每一發都從頭卡一下</li>
+     * </ul>
+     *
+     * <p>這跟光碟右鍵播放用的是同一條規則（{@code Duel.playMusic} 的「放完之前再按沒有作用」）。
+     *
+     * <p>原版的弓聲不走這套：它只有半秒，而它就是「我開了一槍」的回饋，每一發都該響。
+     */
+    private void playFireSounds(ServerLevel level, ServerPlayer player, WeaponDef weapon) {
+        Vec3 pos = player.position();
+        boolean song = !weapon.fireSounds().equals(DEFAULT_FIRE_SOUNDS);
+
+        for (Identifier sound : weapon.fireSounds()) {
+            if (!song) {
+                DuelSounds.playAt(level, pos, sound, SoundSource.PLAYERS, 1f, 1f, FIRE_SOUND_RANGE);
+                continue;
+            }
+            if (isPlaying(player, sound)) continue;
+
+            DuelSounds.playAt(level, pos, sound, SoundSource.PLAYERS, 1f, 1f, FIRE_SOUND_RANGE);
+            activeSounds.add(new ActiveSound(player.getUUID(), level, sound, FIRE_SOUND_TICKS));
+        }
+    }
+
+    private boolean isPlaying(ServerPlayer player, Identifier sound) {
+        for (ActiveSound active : activeSounds) {
+            if (active.sound.equals(sound) && active.player.equals(player.getUUID())) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 到期就把音效切掉。
+     *
+     * <p>**只有在沒有別人還在放同一首的時候才送停止封包。** 停止是按「id ＋ 頻道」生效的，
+     * 不是按單一次播放——不檢查的話，兩個人同時用同一首歌的彈藥時，先到期的那一個會把
+     * 另一個也一起掐掉。
+     */
+    private void tickFireSounds() {
+        if (activeSounds.isEmpty()) return;
+
+        List<ActiveSound> finished = new ArrayList<>();
+        activeSounds.removeIf(active -> {
+            if (--active.ticks > 0) return false;
+            finished.add(active);
+            return true;
+        });
+
+        for (ActiveSound done : finished) {
+            if (activeSounds.stream().noneMatch(a -> a.sound.equals(done.sound))) {
+                DuelSounds.stop(done.level, done.sound, SoundSource.PLAYERS);
+            }
+        }
+    }
+
+    /** 一次正在進行中的開火音效。 */
+    private static final class ActiveSound {
+        final UUID player;
+        final ServerLevel level;
+        final Identifier sound;
+        int ticks;
+
+        ActiveSound(UUID player, ServerLevel level, Identifier sound, int ticks) {
+            this.player = player;
+            this.level = level;
+            this.sound = sound;
+            this.ticks = ticks;
         }
     }
 
@@ -552,42 +669,11 @@ public final class WeaponSystem {
 
     private void onServerTick(MinecraftServer server) {
         tickCooldowns();
-        tickRecoil();
+        tickFireSounds();
         // 要排在 tickCooldowns 之後：先讓冷卻減到 0，這一 tick 才打得出下一發。
         // 反過來的話每一發都會多等一 tick，機槍的實際射速會比設定值慢三成
         tickAutoFire(server);
         tickProjectiles();
-    }
-
-    /** 目前這把武器累積了多少後座力（度）。 */
-    private double recoilOf(ServerPlayer player, WeaponDef weapon) {
-        Map<String, Double> perWeapon = recoil.get(player.getUUID());
-        return perWeapon == null ? 0 : perWeapon.getOrDefault(weapon.id(), 0.0);
-    }
-
-    private void addRecoil(ServerPlayer player, WeaponDef weapon) {
-        if (weapon.recoil() <= 0) return;
-        recoil.computeIfAbsent(player.getUUID(), k -> new HashMap<>())
-                .merge(weapon.id(), weapon.recoil(),
-                        (old, add) -> Math.min(weapon.recoilMax(), old + add));
-    }
-
-    /**
-     * 後座力回穩。
-     *
-     * <p>固定速率往下掉而不是按比例衰減：按比例的話尾巴會拖很長，玩家永遠等不到「完全回穩」
-     * 的那一刻，而「停火多久才會恢復準度」是要能被背下來的。
-     */
-    private void tickRecoil() {
-        for (Map.Entry<UUID, Map<String, Double>> entry : recoil.entrySet()) {
-            entry.getValue().replaceAll((id, degrees) -> {
-                WeaponDef weapon = config.weapons().byId(id);
-                double perTick = (weapon == null ? 6.0 : weapon.recoilRecovery()) / 20.0;
-                return degrees - perTick;
-            });
-            entry.getValue().values().removeIf(degrees -> degrees <= 0);
-        }
-        recoil.values().removeIf(Map::isEmpty);
     }
 
     private void tickCooldowns() {
@@ -763,16 +849,21 @@ public final class WeaponSystem {
             return;
         }
 
-        if (weapon.splashRadius() > 0) {
-            splash(projectile, level, location);
-            return;
-        }
-
-        if (directEntity instanceof LivingEntity living) {
+        // 直擊永遠先照直擊算，**即使這一發有濺射**。濺射的距離是拿實體腳下的座標去量的，
+        // 而命中點在對方胸口——兩者差一格以上，所以半徑小的時候被正面打中的那個人會落在
+        // 球外，整發變成零傷害。自製設計最容易踩到：一顆炸藥只有 0.5 格，九顆也才 1.87 格
+        // （見 materials.yml 的 splash 曲線），等於「配方裡有炸藥」就是「打人不會痛」。
+        // 直擊比擦邊痛也是本來就該有的樣子——濺射只負責它周圍那一圈
+        LivingEntity direct = directEntity instanceof LivingEntity living ? living : null;
+        if (direct != null) {
             // 直擊：順著彈丸飛的方向推
-            damageEntity(projectile, level, living, projectile.damage(), projectile.velocity, 1.0);
+            damageEntity(projectile, level, direct, projectile.damage(), projectile.velocity, 1.0);
         } else if (directBlock != null) {
             damageBlock(projectile, level, directBlock, projectile.damageVsBlock());
+        }
+
+        if (weapon.splashRadius() > 0) {
+            splash(projectile, level, location, direct, directBlock);
         }
     }
 
@@ -812,8 +903,17 @@ public final class WeaponSystem {
         }
     }
 
-    /** 濺射：範圍內的方塊與生物都吃傷害，離爆心越遠越低。 */
-    private void splash(Projectile projectile, ServerLevel level, Vec3 center) {
+    /**
+     * 濺射：範圍內的方塊與生物都吃傷害，離爆心越遠越低。
+     *
+     * <p>被直擊的那一個已經在 {@link #onHit} 拿過整份傷害了，所以要跳過——不跳的話它會被
+     * 算兩次，而那是「貼臉開一發等於兩發」的後門。
+     *
+     * @param hitEntity 已經直擊過的生物；null ＝ 這一發打在方塊上或空中
+     * @param hitBlock  已經直擊過的方塊；同上
+     */
+    private void splash(Projectile projectile, ServerLevel level, Vec3 center,
+                        LivingEntity hitEntity, BlockPos hitBlock) {
         double radius = projectile.weapon.splashRadius();
         int r = (int) Math.ceil(radius);
         BlockPos origin = BlockPos.containing(center);
@@ -821,12 +921,14 @@ public final class WeaponSystem {
         for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-r, -r, -r), origin.offset(r, r, r))) {
             double distance = Math.sqrt(pos.distToCenterSqr(center));
             if (distance > radius) continue;
+            if (pos.equals(hitBlock)) continue;
             damageBlock(projectile, level, pos.immutable(),
                     projectile.damageVsBlock() * falloff(distance, radius));
         }
 
         AABB box = new AABB(center, center).inflate(radius);
         for (Entity entity : level.getEntities((Entity) null, box, e -> e instanceof LivingEntity && e.isAlive())) {
+            if (entity == hitEntity) continue;
             double distance = entity.position().distanceTo(center);
             if (distance > radius) continue;
             // 濺射：從爆心往外推，而不是順著彈丸的方向——爆炸該把人推開，不是把人推著走
@@ -860,7 +962,17 @@ public final class WeaponSystem {
         var source = shooter != null
                 ? level.damageSources().playerAttack(shooter)
                 : level.damageSources().generic();
-        if (!target.hurtServer(level, source, (float) damage)) return;
+        // 記在扣血之前：致命的那一發會在 hurtServer 裡面一路走到死亡訊息，
+        // 等它回來才記就來不及了（見 KillCredit）
+        if (shooter != null) {
+            KillCredit.record(target, shooter, projectile.ammoName);
+        }
+        if (!target.hurtServer(level, source, (float) damage)) {
+            // 傷害被擋掉了（停火階段的互毆、打到自己人的濺射）——那就不算命中，
+            // 不然同一 tick 內因為別的原因死掉的話會被誤記在這一發頭上
+            KillCredit.forget(target);
+            return;
+        }
 
         knockBack(target, direction, projectile.weapon.knockback() * scale);
     }

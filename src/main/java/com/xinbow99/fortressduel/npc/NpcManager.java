@@ -2,6 +2,7 @@ package com.xinbow99.fortressduel.npc;
 
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.battle.DuelManager;
+import com.xinbow99.fortressduel.building.BuildingPlacer;
 import com.xinbow99.fortressduel.core.ConfigManager;
 import com.xinbow99.fortressduel.craft.AmmoLook;
 import com.xinbow99.fortressduel.craft.AmmoVector;
@@ -19,9 +20,11 @@ import com.xinbow99.fortressduel.weapon.WeaponSystem;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
@@ -98,8 +101,59 @@ public final class NpcManager {
             designs.forget(duel.south().playerId());
             removeIn(duel.arena().level(), duel.arena().region());
         });
+        // 光碟是音樂家賣出去的東西，右鍵播放的那條路跟著他一起登記
+        SongDisc.register(duels);
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> onNpcDeath(entity));
-        ServerTickEvents.END_SERVER_TICK.register(server -> bounds.tick(server, homes));
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            bounds.tick(server, homes);
+            expire(server);
+        });
+    }
+
+    /**
+     * 到期的商人自己收攤。
+     *
+     * <p>只管有寫 {@code lifespan_seconds} 的那些（事件放出來的臨時商人）。長駐的商人不受
+     * 影響——他們是這一側的命脈，會消失的話那條「保護你的軍火商」的戰術就沒有意義了。
+     *
+     * <p>計時看實體自己的 {@code tickCount}，理由跟 {@code SkillTypes.expire} 一樣：那本來
+     * 就是「出生到現在幾 tick」，不用另外記一份會跟現實對不起來的表。
+     *
+     * <p>走 {@code discard()} 而不是 {@code kill()}：收攤不是被殺，不該觸發死亡訊息，
+     * 也不該讓「打死商人」的音效與提示跑出來——那兩件事在玩家眼裡是完全不同的事件。
+     */
+    private void expire(MinecraftServer server) {
+        if (spawned.isEmpty()) return;
+
+        Iterator<Map.Entry<UUID, NpcDef>> it = spawned.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, NpcDef> e = it.next();
+            if (e.getValue().lifespanSeconds() <= 0) continue;
+
+            Entity entity = entityOf(server, e.getKey());
+            if (entity == null) continue;
+            if (entity.tickCount < e.getValue().lifespanSeconds() * 20) continue;
+
+            if (entity.level() instanceof ServerLevel level) {
+                level.sendParticles(net.minecraft.core.particles.ParticleTypes.POOF,
+                        entity.getX(), entity.getY(1.0), entity.getZ(), 12, 0.3, 0.4, 0.3, 0.02);
+                Component text = Msg.info(e.getValue().displayName() + " 收攤走了。");
+                level.getPlayers(p -> p.distanceToSqr(entity) < 96 * 96)
+                        .forEach(p -> p.sendSystemMessage(text));
+            }
+            entity.discard();
+            homes.remove(e.getKey());
+            it.remove();
+        }
+    }
+
+    /** 在所有世界裡找這個 UUID。NPC 只會在對戰那個世界，但這裡不預設哪一個。 */
+    private static Entity entityOf(MinecraftServer server, UUID id) {
+        for (ServerLevel level : server.getAllLevels()) {
+            Entity entity = level.getEntity(id);
+            if (entity != null) return entity;
+        }
+        return null;
     }
 
     /**
@@ -150,6 +204,37 @@ public final class NpcManager {
     }
 
     /**
+     * 把 buildings.yml 裡標了 {@code sold} 的藍圖掛成建築師那間店。
+     *
+     * <p>**要排在 {@link #loadShops} 後面**，理由跟 {@link #loadSongs} 一樣：它是併進同一張
+     * 表的，先跑會被整個蓋掉。而且它要用建材的單價，那份單價得先從架上讀出來。
+     */
+    public void loadBlueprints(BuildingPlacer buildings) {
+        ShopDef architect = BlueprintShop.from(buildings, blockPrices(), "建築師巴布");
+        Map<String, ShopDef> merged = new LinkedHashMap<>(shops);
+        merged.put(architect.id(), architect);
+        this.shops = Map.copyOf(merged);
+    }
+
+    /**
+     * 建材一格多少錢，從軍火商架上的商品回推（{@code price ÷ amount}）。
+     *
+     * <p>圖紙的價格靠它算。回推而不是另外寫一份表：另外寫的那份會跟架上的價格漂移，
+     * 而漂掉的那天沒有人會發現——這份檔案裡到處都是同一條規矩。
+     */
+    private Map<String, Double> blockPrices() {
+        Map<String, Double> prices = new LinkedHashMap<>();
+        for (ShopDef shop : shops.values()) {
+            for (ShopEntry entry : shop.entries()) {
+                if (!"item".equals(entry.type()) || entry.item().isEmpty()) continue;
+                if (entry.amount() <= 0) continue;
+                prices.put(entry.item(), (double) entry.price() / entry.amount());
+            }
+        }
+        return prices;
+    }
+
+    /**
      * 把 songs.yml 的曲目掛成音樂家那間店。
      *
      * <p>**要排在 {@link #loadShops} 後面**：它是併進同一張表的，先跑會被 loadShops 整個蓋掉。
@@ -161,7 +246,7 @@ public final class NpcManager {
         this.shops = Map.copyOf(merged);
     }
 
-    /** 把六種材料掛到軍火商的架上。其他商店（之後可能會有）不受影響。 */
+    /** 把 materials.yml 裡的材料掛到軍火商的架上。其他商店（之後可能會有）不受影響。 */
     private static ShopDef withMaterials(ShopDef shop, MaterialRegistry materials) {
         if (!"arms_dealer".equals(shop.id()) || materials.size() == 0) return shop;
 
@@ -187,8 +272,15 @@ public final class NpcManager {
     /**
      * 把手上的原型登記給軍火商，之後就能在店裡量產。
      *
-     * <p>**原型會被收走**：它是一份設計圖，交出去就是交出去了。留著的話玩家可以拿同一份
-     * 原型去對面的商人那裡再登記一次——而配方逐人正是這個系統的競爭點。
+     * <p>**原型不會被收走。** 這一條改過：原本是登記完就 shrink 掉，理由是「設計圖交出去
+     * 就是交出去了」，而且怕玩家拿同一份去對面的商人那裡再登記一次。
+     *
+     * <p>後面那個顧慮是不成立的——登記是記在 {@code player.getUUID()} 底下的，跟是哪一隻
+     * 商人無關，重複登記只會得到「已經登記過了」。所以收走它換不到任何東西。
+     *
+     * <p>換不到東西卻有代價：工作台一次只產出一個原型（那是守恆的要求），登記又把它吃掉，
+     * 於是「照著提示走完流程的人手上永遠沒有可以回收的設計圖」——遞迴合成在實務上等於
+     * 是關著的。留著它，量產與遞迴才不必二選一。
      */
     private boolean registerDesign(ServerPlayer player) {
         ItemStack prototype = player.getMainHandItem();
@@ -198,16 +290,15 @@ public final class NpcManager {
         String name = AmmoLook.readName(prototype)
                 .orElseGet(() -> config.designs().toWeapon(vector).displayName());
 
-        boolean fresh = designs.register(player.getUUID(), vector, name);
-        if (!fresh) {
-            player.sendSystemMessage(Msg.info("「" + name + "」已經登記過了，架上就有。"));
-            return true;
-        }
+        // 已經登記過了 → 回 false 讓右鍵照常開店。不再發「已經登記過了」那則訊息：
+        // 架上那一格本身就是更好的回答，而且玩家這一下多半就是想去買它
+        if (!designs.register(player.getUUID(), vector, name)) return false;
 
-        prototype.shrink(1);
         int price = config.materials().batchPrice(vector);
-        player.sendSystemMessage(Msg.good("軍火商收下了「" + name + "」的設計圖，開始量產——"
+        player.sendSystemMessage(Msg.good("軍火商抄下了「" + name + "」的設計圖，開始量產——"
                 + "架上多了一格，$" + price + " 一批（" + config.materials().batch() + " 發）。"));
+        player.sendSystemMessage(Msg.plain("  設計圖還在你手上，可以丟回工作台當材料再組。",
+                ChatFormatting.DARK_GRAY));
         return true;
     }
 
@@ -308,9 +399,13 @@ public final class NpcManager {
         if (def == null) return InteractionResult.PASS;
 
         // 手上拿著工作台做出來的原型 → 登記進他的軍火商，而不是開店。
-        // 「拿東西給商人看」是這個動作最直覺的表達，不需要另外一個介面
-        if (CraftingBench.isPrototype(player.getMainHandItem())) {
-            return registerDesign(player) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+        // 「拿東西給商人看」是這個動作最直覺的表達，不需要另外一個介面。
+        //
+        // **只有真的登記到新東西才攔截。** 設計圖現在登記完會留在手上（見 registerDesign），
+        // 所以「已經登記過的設計」是一個會一直存在的狀態——攔的話玩家只要手上拿著自己的
+        // 設計圖就再也打不開商店了，而他多半正是想去買那份設計量產的彈藥
+        if (CraftingBench.isPrototype(player.getMainHandItem()) && registerDesign(player)) {
+            return InteractionResult.SUCCESS;
         }
 
         // 拴繩相關的右鍵一律放行，讓**原版**去處理，我們一行都不寫。兩種情況：

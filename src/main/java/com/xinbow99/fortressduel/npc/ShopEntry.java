@@ -15,6 +15,7 @@ import java.util.Map;
  *   <li>{@code item}——賣一般物品（建材之類）</li>
  *   <li>{@code worker}——雇一名工人（礦工、農夫），買到的是一個會自己賺錢的 NPC 而不是物品</li>
  *   <li>{@code music}——放一首歌給場上所有人聽，什麼東西都不給</li>
+ *   <li>{@code disc}——賣一張光碟，買回去右鍵才放（見 {@link SongDisc}）。音樂家賣的是這種</li>
  * </ul>
  */
 public record ShopEntry(
@@ -28,9 +29,9 @@ public record ShopEntry(
         String job,
         /** type = item 時要給的物品，type = weapon 時當作展示圖示（省略就用武器綁的物品）。 */
         String item,
-        /** type = music 時要放的音效 id（例如 {@code fortress-duel:chinese}）。 */
+        /** type = music/disc 時要放的音效 id（例如 {@code fortress-duel:chinese}）。 */
         String sound,
-        /** type = music 時這首歌有多長（秒）；放完之前不接受下一次點歌。 */
+        /** type = music/disc 時這首歌有多長（秒）；放完之前不接受下一次播放。 */
         int lengthSeconds,
         /** 買一次給幾發／幾個。 */
         int amount,

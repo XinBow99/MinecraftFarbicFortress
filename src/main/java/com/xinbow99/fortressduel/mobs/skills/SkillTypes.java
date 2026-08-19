@@ -3,21 +3,33 @@ package com.xinbow99.fortressduel.mobs.skills;
 import com.xinbow99.fortressduel.FortressDuel;
 import com.xinbow99.fortressduel.battle.Duel;
 import com.xinbow99.fortressduel.mobs.entity.MobDef;
+import com.xinbow99.fortressduel.mixin.MobAccessor;
 import com.xinbow99.fortressduel.mobs.entity.MobSpawner;
 import com.xinbow99.fortressduel.util.Ground;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.PathfinderMob;
+import net.minecraft.world.entity.ai.goal.GoalSelector;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
+import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.phys.Vec3;
 
@@ -43,6 +55,128 @@ public final class SkillTypes {
         engine.registerType("effect", SkillTypes::effect);
         engine.registerType("break_blocks", ctx -> breakBlocks(engine, ctx));
         engine.registerType("restless", SkillTypes::restless);
+        engine.registerType("steal", SkillTypes::steal);
+        engine.registerType("expire", SkillTypes::expire);
+    }
+
+    /**
+     * 壽命到了就自己消失。
+     *
+     * <p>params：{@code seconds}（活多久）。
+     *
+     * <p>給「一陣風式」的事件用：鼠疫那種一次放十幾隻、目的是逼玩家在幾秒內做決定的怪，
+     * 留著只會變成打掃工作——而打掃不是遊戲。有了它，事件的張力落在**那二十秒**裡，
+     * 而不是落在「等一下要花多久把牠們清乾淨」。
+     *
+     * <p>計時看的是實體自己的 {@code tickCount}（出生到現在幾 tick），不是技能的間隔。
+     * {@code INTERVAL} 的第一次觸發是**立刻**發生的（見 {@code SkillEngine} 的倒數：初值
+     * 不存在，{@code merge(-1)} 之後就已經 ≤ 0），拿它當計時器的話怪一生出來就死了。
+     * 所以這個技能設成每秒問一次，真正的判斷交給 tickCount。
+     *
+     * <p>用 {@code discard()} 而不是 {@code kill()}：牠不是被殺的，**不該發賞金**——
+     * 不然只要站著等就有錢拿。冒一陣煙是為了讓它看起來像自然消失，跟怪物數量上限
+     * （{@code MobSpawner.enforceCap}）用的是同一個表達。
+     */
+    private static boolean expire(SkillContext ctx) {
+        int lifespan = Math.max(1, ctx.skill().param("seconds", 20)) * 20;
+        LivingEntity mob = ctx.caster();
+        if (mob.tickCount < lifespan) return false;
+
+        ctx.level().sendParticles(ParticleTypes.POOF,
+                mob.getX(), mob.getY(0.5), mob.getZ(), 8, 0.2, 0.2, 0.2, 0.02);
+        mob.discard();
+        return true;
+    }
+
+    /**
+     * 小偷：追人 → 搶走一整疊東西叼在嘴上 → 掉頭就跑，直到被打死才吐出來。
+     *
+     * <p>params：{@code speed}（導航速度倍率）、{@code range}（看得到幾格內的玩家）、
+     * {@code reach}（多近算搶得到）、{@code flee}（逃跑時一次跑多遠）。
+     *
+     * <h2>三件事是原版幫我們做的</h2>
+     * <ul>
+     *   <li><b>叼在嘴上</b>——搶到的東西放進主手欄位，而狐狸本來就會把主手的物品渲染在嘴裡</li>
+     *   <li><b>死了才掉</b>——掉落機率設成 1.0，剩下的交給原版的死亡掉落</li>
+     *   <li><b>一整疊拿走</b>——直接搬整個 {@link ItemStack}，不用自己算數量</li>
+     * </ul>
+     *
+     * <h2>為什麼要把原版的行為整組拔掉</h2>
+     * <p>原版的狐狸**白天會睡覺、會躲玩家、會去撿地上的東西、會撲雞**。那四條每一條都在跟
+     * 這個技能搶導航，而「躲玩家」更是跟「追玩家」直接對衝。只靠每秒重下一次路徑壓不住
+     * ——{@link #restless} 那種輕量作法能成立，是因為它跟原版的閒晃目標想做的事情一樣。
+     *
+     * <p>拔的動作是**冪等**的：每次發動都看一眼還有沒有目標在，有就清掉。這樣就不必另外記
+     * 「這一隻清過了沒有」，也不用為了同一件事多寫一份 ON_SPAWN 的技能定義。
+     */
+    private static boolean steal(SkillContext ctx) {
+        if (!(ctx.caster() instanceof PathfinderMob mob)) return false;
+
+        clearVanillaGoals(mob);
+
+        double speed = ctx.skill().param("speed", 1.3);
+        double range = ctx.skill().param("range", 24.0);
+        double reach = ctx.skill().param("reach", 1.8);
+        int flee = Math.max(4, ctx.skill().param("flee", 16));
+
+        Player nearest = ctx.level().getNearestPlayer(mob, range);
+        if (nearest == null) return false;
+
+        // 已經得手 → 掉頭就跑。目標是「離這個人最遠」而不是某個固定方向，
+        // 所以玩家繞過去堵牠的時候牠會自己改道
+        if (!mob.getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()) {
+            Vec3 away = DefaultRandomPos.getPosAway(mob, flee, 7, nearest.position());
+            if (away == null) return false;
+            return mob.getNavigation().moveTo(away.x, away.y, away.z, speed);
+        }
+
+        if (mob.distanceToSqr(nearest) > reach * reach) {
+            mob.getLookControl().setLookAt(nearest, 30f, 30f);
+            return mob.getNavigation().moveTo(nearest, speed);
+        }
+        return grab(ctx.level(), mob, nearest);
+    }
+
+    /**
+     * 從這個人身上隨機搶一疊。
+     *
+     * <p>**整疊拿走**，不是拿一個：被偷走 64 個石頭跟被偷走 1 個石頭，前者才是一件事。
+     *
+     * <p>只翻主要的物品欄（含快捷列與副手），不碰盔甲——盔甲穿在身上，被叼走的畫面說不通，
+     * 而且那會讓這個事件從「討厭」變成「毀掉這一局」。
+     */
+    private static boolean grab(ServerLevel level, Mob mob, Player victim) {
+        List<Integer> candidates = new ArrayList<>();
+        for (int i = 0; i < victim.getInventory().getNonEquipmentItems().size(); i++) {
+            if (!victim.getInventory().getItem(i).isEmpty()) candidates.add(i);
+        }
+        if (candidates.isEmpty()) return false;
+
+        int slot = candidates.get(level.getRandom().nextInt(candidates.size()));
+        ItemStack stolen = victim.getInventory().getItem(slot);
+        victim.getInventory().setItem(slot, ItemStack.EMPTY);
+
+        mob.setItemSlot(EquipmentSlot.MAINHAND, stolen);
+        // 不設的話原版只有一成機率掉落，而「殺了牠就拿得回來」是這個事件唯一的出口
+        mob.setDropChance(EquipmentSlot.MAINHAND, 1.0f);
+
+        if (victim instanceof ServerPlayer sp) {
+            sp.sendSystemMessage(Component.literal("狐狸叼走了你的 ").withStyle(ChatFormatting.RED)
+                    .append(stolen.getHoverName())
+                    .append(Component.literal(" ×" + stolen.getCount() + "！殺了牠才拿得回來")));
+        }
+        level.playSound(null, mob.blockPosition(), SoundEvents.FOX_AGGRO, SoundSource.HOSTILE, 1f, 1.4f);
+        return true;
+    }
+
+    /**
+     * 把原版掛在這隻怪身上的目標整組拔掉。
+     *
+     * <p>冪等：已經空了就什麼都不做，所以每次發動都呼叫一次也沒有成本。
+     */
+    private static void clearVanillaGoals(Mob mob) {
+        ((MobAccessor) mob).fortressduel$goalSelector().removeAllGoals(goal -> true);
+        ((MobAccessor) mob).fortressduel$targetSelector().removeAllGoals(goal -> true);
     }
 
     /**

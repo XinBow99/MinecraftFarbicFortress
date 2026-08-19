@@ -208,6 +208,7 @@ public final class Duel {
         }
 
         duel.warnShortRangedWeapons();
+        duel.applyNameTags();
         DuelEvents.START.invoker().onDuelStart(duel);
         return duel;
     }
@@ -597,7 +598,9 @@ public final class Duel {
 
             panda.setCustomName(Component.literal(side.playerName() + " 的熊貓")
                     .withStyle(ChatFormatting.GREEN));
-            panda.setCustomNameVisible(true);
+            // 名牌穿牆而且很遠就看得到，等於免費告訴對手「這一圈在這裡」。
+            // 名字本身留著——滑鼠指著還是看得到，死亡訊息也還是講得出是誰的熊貓
+            panda.setCustomNameVisible(!settings.hideNameTags());
             // 沒有玩家在附近時原版會把牠清掉，那等於隨機判輸
             if (panda instanceof Mob mob) {
                 mob.setPersistenceRequired();
@@ -864,6 +867,20 @@ public final class Duel {
     }
 
     /** 目前線上的參戰玩家。單人練習模式下只有一個。 */
+    /**
+     * 把雙方的名牌藏起來。
+     *
+     * <p>離線又上線的人不會自動補上——那要掛在加入事件上，而名牌是這一場的規則、不是這個人
+     * 的狀態。斷線重連本來就會走 {@code onJoin} 那條路，之後要補的話補在那裡才對。
+     */
+    private void applyNameTags() {
+        if (!settings.hideNameTags()) return;
+
+        for (ServerPlayer player : onlinePlayers()) {
+            NameTags.hide(player);
+        }
+    }
+
     private ServerPlayer[] onlinePlayers() {
         ServerPlayer a = playerOf(north);
         ServerPlayer b = solo ? null : playerOf(south);
@@ -1212,6 +1229,10 @@ public final class Duel {
         DuelEvents.END.invoker().onDuelEnd(this, result);
 
         clearPlayerModifiers();
+        // 名牌一定要還回去，不然玩家打完之後在整個伺服器上都是隱形的名字
+        for (ServerPlayer player : onlinePlayers()) {
+            NameTags.show(player);
+        }
 
         // 要在 arena.restore() 之前：還原只處理方塊，實體得自己收
         removeGuardians();

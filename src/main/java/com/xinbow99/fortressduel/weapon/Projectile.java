@@ -33,6 +33,13 @@ final class Projectile {
     final Vec3 origin;
     final UUID shooterId;
     final String shooterName;
+    /**
+     * 這一發在玩家眼裡叫什麼（死亡訊息用，見 {@link KillCredit}）。
+     *
+     * <p>不能用 {@code weapon.displayName()} 代替：自製設計可以被玩家取名，而那個名字記在
+     * 彈藥物品上、不在 {@link WeaponDef} 裡。打死人的時候該報的是他手上那疊叫什麼。
+     */
+    final String ammoName;
 
     Vec3 pos;
     Vec3 velocity;
@@ -54,10 +61,11 @@ final class Projectile {
     final double gravityScale;
     final double damageBoost;
 
-    Projectile(WeaponDef weapon, Duel duel, ServerLevel level, ServerPlayer shooter,
+    Projectile(WeaponDef weapon, Duel duel, ServerLevel level, ServerPlayer shooter, String ammoName,
                Vec3 pos, Vec3 velocity,
                double damageScale, double gravityScale, double damageBoost) {
         this.weapon = weapon;
+        this.ammoName = ammoName;
         this.duel = duel;
         this.level = level;
         this.origin = pos;

@@ -62,6 +62,14 @@ public record DuelSettings(
         /** 每隻熊貓的血量。原版熊貓只有 20，不上調的話狙擊一發一隻。 */
         int pandaHp,
         /**
+         * 對戰中要不要藏起浮動名牌（雙方玩家與雙方的熊貓）。
+         *
+         * <p>名牌**穿牆而且很遠就看得到**，所以它等於一個免費的雷達：對手還沒露臉，
+         * 你已經知道他躲在哪面牆後面、他的熊貓圍在哪一格。這個遊戲的攻防建立在
+         * 「你得先找到目標」上，而名牌把那一步整個跳過去了。
+         */
+        boolean hideNameTags,
+        /**
          * 每隻熊貓的個性，照順序對到第 1、2、3… 隻（不夠就從頭循環）。
          *
          * <p>原版是隨機抽的，而個性直接決定牠好不好牽：worried 會主動躲開玩家、lazy 會躺著
@@ -199,6 +207,7 @@ public record DuelSettings(
                 cfg.getString("objective.entity", "minecraft:panda"),
                 Math.max(1, cfg.getInt("objective.panda_count", 4)),
                 Math.max(1, cfg.getInt("objective.panda_hp", 100)),
+                cfg.getBoolean("battle.hide_name_tags", true),
                 pandaPersonalities(cfg),
                 Math.max(1, cfg.getInt("objective.pen_radius", 2)),
                 cfg.getString("objective.pen_block", "minecraft:oak_fence"),

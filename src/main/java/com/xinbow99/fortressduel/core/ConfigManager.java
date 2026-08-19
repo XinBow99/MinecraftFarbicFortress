@@ -69,6 +69,11 @@ public final class ConfigManager {
         }
         if (buildings != null) {
             buildings.load(YamlConfig.load(configDir, "buildings.yml"));
+            // 建築師那間店是從藍圖表生出來的，所以要排在 buildings.load **與** loadShops
+            // 兩者之後：它需要藍圖本身，也需要架上的建材單價來算圖紙的價格
+            if (npcs != null) {
+                npcs.loadBlueprints(buildings);
+            }
         }
 
         FortressDuel.LOGGER.info(
@@ -81,6 +86,11 @@ public final class ConfigManager {
     }
 
     /** 啟動時把兩個子系統登記進來，之後每次 reload 都會一併重讀它們的表。 */
+    /** 藍圖表。圖紙商品要靠它把 id 換回藍圖本體。 */
+    public BuildingPlacer buildings() {
+        return buildings;
+    }
+
     public void attach(NpcManager npcs, BuildingPlacer buildings) {
         this.npcs = npcs;
         this.buildings = buildings;
