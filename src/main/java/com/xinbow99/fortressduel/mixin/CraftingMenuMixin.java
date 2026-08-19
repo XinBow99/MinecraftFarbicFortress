@@ -36,18 +36,31 @@ public abstract class CraftingMenuMixin extends AbstractCraftingMenu {
         CraftingContainer grid = this.craftSlots;
         ResultContainer result = this.resultSlots;
 
+        // 扣材料扣到一半，格子還不是最後的樣子，這時候算出來的東西沒有意義
+        if (CraftingBench.busy()) return;
+
         // 原版已經算出東西了就不要插手——那是一條真正的原版配方
-        if (!result.getItem(0).isEmpty()) return;
+        if (!result.getItem(0).isEmpty()) {
+            CraftingBench.rememberResult(grid, false);
+            return;
+        }
 
         CraftingBench.Offer offer = CraftingBench.offerFor(grid);
         if (offer.problem() != null) {
             // 認得的東西但組不起來。這一定要講：在畫面上「不能組」跟「壞掉了」是同一個樣子
+            CraftingBench.rememberResult(grid, false);
             CraftingBench.explain(this.owner(), offer.problem());
             return;
         }
-        if (offer.result().isEmpty()) return;   // 原版的合成，安靜放行
+        if (offer.result().isEmpty()) {
+            CraftingBench.rememberResult(grid, false);
+            return;                             // 原版的合成，安靜放行
+        }
 
         CraftingBench.forgetProblem(this.owner());
+        // 「這一份是我們的」只在這裡決定一次。等到玩家拿走才回頭推，就會踩到
+        // shift 取物把產物搬空、身分跟著消失的那個坑（見 CraftingBench.authored）
+        CraftingBench.rememberResult(grid, true);
         result.setItem(0, offer.result());
         // 結果是我們事後塞的，原版那一輪的同步已經跑完了，不自己送一次客戶端看不到
         this.broadcastChanges();

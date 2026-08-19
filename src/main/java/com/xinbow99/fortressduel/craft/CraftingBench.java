@@ -69,6 +69,39 @@ public final class CraftingBench {
      */
     private static final java.util.Set<java.util.UUID> hinted = new java.util.HashSet<>();
 
+    /**
+     * 結果格裡放的那一份是我們算出來的工作台。
+     *
+     * <p>看起來多餘——產物身上就帶著材料向量，直接問它不就好了？**不行，而且那正是
+     * shift 拿走會噴東西的原因**：原版 shift 取物是先把結果格那疊搬進背包、再呼叫
+     * {@code onTake}，傳進來的已經是一個被搬空的殼；而 {@code ItemStack.getComponents()}
+     * 對空堆疊一律回傳 {@code EMPTY}，於是那份設計的向量在那一刻是讀不到的。
+     *
+     * <p>讀不到就等於「這不是我們的東西」，原版的 {@code onTake} 就接手了：它每格只扣 1、
+     * 扣完觸發重算、我們又補一份新的設計進結果格，而 shift 的迴圈只比對物品種類
+     * （{@code isSameItem} 不看 component），看到格子又滿了就再跑一輪。背包塞爆之後
+     * 原版在 {@code quickMoveStack} 結尾 {@code player.drop} 把剩下的丟到地上——那就是
+     * 「一堆東西爆出來」。
+     *
+     * <p>所以這裡記的是**當初的判斷**，而不是事後再推一次。判斷只做一次、在
+     * {@code CraftingMenuMixin} 決定要不要接手的那一刻，之後誰也改不動它。
+     *
+     * <p>用弱參照的鍵：工作台選單關掉之後這裡不該是它活著的唯一理由。
+     */
+    private static final java.util.Set<Container> authored =
+            java.util.Collections.synchronizedSet(
+                    java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>()));
+
+    /**
+     * 正在扣材料。
+     *
+     * <p>{@link #consume} 一格一格扣，而每扣一格容器都會通知選單重算一次——那幾次重算看到的
+     * 是**扣到一半的格子**，會算出一份不完整的設計塞回結果格。最後一次（格子空了）會自己
+     * 清掉，所以不擋也不會錯，但中間那幾份是白算的，而且會在原版處理點擊的過程中反覆
+     * 送封包給客戶端。扣材料要嘛整件做完、要嘛沒發生。
+     */
+    private static boolean consuming = false;
+
     /** 玩家 → 最後一次跟他講過的失敗原因。見 {@link #explain}。 */
     private static final java.util.Map<java.util.UUID, String> lastProblem = new java.util.HashMap<>();
 
@@ -235,11 +268,53 @@ public final class CraftingBench {
     }
 
     /**
-     * 拿走產物之後把材料吃掉：**每一格各消耗 1 個**，跟原版合成一樣。
+     * 記下結果格裡這一份是不是我們算的。只有 {@code CraftingMenuMixin} 該呼叫。
+     *
+     * <p>要**兩邊都記**：不是我們的時候也要清掉。少了清除，玩家把設計拿走之後再擺一份
+     * 真正的原版配方進去，那個舊旗標會讓我們把原版的產物當成自己的去扣材料。
+     */
+    public static void rememberResult(Container grid, boolean ours) {
+        if (ours) {
+            authored.add(grid);
+        } else {
+            authored.remove(grid);
+        }
+    }
+
+    /**
+     * 現在正在扣材料嗎。扣的過程中不要重算結果格，見 {@link #consuming}。
+     */
+    public static boolean busy() {
+        return consuming;
+    }
+
+    /**
+     * 玩家拿走的這一份是不是我們的設計。
+     *
+     * <p>先看手上那一份、讀不到才回頭問旗標：一般點擊拿走時傳進來的是完好的產物，直接
+     * 看它最準；shift 拿走時它已經被搬空了（見 {@link #authored}），只剩旗標可信。
+     */
+    public static boolean resultWasOurs(Container grid, ItemStack taken) {
+        return isOurs(taken) || authored.contains(grid);
+    }
+
+    /**
+     * 拿走產物之後把材料吃掉：**整疊吃掉**，跟 {@link #offerFor} 算的時候一樣。
      *
      * <p>要自己做是因為原版那條路要走配方物件，而我們沒有註冊任何配方。
      */
     public static void consume(Container grid) {
+        consuming = true;
+        try {
+            consumeAll(grid);
+        } finally {
+            consuming = false;
+        }
+        // 格子空了，結果格就不該再留著東西。扣的過程中重算被擋掉了，這裡補一次
+        rememberResult(grid, false);
+    }
+
+    private static void consumeAll(Container grid) {
         for (int i = 0; i < grid.getContainerSize(); i++) {
             ItemStack stack = grid.getItem(i);
             if (stack.isEmpty()) continue;
